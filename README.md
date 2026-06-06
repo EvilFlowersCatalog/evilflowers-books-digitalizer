@@ -59,6 +59,8 @@ Experimentation happens in notebooks first; the module holds the reusable parts.
 | `notebooks/01_webdav_exploration.ipynb` | Inventory the shares: books, pages, sizes — interactive Plotly charts (cached to `.cache/stats/`) |
 | `notebooks/02_single_book_pipeline.ipynb` | Download one book and run the standard pipeline end to end |
 | `notebooks/03_transformation_lab.ipynb` | Tune the TIFF → PDF/A transformation: spread splitting, unpaper, compression/quality matrix, OCR confidence |
+| `notebooks/04_produce_samples.ipynb` | Run the production pipeline on one small book per faculty |
+| `notebooks/05_batch_pipeline.ipynb` | Batch run: 4 books in parallel (process pool), low-storage mode (cache deleted per book), resumable via `output/batch_report.jsonl` |
 
 > Heads-up: Ghostscript ≥ 10.6 has a known JPEG-encoding bug affecting PDF/A
 > conversion; OCRmyPDF mitigates it, but visually check outputs (notebook 03,

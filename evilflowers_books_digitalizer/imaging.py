@@ -64,18 +64,25 @@ def analyze_spread(
     paper_threshold: int = 80,
     min_paper_ratio: float = 0.05,
     spread_aspect: float = 1.15,
-    min_gutter_brightness: float = 0.85,
+    max_gutter_density: float = 0.06,
+    centre_penalty: float = 0.2,
 ) -> SpreadLayout:
     """Locate the paper area in a frame and decide whether it is a spread.
 
-    ``paper_threshold``: gray level separating paper from the black bed.
-    ``min_paper_ratio``: below this paper fraction the frame is treated as-is
-    (e.g. covers shot almost entirely on the black bed).
-    ``spread_aspect``: width/height above which the paper area is considered
-    a two-page spread and searched for a gutter.
-    ``min_gutter_brightness``: the chosen gutter column must reach this
-    fraction of the paper brightness — if not, content runs across the fold
-    (wide tables, fold-outs) and the frame is kept as one page.
+    Handles both observed scan styles:
+
+    * **black scanner bed** — paper bbox < frame; spread decision and gutter
+      search run within the paper area
+    * **white copier glass** — everything is "paper" (``paper_ratio`` ≈ 1);
+      the *ink* bbox locates the actual spread, which may sit anywhere on the
+      glass (small books leave large white margins, making the frame portrait
+      even though the content is a landscape spread)
+
+    The spread decision uses the ink-content aspect; the gutter is the
+    lowest ink-density column band near the content centre (margins around
+    the fold). ``max_gutter_density``: if even the best candidate band has
+    more ink than this, content runs across the fold (wide tables,
+    fold-outs) and the frame is kept as one page.
     """
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -90,23 +97,27 @@ def analyze_spread(
     x0, x1 = int(xs.min()), int(xs.max() + 1)
     y0, y1 = int(ys.min()), int(ys.max() + 1)
 
+    # ink = dark pixels on paper; threshold relative to the paper brightness
+    paper_region = small[y0:y1, x0:x1]
+    paper_brightness = float(np.percentile(paper_region, 75))
+    ink = (paper_region < 0.6 * paper_brightness).astype(np.float32)
+
     gutter_x = None
-    if (x1 - x0) / max(y1 - y0, 1) >= spread_aspect:
-        # The fold shadow itself is faint, but the gutter sits inside a bright
-        # band (facing page margins). Page margins elsewhere can be even
-        # brighter, so bias the search toward the centre of the paper area
-        # with a Gaussian prior before taking the brightest column.
-        width = x1 - x0
-        column_brightness = small[y0:y1, x0:x1].mean(axis=0)
-        window = max(width // 30, 3)
-        smoothed = np.convolve(column_brightness, np.ones(window) / window, mode="same")
-        prior = np.exp(-0.5 * ((np.arange(width) - width / 2) / (width / 8)) ** 2)
-        third = width // 3
-        candidate = third + int(np.argmax((smoothed * prior)[third : 2 * third]))
-        # content printed across the fold (wide tables, fold-outs) -> no split
-        paper_brightness = float(np.percentile(smoothed, 75))
-        if smoothed[candidate] >= min_gutter_brightness * paper_brightness:
-            gutter_x = (x0 + candidate) * ANALYSIS_SCALE
+    content = _ink_bbox(ink)
+    if content is not None:
+        cx0, cy0, cx1, cy1 = content
+        if (cx1 - cx0) / max(cy1 - cy0, 1) >= spread_aspect:
+            # gutter = lowest ink-density column band near the content centre
+            density = ink[cy0:cy1, cx0:cx1].mean(axis=0)
+            width = cx1 - cx0
+            window = max(width // 25, 3)
+            smoothed = np.convolve(density, np.ones(window) / window, mode="same")
+            distance = np.abs(np.arange(width) - width / 2) / width
+            third = width // 3
+            score = (smoothed + centre_penalty * distance)[third : 2 * third]
+            candidate = third + int(np.argmin(score))
+            if smoothed[candidate] <= max_gutter_density:
+                gutter_x = (x0 + cx0 + candidate) * ANALYSIS_SCALE
 
     scale = ANALYSIS_SCALE
     return SpreadLayout(
@@ -114,6 +125,19 @@ def analyze_spread(
         gutter_x=gutter_x,
         paper_ratio=paper_ratio,
     )
+
+
+def _ink_bbox(ink: np.ndarray, min_line_frac: float = 0.01) -> tuple[int, int, int, int] | None:
+    """Bbox of real content: rows/columns with at least ``min_line_frac`` ink.
+
+    Per-line thresholding (instead of a bbox over all ink pixels) ignores
+    isolated specks and edge noise that would otherwise stretch the box.
+    """
+    cols = np.where(ink.mean(axis=0) > min_line_frac)[0]
+    rows = np.where(ink.mean(axis=1) > min_line_frac)[0]
+    if not len(cols) or not len(rows):
+        return None
+    return int(cols.min()), int(rows.min()), int(cols.max() + 1), int(rows.max() + 1)
 
 
 def _tight_crop(img: np.ndarray, paper_threshold: int, margin: int) -> np.ndarray:
@@ -135,19 +159,21 @@ def _tight_crop(img: np.ndarray, paper_threshold: int, margin: int) -> np.ndarra
 def trim_edge_shadows(
     img: np.ndarray,
     search_frac: float = 0.06,
-    dark_pixel: int = 100,
-    dark_frac: float = 0.12,
-    clean_frac: float = 0.06,
+    dark_pixel: int | None = None,
+    dark_frac: float = 0.10,
+    clean_frac: float = 0.05,
     margin: int = 6,
 ) -> np.ndarray:
     """Trim binding/spine artifacts hugging the page edges.
 
     Scans carry various junk in the outer ``search_frac`` of the page: black
     bed remnants, fold shadow slivers on the gutter side, dashed binding-hole
-    strips, edges of the neighbouring page or the book's back. A column/row is
-    junk when more than ``dark_frac`` of its pixels are darker than
-    ``dark_pixel`` — a *fraction* test, because dashed strips keep a bright
-    mean. Everything from the outermost junk line to the edge is cut.
+    strips, page-edge lines and text slivers of the neighbouring page. A
+    column/row is junk when more than ``dark_frac`` of its pixels are darker
+    than ``dark_pixel`` — a *fraction* test, because dashed strips keep a
+    bright mean. ``dark_pixel`` defaults to 60% of the page's paper
+    brightness, so the grey page-edge lines of white-copier scans count too.
+    Everything from the outermost junk line to the edge is cut.
 
     Full-bleed pages (photos/design running to the edge) are protected: the
     cut only happens if the band just inside it is clean (< ``clean_frac``
@@ -155,6 +181,8 @@ def trim_edge_shadows(
     """
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if dark_pixel is None:
+        dark_pixel = int(np.clip(0.6 * np.percentile(gray, 75), 80, 150))
     dark = (gray < dark_pixel).astype(np.float32)
     col_frac = dark.mean(axis=0)
     row_frac = dark.mean(axis=1)
@@ -184,6 +212,68 @@ def trim_edge_shadows(
     return img[y0:y1, x0:x1]
 
 
+def trim_neighbor_sliver(
+    img: np.ndarray,
+    max_sliver_frac: float = 0.30,
+    min_sliver_frac: float = 0.02,
+    max_valley_density: float = 0.005,
+    min_edge_density: float = 0.01,
+    min_valley_width: float = 0.06,
+    margin: int = 8,
+) -> np.ndarray:
+    """Cut off a partially visible facing page at the left/right edge.
+
+    Some books were scanned one page per frame with a strip of the facing
+    page in view (its text *truncated by the frame edge*). Signature, per
+    side: ink touching the outer edge (density ≥ ``min_edge_density`` in the
+    outermost columns) separated from the main page by a **wide blank
+    valley** — at least ``min_valley_width`` of the page width with ink
+    density ≤ ``max_valley_density``. The cut lands in the valley.
+
+    The valley-width requirement is what protects real content: a facing
+    page is separated by two page margins plus the fold (≥ ~10% of width,
+    measured), while full-bleed designs and sidebar columns have only a
+    narrow column gap (~5%).
+    """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    small = cv2.resize(gray, (max(w // 4, 1), max(h // 4, 1)))
+    paper_brightness = float(np.percentile(small, 75))
+    ink = (small < 0.6 * paper_brightness).astype(np.float32)
+    density = ink.mean(axis=0)
+    sw = len(density)
+    window = max(sw // 50, 3)
+    smoothed = np.convolve(density, np.ones(window) / window, mode="same")
+    blank = smoothed <= max_valley_density
+
+    lo, hi = int(sw * min_sliver_frac), int(sw * max_sliver_frac)
+    edge_zone = max(int(sw * 0.02), 2)
+
+    def valley_cut(valley: int) -> int | None:
+        """Position of the cut if the blank run containing ``valley`` is wide enough."""
+        if not blank[valley]:
+            return None
+        i = j = valley
+        while i > 0 and blank[i - 1]:
+            i -= 1
+        while j < sw - 1 and blank[j + 1]:
+            j += 1
+        return valley if (j - i + 1) >= min_valley_width * sw else None
+
+    x0, x1 = 0, w
+    if density[:edge_zone].mean() >= min_edge_density:
+        cut = valley_cut(lo + int(np.argmin(smoothed[lo:hi])))
+        if cut is not None:
+            x0 = cut * 4 + margin
+    if density[-edge_zone:].mean() >= min_edge_density:
+        cut = valley_cut(sw - hi + int(np.argmin(smoothed[sw - hi : sw - lo])))
+        if cut is not None:
+            x1 = cut * 4 - margin
+    if x1 - x0 < w * 0.4:  # implausible cut — bail out
+        return img
+    return img[:, x0:x1]
+
+
 def split_pages(
     img: np.ndarray,
     layout: SpreadLayout | None = None,
@@ -194,8 +284,8 @@ def split_pages(
     """Crop a frame to its paper area and split spreads into single pages.
 
     Each resulting page is re-cropped individually (the bbox of a spread is
-    the union of two pages) and binding/fold shadow bands at the edges are
-    trimmed.
+    the union of two pages); binding/fold shadow bands and partially visible
+    facing pages at the edges are trimmed.
     """
     if layout is None:
         layout = analyze_spread(img, paper_threshold=paper_threshold, **analyze_kwargs)
@@ -209,7 +299,10 @@ def split_pages(
     else:
         gx = layout.gutter_x
         halves = [img[y0:y1, x0:gx], img[y0:y1, gx:x1]]
-    return [trim_edge_shadows(_tight_crop(half, paper_threshold, margin)) for half in halves]
+    return [
+        trim_neighbor_sliver(trim_edge_shadows(_tight_crop(half, paper_threshold, margin)))
+        for half in halves
+    ]
 
 
 def deskew(
