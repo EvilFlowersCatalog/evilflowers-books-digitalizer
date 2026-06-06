@@ -1,0 +1,48 @@
+[project]
+name = "evilflowers-books-digitalizer"
+version = "0.1.0"
+description = "Digitalization pipeline for scanned books: WebDAV TIFF scans -> searchable PDF/A, with enrichment and classification stages"
+authors = [{ name = "Jakub Dubec", email = "jdubec@culturepulse.ai" }]
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "webdav4 (>=0.10,<1.0)",
+    "ocrmypdf (>=17.0,<18.0)",
+    "img2pdf (>=0.6,<1.0)",
+    "pikepdf (>=10.0,<11.0)",
+    "pillow (>=11.0,<12.0)",
+    "pydantic (>=2.0,<3.0)",
+    "tqdm (>=4.66,<5.0)",
+    "opencv-python-headless (>=4.10,<5.0)",
+    "langdetect (>=1.0.9,<2.0.0)",
+]
+
+[project.optional-dependencies]
+
+[tool.poetry]
+packages = [{ include = "evilflowers_books_digitalizer" }]
+
+[tool.poetry.group.notebooks.dependencies]
+jupyterlab = "^4.0"
+pandas = "^2.2"
+matplotlib = "^3.9"
+plotly = "^6.8.0"
+ipywidgets = "^8.1.8"
+pypdfium2 = "^5.9.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9"
+mypy = "^1.14"
+
+[build-system]
+requires = ["poetry-core>=2.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true

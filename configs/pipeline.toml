@@ -1,0 +1,19 @@
+# Production transformation settings — chosen in notebooks/03_transformation_lab.ipynb
+# (2026-06-06). Key evidence:
+#   - splitting spreads: confidence 83 -> 91, 0.64 -> 0.29 MB/page
+#   - color_mode "keep": grayscale costs ~3.5 confidence points for ~4% size
+#   - optimize 2: no downside; engages pngquant, and JBIG2 once jbig2enc is installed
+#   - whiten: per-channel white balance maps yellowed paper to white
+#   - language "auto": quick OCR + langdetect per book (sk/cs/en/de/ru), e.g. "eng+slk"
+
+[preprocess]
+split = true
+deskew = true
+whiten = true
+color_mode = "keep"
+
+[ocr]
+language = "auto"
+output_type = "pdfa-2"
+optimize = 2
+rotate_pages = true

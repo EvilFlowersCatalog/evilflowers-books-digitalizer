@@ -1,0 +1,25 @@
+.idea/
+.venv/
+
+# Secrets — never commit credentials
+credentials.toml
+CREDENTIALS.md
+.env
+
+# Local data — scans are huge, keep them out of git
+.cache/
+output/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
