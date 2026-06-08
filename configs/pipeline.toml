@@ -1,10 +1,58 @@
-# Production transformation settings — chosen in notebooks/03_transformation_lab.ipynb
-# (2026-06-06). Key evidence:
+# Production transformation settings.
+#
+# engine = "scantailor_mrc" (default since 2026-06-07, prototyped in notebook 06):
+#   ScanTailor cleanup [-> DocRes] -> Tesseract hOCR -> MRC PDF.
+#   On the fad sample vs legacy: uniform page sizes + real margins, bleed-through
+#   gone, 10.1 MB -> 1.8 MB, OCR words 6364 -> 6725.
+# engine = "legacy": OpenCV preprocess -> img2pdf -> OCRmyPDF
+#   (settings in [preprocess] / [ocr], chosen in notebook 03, 2026-06-06).
+
+[pipeline]
+engine = "scantailor_mrc"
+
+[scantailor]
+binary = "scantailor-deviant-cli"
+# "mixed": text binarized (crisp, kills bleed-through), picture zones keep tones.
+# "color_grayscale": tones kept everywhere — pair with [docres] enabled = true.
+color_mode = "mixed"
+margins_mm = 8.0
+dewarping = "auto"
+normalize_illumination = true
+despeckle = "cautious"
+dpi = 300
+# supersampled binarization (notebook 07): 600dpi B/W output from 300dpi scans
+# gives much smoother glyphs at ~2x the (still small) file size.
+output_dpi = 600
+
+[docres]
+# AI appearance enhancement (keeps stamp/photo tones; ~2 min/page) — only
+# worthwhile with color_mode = "color_grayscale" on covers / photo-heavy books.
+enabled = false
+repo = "~/.local/share/evilflowers-tools/DocRes"
+python = "~/.local/share/evilflowers-tools/venv-docres/bin/python"
+task = "appearance"
+
+[mrc]
+mask_compression = "jbig2"
+jpeg2000_encoder = "pillow"
+
+[ocr]
+language = "auto"
+
+[finalize]
+# Reading-experience polish (notebook 09): outline bookmarks from hOCR
+# headings, /PageLabels from printed page numbers, web-optimized (linearized)
+# save. Heuristic and fail-safe — skipped pieces are logged, never fatal.
+enabled = true
+bookmarks = true
+page_labels = true
+linearize = true
+
+# --- legacy engine settings (engine = "legacy") ---------------------------
 #   - splitting spreads: confidence 83 -> 91, 0.64 -> 0.29 MB/page
 #   - color_mode "keep": grayscale costs ~3.5 confidence points for ~4% size
 #   - optimize 2: no downside; engages pngquant, and JBIG2 once jbig2enc is installed
 #   - whiten: per-channel white balance maps yellowed paper to white
-#   - language "auto": quick OCR + langdetect per book (sk/cs/en/de/ru), e.g. "eng+slk"
 
 [preprocess]
 split = true
@@ -12,8 +60,7 @@ deskew = true
 whiten = true
 color_mode = "keep"
 
-[ocr]
-language = "auto"
+[legacy_ocr]
 output_type = "pdfa-2"
 optimize = 2
 rotate_pages = true

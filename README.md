@@ -10,13 +10,30 @@ richer classification for a graph database.
 ## Architecture
 
 The scans are **two-page spreads on a black scanner bed** (uncompressed RGB
-TIFF @ 300 DPI, ~24 MB/frame) — preprocessing splits, crops and deskews them
-before OCR:
+TIFF @ 300 DPI, ~24 MB/frame). Two engines exist, selected by
+`[pipeline] engine` in `configs/pipeline.toml`:
+
+**`scantailor_mrc`** (production default since 2026-06-07, prototyped in
+notebook 06 — uniform page sizes with real margins, no bleed-through, ~5×
+smaller PDFs):
 
 ```
-WebDAV (TIFF frames per book)                                       output/<source>/
-        │                                                                 ▲
-        ▼                                                                 │
+WebDAV (TIFF frames per book)                                          output/<source>/
+        │                                                                    ▲
+        ▼                                                                    │
+  DownloadBook ─► ScanTailorScans ──► [DocResEnhance] ─► DetectLanguage ─► MrcPdf ─► EnrichPdfMetadata
+  (local cache)   (split at gutter,    (optional AI       (quick OCR +     (Tesseract -> hOCR;
+                   scantailor-cli:      appearance pass,    langdetect)     recode_pdf: JBIG2 text
+                   content detection,   keeps stamp/photo                   mask over JPEG2000
+                   deskew, dewarp,      tones; ~2 min/page)                 layers — MRC PDF
+                   illumination,                                            + text sidecar)
+                   margins, uniform
+                   page size)
+```
+
+**`legacy`** (OpenCV preprocess → img2pdf → OCRmyPDF):
+
+```
   DownloadBook ─► PreprocessScans ─► DetectLanguage ─► AssemblePdf ─► OcrPdf ─► EnrichPdfMetadata
   (local cache)   (OpenCV: split      (quick OCR +      (img2pdf,     (OCRmyPDF, detected
                    spreads, crop bed,  langdetect ->     lossless)     language e.g. slk+eng,
@@ -25,7 +42,7 @@ WebDAV (TIFF frames per book)                                       output/<sour
                    whiten paper)
 ```
 
-Settings live in `configs/pipeline.toml` (written by notebook 03, consumed by
+Settings live in `configs/pipeline.toml` (consumed by
 `pipeline.factory.build_pipeline`). Classification (`ClassifyBook`, pluggable
 `Classifier`) and embedding stages will run later on the OCR text sidecar.
 
@@ -38,8 +55,8 @@ graph classification) slot in without touching existing ones.
 ```bash
 # System dependencies (macOS)
 brew install tesseract tesseract-lang ghostscript   # required
-brew install unpaper pngquant                       # scan cleaning + PNG optimization
-brew install jbig2enc                               # recommended: JBIG2 for monochrome images
+brew install jbig2enc                               # required (scantailor_mrc): MRC text mask
+brew install unpaper pngquant                       # legacy engine: cleaning + PNG optimization
 
 # Python
 poetry install
@@ -49,6 +66,26 @@ cp credentials.example.toml credentials.toml        # then fill in WebDAV creden
 ```
 
 Tesseract must have the Slovak language pack (`tesseract --list-langs | grep slk`).
+
+The `scantailor_mrc` engine additionally needs `scantailor-deviant-cli` — there is no
+brew formula. Either build it from source (qt@5 + cmake; bump `CMAKE_CXX_STANDARD`
+to 17 in its `CMakeLists.txt`, build the `scantailor-deviant-cli` target, drop the
+binary into `~/.local/bin`) or use the Docker image, which bakes in *all* tooling
+including the optional DocRes model:
+
+```bash
+docker build -t evilflowers-digitalizer .            # --build-arg DOCRES_WEIGHTS=0 to skip ~900 MB
+docker run --rm -it \
+  -v $PWD/credentials.toml:/app/credentials.toml:ro \
+  -v $PWD/.cache:/app/.cache \
+  -v $PWD/output:/app/output \
+  evilflowers-digitalizer python -c \
+  "from evilflowers_books_digitalizer.batch import process_book; print(process_book('fad', '<BOOK_ID>'))"
+```
+
+DocRes on the host (Apple Silicon MPS — much faster than the container's CPU) lives in
+`~/.local/share/evilflowers-tools/` (DocRes repo + its venv + weights); paths are set
+in `[docres]` in `pipeline.toml`.
 
 ## Usage
 
@@ -61,6 +98,9 @@ Experimentation happens in notebooks first; the module holds the reusable parts.
 | `notebooks/03_transformation_lab.ipynb` | Tune the TIFF → PDF/A transformation: spread splitting, unpaper, compression/quality matrix, OCR confidence |
 | `notebooks/04_produce_samples.ipynb` | Run the production pipeline on one small book per faculty |
 | `notebooks/05_batch_pipeline.ipynb` | Batch run: 4 books in parallel (process pool), low-storage mode (cache deleted per book), resumable via `output/batch_report.jsonl` |
+| `notebooks/06_scantailor_mrc_lab.ipynb` | ScanTailor + MRC engine lab: run one cached book through the new engine, eyeball pages, compare against legacy output |
+| `notebooks/07_fonts_tables_diagrams.ipynb` | Variant comparison (mixed@300/600, grayscale, DocRes): font quality at 3× zoom, table/diagram survival checks, corpus inventory of figure-heavy books |
+| `notebooks/08_perfect_quality_lab.ipynb` | Max-quality experiments: Sauvola/Wolf supersampled masks, facsimile-grade MRC profile (V5), potrace vector-glyph demo, prioritized roadmap (PERO-OCR, UVDoc, NAF-DPM, neural SR, smoothscan) |
 
 > Heads-up: Ghostscript ≥ 10.6 has a known JPEG-encoding bug affecting PDF/A
 > conversion; OCRmyPDF mitigates it, but visually check outputs (notebook 03,

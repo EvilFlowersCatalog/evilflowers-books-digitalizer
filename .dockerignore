@@ -1,0 +1,10 @@
+.cache/
+output/
+.venv/
+notebooks/
+.ruff_cache/
+**/__pycache__/
+credentials.toml
+poetry.lock
+.dockerignore
+Dockerfile
