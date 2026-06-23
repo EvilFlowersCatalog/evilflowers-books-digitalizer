@@ -15,14 +15,16 @@ orchestrator/server/DB) for unattended multi-TB runs on a remote VM.
             ┌───────────────────────▼─────────────────────────────────┐
             │ pipeline (PipelineStep / Pipeline / BookContext)         │
             │  download → scantailor → [docres] → language → mrc       │
-            │           → metadata → enrich → cover → finalize         │
-            └───┬─────────────┬─────────────────┬──────────────────────┘
-                │             │                 │
-          sources/      metadata/           covers/
-       (local mount,   (Excel catalog,    (OPAC cover by ISBN,
-        WebDAV)         dir-name keyed)     else PIL templates)
+            │     → metadata → enrich → cover → finalize → manifest    │
+            └───┬─────────────┬─────────────┬──────────────┬───────────┘
+                │             │             │              │
+          sources/      metadata/       covers/        catalog/
+       (local mount,   (Excel catalog, (OPAC cover by  (entry manifest
+        WebDAV)         dir-name keyed)  ISBN/PIL)       + REST import)
 
-   monitor (rich TUI) + stats (CLI) read the JSONL report — out of band.
+   monitor (rich TUI) + stats (CLI/exports) read the JSONL reports + per-book
+   heartbeats (output/.progress/) — out of band; monitor shows live parallel
+   workers. publish-catalog pushes the manifests into the EvilFlowers Catalog.
 ```
 
 ## Components
@@ -35,7 +37,9 @@ orchestrator/server/DB) for unattended multi-TB runs on a remote VM.
 | `runner.py` | `run_source`/`run_corpus` — process-pool fan-out over `process_book` with a resumable JSONL report. |
 | `metadata/` | `MetadataCatalog.from_excel` (dir-name join) + `isbn_lookup` (STU OPAC / Open Library enrichment). |
 | `covers/` | OPAC cover by ISBN (`opac.py`) else `CoverRenderer` templates + per-faculty palettes; bundled DejaVu fonts. |
-| `reporting.py` / `monitor.py` | Summaries over the JSONL reports; `monitor` is a live rich TUI. |
+| `catalog/` | Import layer: `mapping` (book → `EntryManifest`), `manifest` (`*.entry.json` sidecar), `client` (REST), `publisher` (resumable batch). |
+| `reporting.py` / `dashboard.py` / `exports.py` | Summaries over the JSONL reports; shared rich table (used by `monitor` + `stats`); CSV/JSON/HTML exports. |
+| `monitor.py` | Live rich TUI over the reports (out of band). |
 | `runtime.py` | Resolves `configs/pipeline.toml` into ready objects (paths, source, catalog). |
 | `cli.py` | `python -m evilflowers_books_digitalizer …` operator commands. |
 

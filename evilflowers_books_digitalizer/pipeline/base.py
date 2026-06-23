@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,9 +61,23 @@ class Pipeline:
         names = " -> ".join(step.name for step in self.steps)
         return f"Pipeline({names})"
 
-    def run(self, ctx: BookContext) -> BookContext:
-        logger.info("pipeline start: %s (%d steps)", ctx.slug, len(self.steps))
-        for step in self.steps:
+    def run(
+        self,
+        ctx: BookContext,
+        *,
+        on_step: Callable[[int, int, str], None] | None = None,
+    ) -> BookContext:
+        """Run every step, returning the final context.
+
+        ``on_step(index, total, name)`` is invoked as each step *starts* (0-based
+        index), letting a caller publish progress — see
+        :class:`~evilflowers_books_digitalizer.progress.BookProgress`.
+        """
+        total = len(self.steps)
+        logger.info("pipeline start: %s (%d steps)", ctx.slug, total)
+        for index, step in enumerate(self.steps):
+            if on_step is not None:
+                on_step(index, total, step.name)
             started = time.perf_counter()
             ctx = step.run(ctx)
             elapsed = time.perf_counter() - started

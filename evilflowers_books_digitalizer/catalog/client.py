@@ -211,11 +211,13 @@ class EvilFlowersClient:
             raise
 
         entry_id = entry.get("id")
+        if not entry_id:
+            raise CatalogError(f"catalog returned no entry id for {manifest.slug}", detail=entry)
         row["entry_id"] = entry_id
         pdf = book_dir / manifest.pdf
         if not pdf.exists():
             raise CatalogError(f"PDF not found for {manifest.slug}: {pdf}")
-        acquisition = self.attach_pdf(catalog_id, entry_id, pdf, relation=manifest.relation)
+        acquisition = self.attach_pdf(catalog_id, str(entry_id), pdf, relation=manifest.relation)
         row["acquisition_id"] = acquisition.get("id")
         logger.info("%s: published entry %s", manifest.slug, entry_id)
         return row

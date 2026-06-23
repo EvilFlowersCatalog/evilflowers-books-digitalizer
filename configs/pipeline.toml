@@ -102,9 +102,9 @@ api_key_env = "EVILFLOWERS_API_KEY"
 relation = "open-access"
 # Fallback language (alpha2/alpha3) when neither the catalog nor OCR set one.
 default_language = "slk"
-# Author string order in catalog.xlsx: "surname_first" (Slovak "Novák Ján") or
-# "given_first" ("Ján Novák"). The librarian draft uses surname-first.
-author_name_order = "surname_first"
+# Author string order in catalog.xlsx: "given_first" ("Ján Novák") or
+# "surname_first" (Slovak "Novák Ján").
+author_name_order = "given_first"
 # Per-entry feature flags merged into the catalog's EntryConfig on create.
 [catalog.entry_config]
 evilflowers_ocr_enabled = false

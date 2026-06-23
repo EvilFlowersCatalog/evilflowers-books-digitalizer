@@ -58,6 +58,26 @@ def test_cover_without_catalog_still_runs(tmp_path):
     assert names.index("cover") == names.index("enrich") + 1
 
 
+def test_catalog_manifest_step_appended_last(tmp_path):
+    config = {
+        **BASE_CONFIG,
+        "metadata": {"enabled": True},
+        "cover": {"enabled": True},
+        "catalog": {"enabled": True, "catalog": "stu-books"},
+    }
+    catalog = MetadataCatalog([])
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config, catalog=catalog)
+    names = _names(pipe)
+    assert names[-1] == "manifest"  # needs the final PDF + cover, so runs last
+
+
+def test_catalog_manifest_skipped_without_target(tmp_path):
+    # enabled but no target catalog -> no manifest step (nothing to import into)
+    config = {**BASE_CONFIG, "catalog": {"enabled": True}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    assert "manifest" not in _names(pipe)
+
+
 def test_legacy_engine_builds(tmp_path):
     config = {
         "pipeline": {"engine": "legacy"},

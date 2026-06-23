@@ -15,6 +15,9 @@ configuration checklist.
 - `[cover] source = "opac_then_generated"`.
 - `[orchestration]` — `max_parallel_books × ocr_jobs ≤ CPU cores`,
   `min_free_gb` set to a safe floor for `cache_dir`'s disk.
+- `[catalog]` (optional, to import into the EvilFlowers Catalog) — `enabled`,
+  `base_url`, the target `catalog`, and `EVILFLOWERS_API_KEY` in the environment.
+  See [catalog_import.md](catalog_import.md).
 
 ## Toolchain
 
@@ -32,6 +35,9 @@ batch inside the project Docker image, which bakes them all in
    ([deploy/README.md](../deploy/README.md)).
 4. Watch with `monitor`; offload `output/` periodically; re-run any time to
    resume (finished books are skipped).
+5. Import into the catalog (if `[catalog]` is on): `publish-catalog --dry-run`,
+   then `publish-catalog` (idempotent; re-run to resume). Hand off results with
+   `stats --export html` / `--export csv`.
 
 See [operations.md](operations.md) for monitoring detail, disk handling, and the
 troubleshooting table.

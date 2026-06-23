@@ -1,9 +1,9 @@
 """EvilFlowers Books Digitalizer.
 
 Digitalization pipeline for scanned books: TIFF scans on WebDAV shares are
-turned into searchable PDF/A documents, enriched with metadata and classified.
-Later stages will produce embeddings (vector DB) and richer classifications
-(graph DB) on top of the same pipeline.
+turned into searchable PDF/A documents, enriched with metadata and covers, and
+imported into the EvilFlowers Catalog. Later stages will add embeddings (vector
+DB) and richer classification (graph DB) on top of the same pipeline.
 """
 
 from evilflowers_books_digitalizer.cache import LocalCache

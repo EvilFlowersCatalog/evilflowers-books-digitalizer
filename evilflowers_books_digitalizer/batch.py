@@ -57,6 +57,7 @@ def process_book(
     # heavy imports stay inside the worker so the parent stays light
     from evilflowers_books_digitalizer import BookContext, LocalCache, build_source
     from evilflowers_books_digitalizer.pipeline.factory import build_pipeline
+    from evilflowers_books_digitalizer.progress import BookProgress
     from evilflowers_books_digitalizer.runtime import build_catalog, load_runtime
 
     rt = load_runtime(config_path)
@@ -72,9 +73,14 @@ def process_book(
     if pdf.exists():
         return {**row, "status": "skipped", "pdf": str(pdf), "pdf_mb": pdf.stat().st_size / 1e6}
 
+    # heartbeat the monitor reads out-of-band (live parallel-worker view)
+    progress = BookProgress(rt.output_dir, source_key, book_id)
+    progress.start()
+
     deadline = time.monotonic() + disk_wait_minutes * 60
     while free_gb(rt.cache_dir.parent) < min_free_gb:
         if time.monotonic() > deadline:
+            progress.finish()
             return {**row, "status": "error", "error": f"low disk (<{min_free_gb} GB) — timed out"}
         logger.warning("%s_%s: waiting for disk space", source_key, book_id)
         time.sleep(30)
@@ -89,7 +95,8 @@ def process_book(
         source = build_source(rt.source, source_key)
         catalog = build_catalog(rt.metadata)
         pipeline = build_pipeline(source, cache, jobs=jobs, config=rt.config, catalog=catalog)
-        ctx = pipeline.run(ctx)
+        progress.start(len(pipeline.steps))
+        ctx = pipeline.run(ctx, on_step=progress.update)
         cover = ctx.artifacts.get("cover")
         manifest = ctx.artifacts.get("manifest")
         row.update(
@@ -107,6 +114,7 @@ def process_book(
     except Exception as exc:  # noqa: BLE001 — isolate per-book failures
         row.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500])
     finally:
+        progress.finish()
         # low-storage mode: drop everything except the final PDF + sidecar + cover
         if not keep_cache:
             shutil.rmtree(cache.book_dir(source_key, book_id), ignore_errors=True)

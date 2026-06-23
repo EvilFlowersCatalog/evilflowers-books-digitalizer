@@ -3,14 +3,23 @@
 ## Monitoring a run
 
 - **`monitor` TUI** — `python -m evilflowers_books_digitalizer monitor`: live
-  per-faculty progress bars, ok/skip/err, pages, output MB, pages/min, ETA.
-  Reads the report files, so run it from anywhere that sees `output_dir` (host,
-  `docker exec`, synced volume) — it doesn't touch the running batch.
-- **`stats`** — one-shot JSON summary (good for cron / a Slack post).
+  per-faculty progress bars, ok/skip/err, pages, output MB, pages/min, ETA, plus a
+  **"working now" panel** showing each parallel worker in flight (book, current
+  step, a step progress bar, elapsed). Reads the report files + per-book
+  heartbeats under `output/.progress/`, so run it from anywhere that sees
+  `output_dir` (host, `docker exec`, synced volume) — it doesn't touch the running
+  batch. Workers refresh their heartbeat at each step boundary and remove it when
+  done; a leftover from a crashed worker is ignored after `progress.DEFAULT_TTL`
+  and wiped at the next `run-source`.
+- **`stats`** — one-shot snapshot. Prints the same rich table as `monitor` (add a
+  `source` to scope it); `--json` for cron/Slack; `--export csv|json|html [--out PATH]`
+  to write a handover file (per-book CSV, summary JSON, or a self-contained HTML
+  report with bars). Shows the catalog-import tally too when publish reports exist.
 - **Log** — console and `output/logs/digitizer.log` (timestamped), one line per
   book completion.
-- **JSONL report** — `output/batch_report_<src>.jsonl`, one row per book
-  (re-runs append; `stats`/`monitor` dedup to the newest per book).
+- **JSONL reports** — `output/batch_report_<src>.jsonl` (digitization) and
+  `output/publish_report_<src>.jsonl` (catalog import), one row per book (re-runs
+  append; `stats`/`monitor` dedup to the newest per book).
 
 ## Resuming
 
@@ -52,3 +61,27 @@ python -m evilflowers_books_digitalizer preview-cover svf <book_id> --template b
 
 `preview-cover` needs only the Excel (not the mount), so you can iterate on
 palette/template quickly, then re-deploy.
+
+## Catalog import
+
+Once books are produced, publish them into the EvilFlowers Catalog (see
+[catalog_import.md](catalog_import.md) for the full flow and `[catalog]` config):
+
+```bash
+export EVILFLOWERS_API_KEY="…"
+python -m evilflowers_books_digitalizer publish-catalog --dry-run   # preview, no push
+python -m evilflowers_books_digitalizer publish-catalog             # idempotent push
+```
+
+Re-runs are safe: books already recorded `published`/`skipped` are skipped, and the
+catalog rejects duplicates (409 → `skipped`). Progress shows in `stats`/`monitor`.
+
+## Handover exports
+
+```bash
+python -m evilflowers_books_digitalizer stats --export csv    # per-book spreadsheet
+python -m evilflowers_books_digitalizer stats --export html   # shareable styled report
+python -m evilflowers_books_digitalizer stats svf --export csv # one faculty only
+```
+
+Files land at `output/stats[_<source>].<ext>` unless `--out` is given.

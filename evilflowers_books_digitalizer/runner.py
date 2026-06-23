@@ -24,6 +24,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from evilflowers_books_digitalizer import progress
 from evilflowers_books_digitalizer.batch import process_book
 from evilflowers_books_digitalizer.runtime import load_runtime
 from evilflowers_books_digitalizer.sources import build_source
@@ -63,6 +64,7 @@ def run_source(
         ids = ids[:limit]
     report = rt.output_dir / f"batch_report_{source_key}.jsonl"
     report.parent.mkdir(parents=True, exist_ok=True)
+    progress.clear(rt.output_dir, source_key)  # drop heartbeats from a prior interrupted run
 
     logger.info("source %s: %d books, %d in parallel", source_key, len(ids), max(parallel, 1))
     started = time.monotonic()

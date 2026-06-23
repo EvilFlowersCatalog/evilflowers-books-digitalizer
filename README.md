@@ -1,7 +1,8 @@
 # EvilFlowers Books Digitalizer
 
 Digitalization pipeline for scanned books: TIFF scans on WebDAV shares →
-searchable PDF/A documents (Slovak OCR), enriched with metadata and classified.
+searchable PDF/A documents (Slovak OCR), enriched with metadata and covers, then
+imported into the [EvilFlowers Catalog](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
 Built entirely on OSS tooling (Tesseract, OCRmyPDF, img2pdf, pikepdf, webdav4).
 
 Planned follow-ups on the same pipeline: embeddings for a vector database and
@@ -19,7 +20,7 @@ notebook 06 — uniform page sizes with real margins, no bleed-through, ~5×
 smaller PDFs):
 
 ```
-source (TIFF frames per book)                          output/<source>/<slug>.{pdf,txt,cover.jpg}
+source (TIFF frames per book)                          output/<source>/<slug>.{pdf,txt,cover.jpg,entry.json}
         │                                                                    ▲
         ▼                                                                    │
   DownloadBook ─► ScanTailorScans ─► [DocResEnhance] ─► DetectLanguage ─► MrcPdf
@@ -28,10 +29,14 @@ source (TIFF frames per book)                          output/<source>/<slug>.{p
                    deskew, dewarp,                                          + text sidecar)
                    margins, uniform)                                              │
                                                                                   ▼
-                              AttachMetadata ─► EnrichPdfMetadata ─► GenerateCover ─► FinalizePdf
-                              (Excel catalog,    (XMP: title,         (stylish cover    (bookmarks,
-                               dir-name keyed)    authors, year)       thumbnail)        page labels)
+                 AttachMetadata ─► EnrichPdfMetadata ─► GenerateCover ─► FinalizePdf ─► WriteCatalogManifest
+                 (Excel catalog,    (XMP: title,         (stylish cover    (bookmarks,    (catalog entry
+                  dir-name keyed)    authors, year)       thumbnail)        page labels)   sidecar .entry.json)
 ```
+
+Produced books are then imported into the EvilFlowers Catalog with
+`publish-catalog` (manifest → REST API, idempotent) — see
+[docs/catalog_import.md](docs/catalog_import.md).
 
 **`legacy`** (OpenCV preprocess → img2pdf → OCRmyPDF):
 
@@ -45,12 +50,12 @@ source (TIFF frames per book)                          output/<source>/<slug>.{p
 ```
 
 Settings live in `configs/pipeline.toml` (consumed by
-`pipeline.factory.build_pipeline`). Classification (`ClassifyBook`, pluggable
-`Classifier`) and embedding stages will run later on the OCR text sidecar.
+`pipeline.factory.build_pipeline`).
 
 Each step implements `PipelineStep.run(ctx: BookContext) -> BookContext`;
-a `Pipeline` is just an ordered list of steps, so new stages (embeddings,
-graph classification) slot in without touching existing ones.
+a `Pipeline` is just an ordered list of steps, so the planned stages
+(classification, embeddings on the OCR text sidecar) slot in without touching
+existing ones.
 
 ## Setup
 
@@ -107,7 +112,8 @@ database**. Configure everything in `configs/pipeline.toml` (`[paths]`,
 … run-source svf --limit 3       # a faculty (process pool)
 … run-corpus                     # the whole corpus
 … monitor                        # live TUI dashboard (progress, throughput, ETA)
-… stats                          # one-shot summary
+… stats                          # snapshot table (--json | --export csv|json|html)
+… publish-catalog                # import produced books into EvilFlowers Catalog
 ```
 
 Run it under screen / systemd / Docker — see `deploy/` and:
@@ -181,8 +187,12 @@ evilflowers_books_digitalizer/
 ├── sources/              AbstractBookSource + filesystem (mount) / webdav backends
 ├── metadata/             Excel catalog matched to books by directory name
 ├── covers/               PIL cover renderer, templates, palettes, bundled fonts
+├── catalog/              import layer: book -> EvilFlowers Catalog entry (manifest + REST)
 ├── runner.py             run_source / run_corpus — process-pool batch (no orchestrator)
 ├── reporting.py          summarize the JSONL reports (powers stats)
+├── progress.py           per-book heartbeats (live parallel-worker view)
+├── dashboard.py          shared rich table for monitor + stats
+├── exports.py            stats exports (per-book CSV, summary JSON, HTML report)
 ├── monitor.py            live rich TUI dashboard
 └── pipeline/
     ├── base.py           BookContext, PipelineStep, Pipeline

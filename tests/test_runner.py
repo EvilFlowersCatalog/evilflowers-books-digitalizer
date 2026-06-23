@@ -1,4 +1,4 @@
-"""Plain runner (sequential path) + monitor rendering."""
+"""Plain runner (sequential path) + dashboard rendering."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import types
 
 from rich.console import Console
 
-import evilflowers_books_digitalizer.monitor as monitor_mod
+import evilflowers_books_digitalizer.dashboard as dashboard_mod
 import evilflowers_books_digitalizer.runner as runner_mod
 
 
@@ -63,7 +63,7 @@ def test_run_corpus_aggregates(tmp_path, monkeypatch):
     assert set(res["sources"]) == {"svf", "mtf"}
 
 
-def test_monitor_render(tmp_path):
+def test_dashboard_build(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     (out / "batch_report_svf.jsonl").write_text(
@@ -71,11 +71,38 @@ def test_monitor_render(tmp_path):
                     "pdf_mb": 2.0, "minutes": 4.0}) + "\n")
     rt = types.SimpleNamespace(output_dir=out, source_keys=["svf", "mtf"], source={})
     console = Console(width=100, record=True)
-    console.print(monitor_mod.render(rt, {"svf": 150, "mtf": 270}))
+    console.print(dashboard_mod.build(rt, {"svf": 150, "mtf": 270}))
     text = console.export_text()
     assert "svf" in text and "TOTAL" in text and "100" in text
 
 
-def test_monitor_bar():
-    assert "100%" in monitor_mod._bar(10, 10)
-    assert monitor_mod._bar(5, None) == "—"
+def test_dashboard_build_scoped_to_source(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    for src in ("svf", "mtf"):
+        (out / f"batch_report_{src}.jsonl").write_text(
+            json.dumps({"source": src, "book_id": "a", "status": "ok", "n_pages": 10,
+                        "pdf_mb": 1.0, "minutes": 1.0}) + "\n")
+    rt = types.SimpleNamespace(output_dir=out, source_keys=["svf", "mtf"], source={})
+    console = Console(width=100, record=True)
+    console.print(dashboard_mod.build(rt, {"svf": 1, "mtf": 1}, sources=["svf"]))
+    text = console.export_text()
+    assert "svf" in text and "mtf" not in text
+
+
+def test_dashboard_bar():
+    assert "100%" in dashboard_mod._bar(10, 10)
+    assert dashboard_mod._bar(5, None) == "—"
+
+
+def test_dashboard_shows_active_workers(tmp_path):
+    from evilflowers_books_digitalizer.progress import BookProgress
+
+    out = tmp_path / "out"
+    out.mkdir()
+    BookProgress(out, "svf", "inflight").update(3, 8, "mrc")  # a worker mid-pipeline
+    rt = types.SimpleNamespace(output_dir=out, source_keys=["svf"], source={})
+    console = Console(width=100, record=True)
+    console.print(dashboard_mod.build(rt, {"svf": 10}))
+    text = console.export_text()
+    assert "working now" in text and "svf_inflight" in text and "mrc" in text

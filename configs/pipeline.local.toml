@@ -39,6 +39,7 @@ publisher = "vydavateľ"
 isbn = "ISBN"
 faculty = "fakulta"
 language = "jazyk"
+
 [metadata.faculty_names]
 fad = "Fakulta architektúry a dizajnu STU"
 fei = "Fakulta elektrotechniky a informatiky STU"

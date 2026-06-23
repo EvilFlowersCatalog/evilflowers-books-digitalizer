@@ -1,8 +1,8 @@
 """Read and summarize the batch report JSONL files.
 
 Each book run appends a row to ``output/batch_report_<source>.jsonl`` (see
-``orchestration.flows`` / ``batch.process_book``). This module turns those rows
-into headline numbers for the stats notebook and the ``stats`` CLI command.
+``batch.process_book``). This module turns those rows into headline numbers for
+the stats notebook and the ``stats`` CLI command.
 Re-runs append, so :func:`latest_per_book` keeps only the newest row per book.
 """
 
@@ -13,10 +13,14 @@ from pathlib import Path
 from typing import Any
 
 
-def load_reports(output_dir: Path) -> list[dict[str, Any]]:
-    """All report rows under ``output_dir`` (``batch_report*.jsonl``), in file order."""
+def load_reports(output_dir: Path, prefix: str = "batch_report") -> list[dict[str, Any]]:
+    """All report rows under ``output_dir`` (``<prefix>*.jsonl``), in file order.
+
+    ``prefix`` selects the report family: ``"batch_report"`` (digitization, the
+    default) or ``"publish_report"`` (catalog import).
+    """
     rows: list[dict[str, Any]] = []
-    for path in sorted(Path(output_dir).glob("batch_report*.jsonl")):
+    for path in sorted(Path(output_dir).glob(f"{prefix}*.jsonl")):
         for line in path.read_text().splitlines():
             line = line.strip()
             if not line:
@@ -67,3 +71,20 @@ def summarize_by_source(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     """Per-source headline totals."""
     sources = sorted({r.get("source", "?") for r in rows})
     return {src: summarize_reports([r for r in rows if r.get("source") == src]) for src in sources}
+
+
+def summarize_publish(output_dir: Path) -> dict[str, Any] | None:
+    """Catalog-import status counts from ``publish_report*.jsonl``, or None if none.
+
+    Returns ``{"books": N, "by_status": {published/skipped/error: ...}}`` over the
+    latest row per book, so the dashboard can show import progress alongside
+    digitization.
+    """
+    rows = latest_per_book(load_reports(output_dir, prefix="publish_report"))
+    if not rows:
+        return None
+    by_status: dict[str, int] = {}
+    for row in rows:
+        status = row.get("status", "?")
+        by_status[status] = by_status.get(status, 0) + 1
+    return {"books": len(rows), "by_status": by_status}

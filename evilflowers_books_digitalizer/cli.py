@@ -10,7 +10,7 @@ Commands:
     build-catalog    walk the sources and write a (ISBN-enriched) catalog .xlsx
     validate-catalog report Excel catalog match/miss against the mounted sources
     preview-cover    render one cover from catalog metadata (iterate on style)
-    stats            print a one-shot summary of batch results
+    stats            summarize results (rich table; --json or --export csv|json|html)
     monitor          live TUI dashboard over the batch reports
     export-manifests write catalog entry manifests (*.entry.json) for produced books
     publish-book     import one produced book into the EvilFlowers Catalog
@@ -199,15 +199,42 @@ def cmd_stats(args: argparse.Namespace) -> int:
         load_reports,
         summarize_by_source,
         summarize_reports,
+        summarize_publish,
     )
 
     rt = load_runtime(args.config)
     rows = latest_per_book(load_reports(rt.output_dir))
+    if args.source:
+        rows = [r for r in rows if r.get("source") == args.source]
     if not rows:
-        print(f"no batch reports under {rt.output_dir} — run a batch first", file=sys.stderr)
+        scope = f" for {args.source}" if args.source else ""
+        print(f"no batch reports{scope} under {rt.output_dir} — run a batch first", file=sys.stderr)
         return 1
-    print(json.dumps({"overall": summarize_reports(rows),
-                      "by_source": summarize_by_source(rows)}, indent=2, ensure_ascii=False))
+
+    if args.export:
+        from evilflowers_books_digitalizer.dashboard import book_totals
+        from evilflowers_books_digitalizer.exports import default_path, export_report
+
+        out = Path(args.out) if args.out else default_path(rt.output_dir, args.export, args.source)
+        export_report(
+            rows, args.export, out,
+            totals=book_totals(rt),
+            publish=summarize_publish(rt.output_dir),
+        )
+        print(f"wrote {out}")
+        return 0
+
+    if args.json:
+        print(json.dumps({"overall": summarize_reports(rows),
+                          "by_source": summarize_by_source(rows)}, indent=2, ensure_ascii=False))
+        return 0
+
+    from rich.console import Console
+
+    from evilflowers_books_digitalizer.dashboard import book_totals, build
+
+    sources = [args.source] if args.source else None
+    Console().print(build(rt, book_totals(rt), sources=sources))
     return 0
 
 
@@ -300,7 +327,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_arg(p)
     p.set_defaults(func=cmd_preview_cover)
 
-    p = sub.add_parser("stats", help="summarize batch results")
+    p = sub.add_parser("stats", help="summarize batch results (rich table; or export)")
+    p.add_argument("source", nargs="?", help="scope to one source, or all if omitted")
+    p.add_argument("--json", action="store_true", help="print the summary as JSON instead of a table")
+    p.add_argument("--export", choices=("csv", "json", "html"), help="write an export file instead of printing")
+    p.add_argument("--out", help="export path (default: <output_dir>/stats[_<source>].<ext>)")
     _add_config_arg(p)
     p.set_defaults(func=cmd_stats)
 
