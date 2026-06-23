@@ -48,9 +48,9 @@ svf = "Stavebná fakulta STU"
 enabled = true
 source = "opac_then_generated"   # real OPAC cover by ISBN, else generated
 min_px = 80
-template = "banner"
+template = "stu"                 # neutral STU layout (logo + title + author)
 format = "JPEG"
-quality = 88
+quality = 90
 
 [orchestration]
 max_parallel_books = 2

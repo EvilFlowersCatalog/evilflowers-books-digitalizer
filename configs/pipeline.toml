@@ -67,13 +67,27 @@ enabled = true
 #   "opac": only real covers (no artifact when none); "generated": always styled.
 source = "opac_then_generated"
 min_px = 80                 # reject obalkyknih "no cover" placeholders below this
-template = "banner"          # generated-cover style: "banner" | "minimal"
+template = "stu"            # generated-cover style (the neutral STU layout)
 format = "JPEG"             # "JPEG" | "PNG" (generated covers)
-quality = 88
+quality = 90
 # size = [1200, 1697]       # default ~ISO 1:√2 book proportion
-# Per-faculty palette overrides (hex); faculty key -> {bg, accent, text, ...}.
+#
+# Static files (fonts + faculty logos) are bundled in the package under
+# evilflowers_books_digitalizer/covers/assets/{fonts,logos}/. To override any of
+# them without touching code, point `assets_dir` at a parallel tree with the same
+# {fonts,logos}/ layout (first match wins, bundled is the fallback):
+# assets_dir = "/srv/branding/cover-assets"
+#
+# The faculty logo is chosen automatically from the book's faculty (the black,
+# transparent STU lockup: logos/<key>.png for stu|fad|fei|fiit|fchpt|mtf|sjf|svf).
+# Override a single faculty's logo file here if needed:
+# [cover.logos]
+# fei = "fei-custom.png"     # resolved under <assets_dir>/logos/ then bundled
+#
+# Each faculty's one accent colour is sampled from its official STU logo; override
+# per faculty (hex) without code changes:
 # [cover.palette.fad]
-# accent = "#A8442A"
+# accent = "#00a850"
 
 [catalog]
 # Import digitized books into an EvilFlowers Catalog instance
@@ -154,7 +168,7 @@ validate_pdfa = false
 # Per-profile overrides (optional) — any PdfProfile field:
 [render.distribution]
 bg_downsample = 3
-fg_downsample = 2
+# fg_downsample omitted: recode_pdf 1.5.7 corrupts the text layer with --fg-downsample.
 # hq_pages = "1,2,3,4,-4,-3,-2,-1"   # keep covers/endpapers full quality
 [render.archival]
 bg_downsample = 2

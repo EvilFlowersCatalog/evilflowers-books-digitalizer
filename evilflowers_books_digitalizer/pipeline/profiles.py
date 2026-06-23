@@ -88,7 +88,10 @@ DISTRIBUTION = PdfProfile(
     name="distribution",
     image_format="jpeg",
     bg_downsample=3,
-    fg_downsample=2,
+    # fg_downsample left unset: recode_pdf 1.5.7 corrupts the foreground/text
+    # layer when --fg-downsample is passed (rolls it ~50% horizontally + clips),
+    # wrecking every text page. bg downsampling is unaffected. See the
+    # jpeg2000-output-bug note for the controlled repro.
     denoise_mask="fast",
     linearize=True,
     pdfa=None,

@@ -30,6 +30,7 @@ evilflowers-digitalizer = "evilflowers_books_digitalizer.cli:main"
 packages = [{ include = "evilflowers_books_digitalizer" }]
 include = [
     { path = "evilflowers_books_digitalizer/covers/assets/fonts/*.ttf", format = ["sdist", "wheel"] },
+    { path = "evilflowers_books_digitalizer/covers/assets/logos/*.png", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.notebooks.dependencies]

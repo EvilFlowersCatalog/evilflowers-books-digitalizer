@@ -69,7 +69,7 @@ enabled = true
 #   "opac": only real covers (no artifact when none); "generated": always styled.
 source = "opac_then_generated"
 min_px = 80                 # reject obalkyknih "no cover" placeholders below this
-template = "banner"          # generated-cover style: "banner" | "minimal"
+template = "stu"            # neutral STU layout (logo + title + author)
 format = "JPEG"             # "JPEG" | "PNG" (generated covers)
 quality = 88
 # size = [1200, 1697]       # default ~ISO 1:√2 book proportion
@@ -161,7 +161,7 @@ validate_pdfa = true
 # Per-profile overrides (optional) — any PdfProfile field:
 [render.distribution]
 bg_downsample = 3
-fg_downsample = 2
+# fg_downsample omitted: recode_pdf 1.5.7 corrupts the text layer with --fg-downsample.
 # hq_pages = "1,2,3,4,-4,-3,-2,-1"   # keep covers/endpapers full quality
 [render.archival]
 bg_downsample = 2

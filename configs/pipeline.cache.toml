@@ -51,7 +51,7 @@ svf = "Stavebná fakulta STU"
 enabled = true
 source = "opac_then_generated"
 min_px = 80
-template = "banner"
+template = "stu"
 format = "JPEG"
 quality = 88
 
@@ -62,7 +62,7 @@ outputs = ["distribution", "archival"]
 validate_pdfa = true           # run veraPDF on the archival master (installed via brew)
 [render.distribution]
 bg_downsample = 3
-fg_downsample = 2
+# fg_downsample omitted: recode_pdf 1.5.7 corrupts the text layer with --fg-downsample.
 [render.archival]
 bg_downsample = 2
 pdfa = "2b"

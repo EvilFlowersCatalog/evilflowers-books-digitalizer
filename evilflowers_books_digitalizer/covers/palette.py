@@ -1,13 +1,20 @@
-"""Colour palettes for generated covers, themed per faculty.
+"""Colour for generated covers — a neutral page, themed by the faculty logo.
 
-Each faculty gets a distinct, tasteful scheme; an unknown faculty falls back to
-a neutral slate. Palettes are overridable from ``[cover.palette.<faculty>]`` in
-``pipeline.toml`` so branding can be tuned without touching code.
+The cover is deliberately quiet: a warm off-white page, near-black ink for the
+title and author (maximum legibility), and a single faculty accent used only for
+a hairline rule. The accent of each faculty is sampled from its official colour
+logo (``*-nfv``), so the cover's one spot of colour matches its STU mark:
+
+    FAD green · FEI blue · FIIT cyan · FCHPT gold · MTF red · SvF orange ·
+    STU/SjF bordeaux (SjF's mark is monochrome, so it inherits the STU wine).
+
+Any of these can be overridden per faculty from ``[cover.palette.<key>]`` in
+``pipeline.toml`` without touching code.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 RGB = tuple[int, int, int]
 
@@ -24,34 +31,53 @@ def shade(color: RGB, factor: float) -> RGB:
     return tuple(max(0, min(255, round(c * factor))) for c in color)  # type: ignore[return-value]
 
 
+def _luminance(color: RGB) -> float:
+    r, g, b = color
+    return 0.2126 * r + 0.7152 * g + 0.4126 * b
+
+
 @dataclass(frozen=True)
 class Palette:
-    """A cover colour scheme."""
+    """A cover colour scheme: a light page, dark ink, one accent."""
 
-    bg: RGB  # page background (light)
-    accent: RGB  # banner / rules / author (saturated)
-    text: RGB  # title / body on the light background (dark)
-    banner_text: RGB = (255, 255, 255)  # text on the accent band
-    muted: RGB = (120, 120, 120)  # footer / secondary lines
+    bg: RGB  # page background (light, neutral)
+    accent: RGB  # the single spot of faculty colour (hairline rule)
+    text: RGB  # title (near-black, on the light page)
+    muted: RGB = (118, 116, 112)  # author / footer (secondary ink)
+
+    @property
+    def accent_ink(self) -> RGB:
+        """Accent darkened until it reads on the light page (e.g. FCHPT gold)."""
+        accent = self.accent
+        while _luminance(accent) > 150 and accent != (0, 0, 0):
+            accent = shade(accent, 0.82)
+        return accent
 
     @classmethod
-    def from_config(cls, data: dict[str, str]) -> "Palette":
-        base = dict(DEFAULT.__dict__)
-        for key in ("bg", "accent", "text", "banner_text", "muted"):
+    def from_config(cls, data: dict[str, str], base: "Palette | None" = None) -> "Palette":
+        fields = dict((base or DEFAULT).__dict__)
+        for key in ("bg", "accent", "text", "muted"):
             if key in data:
-                base[key] = hex_to_rgb(data[key])
-        return cls(**base)
+                fields[key] = hex_to_rgb(data[key])
+        return cls(**fields)
 
 
-DEFAULT = Palette(bg=(244, 243, 239), accent=(51, 65, 85), text=(28, 30, 36))
+#: Neutral page + ink shared by every faculty (only the accent changes).
+_PAGE: RGB = (247, 246, 242)
+_INK: RGB = (28, 28, 30)
 
-#: Per-faculty defaults (lower-cased source key -> palette).
+DEFAULT = Palette(bg=_PAGE, accent=(142, 7, 51), text=_INK)  # STU bordeaux
+
+#: Per-faculty accent (sampled from the official colour logo).
 FACULTY_PALETTES: dict[str, Palette] = {
-    "fad": Palette(bg=(245, 240, 234), accent=(168, 68, 42), text=(43, 30, 26)),  # clay
-    "fei": Palette(bg=(238, 242, 248), accent=(31, 78, 140), text=(20, 30, 48)),  # blue
-    "mtf": Palette(bg=(236, 244, 244), accent=(46, 110, 115), text=(22, 40, 41)),  # teal
-    "sjf": Palette(bg=(245, 241, 234), accent=(180, 83, 9), text=(43, 33, 18)),  # amber
-    "svf": Palette(bg=(238, 244, 239), accent=(47, 107, 60), text=(22, 41, 28)),  # green
+    "stu": replace(DEFAULT, accent=(142, 7, 51)),  # bordeaux
+    "fad": replace(DEFAULT, accent=(0, 150, 70)),  # green
+    "fei": replace(DEFAULT, accent=(19, 76, 149)),  # blue
+    "fiit": replace(DEFAULT, accent=(29, 124, 170)),  # cyan-blue
+    "fchpt": replace(DEFAULT, accent=(214, 178, 0)),  # gold
+    "mtf": replace(DEFAULT, accent=(178, 22, 30)),  # red
+    "sjf": replace(DEFAULT, accent=(142, 7, 51)),  # monochrome mark -> STU wine
+    "svf": replace(DEFAULT, accent=(196, 108, 26)),  # orange
 }
 
 
@@ -59,12 +85,10 @@ def resolve_palette(
     faculty: str | None, overrides: dict[str, dict[str, str]] | None = None
 ) -> Palette:
     """Palette for a faculty key, applying any ``[cover.palette.*]`` overrides."""
-    key = (faculty or "").lower()
+    from evilflowers_books_digitalizer.covers.logos import faculty_key
+
+    key = faculty_key(faculty)
     palette = FACULTY_PALETTES.get(key, DEFAULT)
     if overrides and key in overrides:
-        palette = Palette.from_config({**_palette_to_hex(palette), **overrides[key]})
+        palette = Palette.from_config(overrides[key], base=palette)
     return palette
-
-
-def _palette_to_hex(p: Palette) -> dict[str, str]:
-    return {k: "#%02x%02x%02x" % v for k, v in p.__dict__.items()}

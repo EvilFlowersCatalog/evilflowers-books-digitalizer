@@ -322,7 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("preview-cover", help="render one cover to a file")
     p.add_argument("source")
     p.add_argument("book_id")
-    p.add_argument("--template", help="banner | minimal")
+    p.add_argument("--template", help="cover template (default: stu)")
     p.add_argument("--out", help="output path")
     _add_config_arg(p)
     p.set_defaults(func=cmd_preview_cover)
