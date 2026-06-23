@@ -26,11 +26,21 @@ class EnrichPdfMetadata(PipelineStep):
             raise ValueError(f"no pdf for {ctx.slug} — run the OCR step first")
 
         title = ctx.metadata.get("title", ctx.book_id)
+        authors = ctx.metadata.get("authors") or []
+        year = ctx.metadata.get("year")
+        publisher = ctx.metadata.get("publisher")
         with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
             with pdf.open_metadata() as meta:
                 meta["dc:title"] = title
                 meta["dc:language"] = [ctx.metadata.get("language", "sk")]
                 meta["xmp:CreatorTool"] = self.creator
+                if authors:
+                    meta["dc:creator"] = list(authors)
+                if publisher:
+                    meta["dc:publisher"] = [publisher]
+                if year:
+                    # XMP wants an ISO-8601 date; a bare year is valid
+                    meta["dc:date"] = [str(year)]
             ctx.metadata["n_pdf_pages"] = len(pdf.pages)
             pdf.save(pdf_path)
 

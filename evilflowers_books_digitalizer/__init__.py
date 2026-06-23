@@ -9,17 +9,25 @@ Later stages will produce embeddings (vector DB) and richer classifications
 from evilflowers_books_digitalizer.cache import LocalCache
 from evilflowers_books_digitalizer.config import Settings, WebDAVSource, load_settings
 from evilflowers_books_digitalizer.pipeline import BookContext, Pipeline, PipelineStep
-from evilflowers_books_digitalizer.webdav import BookSource
+from evilflowers_books_digitalizer.sources import (
+    AbstractBookSource,
+    BookSource,
+    FilesystemBookSource,
+    build_source,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AbstractBookSource",
     "BookContext",
     "BookSource",
+    "FilesystemBookSource",
     "LocalCache",
     "Pipeline",
     "PipelineStep",
     "Settings",
     "WebDAVSource",
+    "build_source",
     "load_settings",
 ]

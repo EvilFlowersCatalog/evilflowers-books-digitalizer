@@ -87,20 +87,49 @@ DocRes on the host (Apple Silicon MPS — much faster than the container's CPU) 
 `~/.local/share/evilflowers-tools/` (DocRes repo + its venv + weights); paths are set
 in `[docres]` in `pipeline.toml`.
 
+## Production (local mount + Prefect)
+
+For unattended multi-TB runs on a VM, the scans are a **local mount**
+(`/mnt/digital-library/raw-scans`), books are enriched from an **Excel catalog**,
+each gets a generated **cover thumbnail**, and **Prefect** (self-hosted)
+orchestrates and monitors the batch. Configure it all in `configs/pipeline.toml`
+(`[paths]`, `[source]`, `[metadata]`, `[cover]`, `[orchestration]`).
+
+```bash
+# operator CLI (python -m evilflowers_books_digitalizer <command>)
+… list svf                       # books on a source
+… validate-catalog               # Excel match/miss report across sources
+… preview-cover svf <book_id>    # render one cover to iterate on style
+… run-book svf <book_id>         # one book, end to end (no Prefect)
+… run-source svf --limit 3       # a faculty via Prefect (local temp server)
+… run-corpus                     # the whole corpus via Prefect
+```
+
+Self-hosted Prefect (server + UI + worker) ships in `deploy/`
+(`docker-compose.prefect.yml`, `prefect.yaml`). See:
+
+- [docs/architecture.md](docs/architecture.md) — components and data flow
+- [docs/deployment.md](docs/deployment.md) — Prefect stack + alerts runbook
+- [docs/operations.md](docs/operations.md) — monitoring, resume, disk, tuning
+- [docs/metadata_and_covers.md](docs/metadata_and_covers.md) — Excel mapping + cover templates
+
+The empirical basis for the engine choice is in
+[docs/digitalization_pipeline_report.md](docs/digitalization_pipeline_report.md).
+
 ## Usage
 
 Experimentation happens in notebooks first; the module holds the reusable parts.
 
-| Notebook | Purpose |
-|----------|---------|
-| `notebooks/01_webdav_exploration.ipynb` | Inventory the shares: books, pages, sizes — interactive Plotly charts (cached to `.cache/stats/`) |
-| `notebooks/02_single_book_pipeline.ipynb` | Download one book and run the standard pipeline end to end |
-| `notebooks/03_transformation_lab.ipynb` | Tune the TIFF → PDF/A transformation: spread splitting, unpaper, compression/quality matrix, OCR confidence |
-| `notebooks/04_produce_samples.ipynb` | Run the production pipeline on one small book per faculty |
-| `notebooks/05_batch_pipeline.ipynb` | Batch run: 4 books in parallel (process pool), low-storage mode (cache deleted per book), resumable via `output/batch_report.jsonl` |
-| `notebooks/06_scantailor_mrc_lab.ipynb` | ScanTailor + MRC engine lab: run one cached book through the new engine, eyeball pages, compare against legacy output |
-| `notebooks/07_fonts_tables_diagrams.ipynb` | Variant comparison (mixed@300/600, grayscale, DocRes): font quality at 3× zoom, table/diagram survival checks, corpus inventory of figure-heavy books |
-| `notebooks/08_perfect_quality_lab.ipynb` | Max-quality experiments: Sauvola/Wolf supersampled masks, facsimile-grade MRC profile (V5), potrace vector-glyph demo, prioritized roadmap (PERO-OCR, UVDoc, NAF-DPM, neural SR, smoothscan) |
+| Notebook                                   | Purpose                                                                                                                                                                                      |
+|--------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `notebooks/01_webdav_exploration.ipynb`    | Inventory the shares: books, pages, sizes — interactive Plotly charts (cached to `.cache/stats/`)                                                                                            |
+| `notebooks/02_single_book_pipeline.ipynb`  | Download one book and run the standard pipeline end to end                                                                                                                                   |
+| `notebooks/03_transformation_lab.ipynb`    | Tune the TIFF → PDF/A transformation: spread splitting, unpaper, compression/quality matrix, OCR confidence                                                                                  |
+| `notebooks/04_produce_samples.ipynb`       | Run the production pipeline on one small book per faculty                                                                                                                                    |
+| `notebooks/05_batch_pipeline.ipynb`        | Batch run: 4 books in parallel (process pool), low-storage mode (cache deleted per book), resumable via `output/batch_report.jsonl`                                                          |
+| `notebooks/06_scantailor_mrc_lab.ipynb`    | ScanTailor + MRC engine lab: run one cached book through the new engine, eyeball pages, compare against legacy output                                                                        |
+| `notebooks/07_fonts_tables_diagrams.ipynb` | Variant comparison (mixed@300/600, grayscale, DocRes): font quality at 3× zoom, table/diagram survival checks, corpus inventory of figure-heavy books                                        |
+| `notebooks/08_perfect_quality_lab.ipynb`   | Max-quality experiments: Sauvola/Wolf supersampled masks, facsimile-grade MRC profile (V5), potrace vector-glyph demo, prioritized roadmap (PERO-OCR, UVDoc, NAF-DPM, neural SR, smoothscan) |
 
 > Heads-up: Ghostscript ≥ 10.6 has a known JPEG-encoding bug affecting PDF/A
 > conversion; OCRmyPDF mitigates it, but visually check outputs (notebook 03,
@@ -134,14 +163,25 @@ print(ctx.artifacts["pdf"])
 ```
 evilflowers_books_digitalizer/
 ├── config.py             settings + credentials.toml loading
+├── runtime.py            resolves pipeline.toml -> paths, source, catalog
 ├── models.py             BookRef, PageScan, SourceStats
-├── webdav.py             BookSource — listing, stats, resumable downloads
 ├── cache.py              LocalCache — scans & cached stats layout
+├── batch.py              process_book — one book, low-storage, isolated
+├── cli.py                operator CLI (python -m evilflowers_books_digitalizer)
+├── sources/              AbstractBookSource + filesystem (mount) / webdav backends
+├── metadata/             Excel catalog matched to books by directory name
+├── covers/               PIL cover renderer, templates, palettes, bundled fonts
+├── orchestration/        Prefect flows: digitize_book / _source / _corpus
 └── pipeline/
     ├── base.py           BookContext, PipelineStep, Pipeline
-    └── steps/            download, assemble, ocr, enrich, classify
+    ├── factory.py        build_pipeline (engine + metadata/cover tail)
+    └── steps/            download, scantailor, mrc, metadata, enrich, cover, finalize, …
+configs/pipeline.toml     production config (source, metadata, cover, orchestration)
+configs/catalog.xlsx      bibliographic metadata (you provide)
+deploy/                   self-hosted Prefect stack (compose, prefect.yaml, runbook)
+docs/                     architecture, deployment, operations, metadata & covers
 notebooks/                exploration & experimentation
-credentials.toml          WebDAV secrets (gitignored, see credentials.example.toml)
-.cache/                   downloaded scans + share stats (gitignored)
-output/                   produced PDFs/text (gitignored)
+credentials.toml          WebDAV secrets (gitignored; not needed for the mount backend)
+.cache/                   staged scans + share stats (gitignored)
+output/                   produced PDFs / text / covers (gitignored)
 ```

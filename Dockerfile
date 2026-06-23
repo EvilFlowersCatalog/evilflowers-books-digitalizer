@@ -7,18 +7,22 @@
 #   * archive-pdf-tools (recode_pdf), and the project package itself
 #   * DocRes (optional AI enhancement; CPU inference — slow, see pipeline.toml)
 #
+# This image is also the Prefect worker (see deploy/docker-compose.prefect.yml):
+# `pip install .` pulls in prefect + pandas + openpyxl and bundles the cover
+# fonts, so the worker can run the orchestration flows directly.
+#
 # Build:
 #   docker build -t evilflowers-digitalizer .
 #   docker build --build-arg DOCRES_WEIGHTS=0 -t evilflowers-digitalizer .   # skip the ~900 MB weights
 #
-# Run a batch (mount cache/output/credentials; VPN must reach the NAS):
+# Run one book directly (production: mount the raw-scans volume + output):
 #   docker run --rm -it \
-#     -v $PWD/credentials.toml:/app/credentials.toml:ro \
-#     -v $PWD/.cache:/app/.cache \
+#     -v /mnt/digital-library/raw-scans:/mnt/digital-library/raw-scans:ro \
+#     -v $PWD/configs:/app/configs:ro \
 #     -v $PWD/output:/app/output \
+#     -v $PWD/.cache:/app/.cache \
 #     evilflowers-digitalizer \
-#     python -c "from evilflowers_books_digitalizer.batch import process_book; \
-#                print(process_book('fad', '<BOOK_ID>'))"
+#     python -m evilflowers_books_digitalizer run-book fad '<BOOK_ID>'
 
 # dev packages double as runtime deps below — exact runtime soname package
 # names churn across Debian releases (t64 transition); -dev names are stable.

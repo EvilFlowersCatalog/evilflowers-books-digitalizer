@@ -10,6 +10,76 @@
 [pipeline]
 engine = "scantailor_mrc"
 
+# --- production runtime (consumed by runtime.load_runtime / the CLI / Prefect) ---
+
+[paths]
+# Relative paths resolve against the project root. On the VM, point output_dir
+# at durable storage and cache_dir at fast local scratch.
+cache_dir = ".cache"
+output_dir = "output"
+
+[source]
+# backend = "filesystem": read the raw scans off a local mount (production).
+# backend = "webdav": pull over WebDAV (dev; needs credentials.toml + VPN).
+backend = "filesystem"
+root = "/mnt/digital-library/raw-scans"
+# stage_mode: "symlink" (zero-copy, default), "copy", or "hardlink".
+stage_mode = "symlink"
+# Faculty key -> directory under `root` that holds the book directories.
+[source.paths]
+fad = "fad/FA-skeny"
+fei = "fei/FEI-skeny"
+mtf = "mtf/MTF-skeny"
+sjf = "sjf/SJF-skeny"
+svf = "svf/SVF-skeny"
+
+[metadata]
+# Excel catalog mapped to books by directory name (see metadata/catalog.py).
+enabled = true
+excel_path = "configs/catalog.xlsx"
+sheet = 0
+# Which canonical field is used to match the directory id (usually the ISBN).
+key_field = "isbn"
+# Canonical field -> spreadsheet column header. Adjust to the real sheet;
+# missing columns are simply skipped.
+[metadata.columns]
+title = "title"
+authors = "authors"
+year = "year"
+publisher = "publisher"
+isbn = "isbn"
+faculty = "faculty"
+language = "language"
+# Source key -> human faculty name (used on covers and for unmatched stubs).
+[metadata.faculty_names]
+fad = "Fakulta architektúry a dizajnu STU"
+fei = "Fakulta elektrotechniky a informatiky STU"
+mtf = "Materiálovotechnologická fakulta STU"
+sjf = "Strojnícka fakulta STU"
+svf = "Stavebná fakulta STU"
+
+[cover]
+# Standalone thumbnail per book (<slug>.cover.jpg); the PDF is left untouched.
+enabled = true
+template = "banner"          # "banner" | "minimal"
+format = "JPEG"             # "JPEG" | "PNG"
+quality = 88
+# size = [1200, 1697]       # default ~ISO 1:√2 book proportion
+# Per-faculty palette overrides (hex); faculty key -> {bg, accent, text, ...}.
+# [cover.palette.fad]
+# accent = "#A8442A"
+
+[orchestration]
+# Prefect fan-out limits. max_parallel_books * ocr_jobs should be <= CPU cores.
+max_parallel_books = 4
+ocr_jobs = 2
+min_free_gb = 40
+# Mark a source-flow run Failed (-> alert) when this fraction of books error.
+fail_on_error_ratio = 0.5
+# Faculties to process (order matters for digitize_corpus); defaults to
+# [source.paths] keys when omitted.
+sources = ["svf", "sjf", "fad", "fei", "mtf"]
+
 [scantailor]
 binary = "scantailor-deviant-cli"
 # "mixed": text binarized (crisp, kills bleed-through), picture zones keep tones.

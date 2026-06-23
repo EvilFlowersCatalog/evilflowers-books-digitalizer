@@ -7,59 +7,107 @@ changes don't require code changes.
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from evilflowers_books_digitalizer.cache import LocalCache
 from evilflowers_books_digitalizer.config import PROJECT_ROOT
-from evilflowers_books_digitalizer.pipeline.base import Pipeline
+from evilflowers_books_digitalizer.covers.renderer import CoverRenderer
+from evilflowers_books_digitalizer.metadata.catalog import MetadataCatalog
+from evilflowers_books_digitalizer.pipeline.base import Pipeline, PipelineStep
 from evilflowers_books_digitalizer.pipeline.steps import (
     AssemblePdf,
+    AttachMetadata,
     DetectLanguage,
     DocResEnhance,
     DownloadBook,
     EnrichPdfMetadata,
     FinalizePdf,
+    GenerateCover,
     MrcPdf,
     OcrPdf,
     PreprocessScans,
     ScanTailorScans,
 )
-from evilflowers_books_digitalizer.webdav import BookSource
+from evilflowers_books_digitalizer.sources.base import AbstractBookSource
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "pipeline.toml"
 
 
 def build_pipeline(
-    source: BookSource,
+    source: AbstractBookSource,
     cache: LocalCache,
     config_path: Path | None = None,
     jobs: int | None = None,
+    *,
+    config: dict[str, Any] | None = None,
+    catalog: MetadataCatalog | None = None,
 ) -> Pipeline:
-    """Standard digitalization pipeline with settings from ``pipeline.toml``."""
-    path = config_path or DEFAULT_CONFIG_PATH
-    with path.open("rb") as fh:
-        config = tomllib.load(fh)
+    """Standard digitalization pipeline with settings from ``pipeline.toml``.
+
+    ``config`` (a pre-parsed dict) takes precedence over ``config_path`` so the
+    batch worker can parse the TOML once and reuse it. ``catalog`` enables the
+    metadata + cover tail when the ``[metadata]`` block is on.
+    """
+    if config is None:
+        path = config_path or DEFAULT_CONFIG_PATH
+        with path.open("rb") as fh:
+            config = tomllib.load(fh)
 
     engine = config.get("pipeline", {}).get("engine", "legacy")
     if engine == "scantailor_mrc":
-        return _build_scantailor_mrc(source, cache, config)
-    if engine == "legacy":
-        return _build_legacy(source, cache, config, jobs)
-    raise ValueError(f"unknown pipeline engine: {engine!r}")
+        steps = _build_scantailor_mrc(source, cache, config)
+    elif engine == "legacy":
+        steps = _build_legacy(source, cache, config, jobs)
+    else:
+        raise ValueError(f"unknown pipeline engine: {engine!r}")
+
+    steps = _append_metadata_and_cover(steps, config, catalog)
+    return Pipeline(steps)
+
+
+def _append_metadata_and_cover(
+    steps: list[PipelineStep], config: dict, catalog: MetadataCatalog | None
+) -> list[PipelineStep]:
+    """Insert AttachMetadata (before enrich) and GenerateCover (after enrich).
+
+    Keeps the engine builders focused on imaging; the enrichment tail is shared.
+    """
+    meta_cfg = config.get("metadata", {})
+    cover_cfg = config.get("cover", {})
+
+    if catalog is not None and meta_cfg.get("enabled", False):
+        attach = AttachMetadata(catalog, faculty_map=meta_cfg.get("faculty_names"))
+        enrich_idx = next(
+            (i for i, s in enumerate(steps) if s.name == "enrich"), len(steps)
+        )
+        steps.insert(enrich_idx, attach)
+
+    if cover_cfg.get("enabled", False):
+        renderer = CoverRenderer.from_config(cover_cfg)
+        # after enrich if present, else append
+        enrich_idx = next(
+            (i for i, s in enumerate(steps) if s.name == "enrich"), len(steps) - 1
+        )
+        steps.insert(enrich_idx + 1, GenerateCover(renderer))
+    return steps
 
 
 def _build_legacy(
-    source: BookSource, cache: LocalCache, config: dict, jobs: int | None
-) -> Pipeline:
+    source: AbstractBookSource, cache: LocalCache, config: dict, jobs: int | None
+) -> list[PipelineStep]:
     """OpenCV preprocess -> img2pdf -> OCRmyPDF (the original pipeline)."""
     preprocess = config.get("preprocess", {})
     # OCRmyPDF knobs live in [legacy_ocr]; the OCR language is shared in [ocr]
     ocr = dict(config.get("legacy_ocr", {}))
     ocr["language"] = config.get("ocr", {}).get("language", "auto")
 
-    steps = [
+    steps: list[PipelineStep] = [
         DownloadBook(source, cache),
         PreprocessScans(
             split=preprocess.get("split", True),
@@ -73,10 +121,12 @@ def _build_legacy(
         ocr["language"] = None
         steps.append(DetectLanguage())
     steps += [AssemblePdf(), OcrPdf(jobs=jobs, **ocr), EnrichPdfMetadata()]
-    return Pipeline(steps)
+    return steps
 
 
-def _build_scantailor_mrc(source: BookSource, cache: LocalCache, config: dict) -> Pipeline:
+def _build_scantailor_mrc(
+    source: AbstractBookSource, cache: LocalCache, config: dict
+) -> list[PipelineStep]:
     """ScanTailor cleanup [-> DocRes] -> Tesseract hOCR -> MRC PDF (notebook 06)."""
     st = config.get("scantailor", {})
     docres = config.get("docres", {})
@@ -84,7 +134,7 @@ def _build_scantailor_mrc(source: BookSource, cache: LocalCache, config: dict) -
     finalize = config.get("finalize", {})
     language = config.get("ocr", {}).get("language", "auto")
 
-    steps: list = [
+    steps: list[PipelineStep] = [
         DownloadBook(source, cache),
         ScanTailorScans(
             binary=st.get("binary", "scantailor-deviant-cli"),
@@ -139,4 +189,4 @@ def _build_scantailor_mrc(source: BookSource, cache: LocalCache, config: dict) -
                 linearize=finalize.get("linearize", True),
             )
         )
-    return Pipeline(steps)
+    return steps

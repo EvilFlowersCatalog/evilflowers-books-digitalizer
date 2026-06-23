@@ -1,11 +1,13 @@
 """Concrete pipeline steps."""
 
 from evilflowers_books_digitalizer.pipeline.steps.assemble import AssemblePdf
+from evilflowers_books_digitalizer.pipeline.steps.attach_metadata import AttachMetadata
 from evilflowers_books_digitalizer.pipeline.steps.classify import (
     Classifier,
     ClassifyBook,
     KeywordClassifier,
 )
+from evilflowers_books_digitalizer.pipeline.steps.cover import GenerateCover
 from evilflowers_books_digitalizer.pipeline.steps.detect_language import DetectLanguage
 from evilflowers_books_digitalizer.pipeline.steps.docres import DocResEnhance
 from evilflowers_books_digitalizer.pipeline.steps.download import DownloadBook
@@ -18,6 +20,7 @@ from evilflowers_books_digitalizer.pipeline.steps.scantailor import ScanTailorSc
 
 __all__ = [
     "AssemblePdf",
+    "AttachMetadata",
     "Classifier",
     "ClassifyBook",
     "DetectLanguage",
@@ -25,6 +28,7 @@ __all__ = [
     "DownloadBook",
     "EnrichPdfMetadata",
     "FinalizePdf",
+    "GenerateCover",
     "KeywordClassifier",
     "MrcPdf",
     "OcrPdf",
