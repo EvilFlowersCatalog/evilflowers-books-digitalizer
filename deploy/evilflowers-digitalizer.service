@@ -1,0 +1,24 @@
+# systemd unit for the digitization batch. Install:
+#   sudo cp deploy/evilflowers-digitalizer.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl start evilflowers-digitalizer
+#   journalctl -u evilflowers-digitalizer -f          # follow logs
+# Adjust WorkingDirectory / user / venv path to your install.
+
+[Unit]
+Description=EvilFlowers Books Digitalizer batch
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=digitizer
+WorkingDirectory=/opt/evilflowers-books-digitalizer
+ExecStart=/opt/evilflowers-books-digitalizer/.venv/bin/python -m evilflowers_books_digitalizer run-corpus
+# resumable: a crash restarts and skips already-finished books; clean finish does not restart
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -3,13 +3,17 @@
 
 # Secrets — never commit credentials
 credentials.toml
+.mcp.json
 CREDENTIALS.md
 .env
 
 # Local data — scans are huge, keep them out of git
 .cache/
 output/
+output_local/
 data/
+# Generated catalog draft (regenerate with notebook 10)
+configs/catalog_template.xlsx
 
 # Python
 __pycache__/

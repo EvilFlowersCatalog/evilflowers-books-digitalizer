@@ -1,78 +1,37 @@
-# Deployment (self-hosted Prefect on the VM)
+# Deployment (production VM)
 
-The VM runs a self-hosted Prefect stack (server + UI + worker) in Docker. Flow
-metadata stays on-prem; the worker image carries the full imaging toolchain.
+The batch is a single long-running process — **no orchestrator, no database, no
+server**. The mechanics of running it (screen / systemd / Docker) and monitoring
+it live with the `monitor` TUI to `stats` and logs, are in
+**[../deploy/README.md](../deploy/README.md)**. This page is the production
+configuration checklist.
 
-## 1. Prerequisites
+## Configure `configs/pipeline.toml`
 
-- The raw scans mounted at `/mnt/digital-library/raw-scans` (read-only is fine).
-- Docker + Docker Compose.
-- The metadata Excel at `configs/catalog.xlsx` (or adjust `[metadata].excel_path`).
+- `[source] backend = "filesystem"`, `root = "/mnt/digital-library/raw-scans"`,
+  and the per-faculty `[source.paths]`.
+- `[paths] output_dir` on durable storage, `cache_dir` on fast local scratch.
+- `[metadata] excel_path = "configs/catalog.xlsx"` (the librarian-completed file).
+- `[cover] source = "opac_then_generated"`.
+- `[orchestration]` — `max_parallel_books × ocr_jobs ≤ CPU cores`,
+  `min_free_gb` set to a safe floor for `cache_dir`'s disk.
 
-## 2. Configure
+## Toolchain
 
-```bash
-cp deploy/.env.example deploy/.env       # set POSTGRES_PASSWORD, PREFECT_UI_API_URL,
-                                         # RAW_SCANS_MOUNT, OUTPUT_DIR, CACHE_DIR
-```
+The engine shells out to `scantailor-deviant-cli`, `tesseract` (+ `slk` `ces`
+`eng` …), `recode_pdf`, and `jbig2enc`. Either install them natively, or run the
+batch inside the project Docker image, which bakes them all in
+(`docker compose -f deploy/docker-compose.yml`).
 
-Review `configs/pipeline.toml` — `[source]`, `[metadata].columns`, `[cover]`,
-and `[orchestration]` (set `max_parallel_books`/`ocr_jobs` to the VM's cores).
+## Go-live sequence
 
-## 3. Start the server + worker
+1. `validate-catalog` — confirm the Excel matches the real directories.
+2. Pilot one faculty: `run-source svf --limit 20`, then `stats`, and eyeball a
+   few PDFs/covers.
+3. Start the full run (`run-corpus`) under screen / systemd / Docker
+   ([deploy/README.md](../deploy/README.md)).
+4. Watch with `monitor`; offload `output/` periodically; re-run any time to
+   resume (finished books are skipped).
 
-```bash
-cd deploy
-docker compose -f docker-compose.prefect.yml up -d postgres prefect-server
-# build the toolchain image + start the worker (creates the work pool)
-docker compose -f docker-compose.prefect.yml up -d --build worker
-```
-
-The UI is at `http://<vm>:4200`. Verify the worker is healthy under
-**Work Pools → digitizer-pool**.
-
-## 4. Register deployments
-
-```bash
-docker compose -f docker-compose.prefect.yml exec worker \
-  python -m evilflowers_books_digitalizer serve      # applies deploy/prefect.yaml
-```
-
-## 5. Run
-
-From the UI (**Deployments → Run**) or the CLI inside the worker:
-
-```bash
-# one faculty
-docker compose ... exec worker prefect deployment run 'digitize-source/by-source' \
-  -p source_key=svf
-# whole corpus
-docker compose ... exec worker prefect deployment run 'digitize-corpus/full-corpus'
-```
-
-For a quick local smoke test (no deployment, temporary server):
-
-```bash
-python -m evilflowers_books_digitalizer run-source svf --limit 3
-```
-
-## 6. Alerts
-
-Configure a Prefect **Automation** (UI → Automations) so failures page you:
-
-- **Trigger**: Flow run enters state `Failed` or `Crashed` (scope it to
-  `digitize-source` / `digitize-corpus`).
-- **Action**: send to a Slack webhook or email block.
-
-A source flow is deliberately marked **Failed** only when at least
-`[orchestration].fail_on_error_ratio` of its books error (a *systematic*
-problem — missing binary, unreadable mount). A handful of bad books do not fail
-the run; they are listed in the per-source summary artifact and the JSONL report
-instead, so you don't get alert-spammed across an 880-book run.
-
-## Scaling out
-
-Add another worker (same or another VM) pointing `PREFECT_API_URL` at this
-server and serving `digitizer-pool`. Because each book is idempotent
-(skip-if-PDF-exists) and self-contained, multiple workers safely drain the same
-corpus run.
+See [operations.md](operations.md) for monitoring detail, disk handling, and the
+troubleshooting table.

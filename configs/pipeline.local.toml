@@ -1,0 +1,86 @@
+# Local experiment config — overrides for testing the whole stack on a laptop.
+#
+# Use it with:   --config configs/pipeline.local.toml   (CLI)
+#            or:  config_path="configs/pipeline.local.toml"  (flows / notebook 11)
+#
+# Differences from the production configs/pipeline.toml:
+#   * source backend = "webdav" (pull a few books over the VPN instead of a mount)
+#   * smaller paths / concurrency / disk guard suited to a laptop
+# Everything else (engine, scantailor, mrc, finalize, cover) inherits the same
+# defaults as production, so a local run exercises the real pipeline.
+
+[pipeline]
+engine = "scantailor_mrc"
+
+[paths]
+cache_dir = ".cache"
+output_dir = "output_local"
+
+[source]
+# WebDAV for local testing (needs credentials.toml + VPN). Switch to
+# "filesystem" + a local root if you manually stage books to disk instead.
+backend = "webdav"
+# Used only by the filesystem backend; harmless for webdav.
+root = ".cache/raw-scans"
+stage_mode = "symlink"
+
+[metadata]
+enabled = true
+excel_path = "configs/catalog.xlsx"   # absent -> books get stub titles (fine for a test)
+sheet = "katalog"
+key_field = "isbn"
+[metadata.columns]
+directory = "directory_id"
+title = "názov"
+subtitle = "podnázov"
+authors = "autori"
+year = "rok_vydania"
+publisher = "vydavateľ"
+isbn = "ISBN"
+faculty = "fakulta"
+language = "jazyk"
+[metadata.faculty_names]
+fad = "Fakulta architektúry a dizajnu STU"
+fei = "Fakulta elektrotechniky a informatiky STU"
+mtf = "Materiálovotechnologická fakulta STU"
+sjf = "Strojnícka fakulta STU"
+svf = "Stavebná fakulta STU"
+
+[cover]
+enabled = true
+source = "opac_then_generated"   # real OPAC cover by ISBN, else generated
+min_px = 80
+template = "banner"
+format = "JPEG"
+quality = 88
+
+[orchestration]
+max_parallel_books = 2
+ocr_jobs = 2
+min_free_gb = 5
+sources = ["svf", "sjf", "fad", "fei", "mtf"]
+
+# --- imaging settings inherited from production (kept identical) -------------
+
+[scantailor]
+binary = "scantailor-deviant-cli"
+color_mode = "mixed"
+margins_mm = 8.0
+dewarping = "auto"
+normalize_illumination = true
+despeckle = "cautious"
+dpi = 300
+output_dpi = 600
+
+[mrc]
+mask_compression = "jbig2"
+jpeg2000_encoder = "pillow"
+
+[ocr]
+language = "auto"
+
+[finalize]
+enabled = true
+bookmarks = true
+page_labels = true
+linearize = true

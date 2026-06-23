@@ -1,0 +1,35 @@
+# Run the batch in the toolchain container (scantailor-cli, tesseract, recode_pdf
+# are baked into the image). Copy .env.example -> .env and adjust paths.
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build digitizer   # start the run
+#   docker compose -f deploy/docker-compose.yml logs -f digitizer          # follow logs
+#   docker compose -f deploy/docker-compose.yml exec digitizer \
+#       python -m evilflowers_books_digitalizer monitor                    # TUI dashboard
+#
+# It's a plain long-running process — no database, no server.
+
+name: evilflowers-digitalizer
+
+services:
+  digitizer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: evilflowers-digitalizer:latest
+    command: python -m evilflowers_books_digitalizer run-corpus
+    environment:
+      # Catalog import API key (used by `publish-catalog`); blank disables it.
+      - EVILFLOWERS_API_KEY=${EVILFLOWERS_API_KEY:-}
+    volumes:
+      - ${RAW_SCANS_MOUNT:-/mnt/digital-library/raw-scans}:/mnt/digital-library/raw-scans:ro
+      - ../configs:/app/configs:ro
+      - ${OUTPUT_DIR:-../output}:/app/output
+      - ${CACHE_DIR:-../.cache}:/app/.cache
+    restart: on-failure
+
+  # One-shot catalog import: `docker compose run --rm publish`. Reuses the same
+  # image, config and output volume as the digitizer.
+  publish:
+    extends: digitizer
+    command: python -m evilflowers_books_digitalizer publish-catalog
+    restart: "no"

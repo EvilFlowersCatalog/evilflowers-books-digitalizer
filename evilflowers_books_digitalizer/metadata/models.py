@@ -22,6 +22,7 @@ class BookMetadata(BaseModel):
     isbn: str | None = None
     faculty: str | None = None
     language: str | None = None  # catalog hint (ISO), may override detection
+    catalog: str | None = None  # target EvilFlowers catalog override (id/url_name)
     matched: bool = True  # False -> stub (no catalog row found)
     extra: dict[str, str] = Field(default_factory=dict)
 

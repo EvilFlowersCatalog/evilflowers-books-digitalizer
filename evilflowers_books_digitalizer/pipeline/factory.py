@@ -31,6 +31,7 @@ from evilflowers_books_digitalizer.pipeline.steps import (
     OcrPdf,
     PreprocessScans,
     ScanTailorScans,
+    WriteCatalogManifest,
 )
 from evilflowers_books_digitalizer.sources.base import AbstractBookSource
 
@@ -80,6 +81,7 @@ def _append_metadata_and_cover(
     """
     meta_cfg = config.get("metadata", {})
     cover_cfg = config.get("cover", {})
+    catalog_cfg = config.get("catalog", {})
 
     if catalog is not None and meta_cfg.get("enabled", False):
         attach = AttachMetadata(catalog, faculty_map=meta_cfg.get("faculty_names"))
@@ -90,11 +92,28 @@ def _append_metadata_and_cover(
 
     if cover_cfg.get("enabled", False):
         renderer = CoverRenderer.from_config(cover_cfg)
+        cover = GenerateCover(
+            renderer,
+            source=cover_cfg.get("source", "opac_then_generated"),
+            min_px=cover_cfg.get("min_px", 80),
+        )
         # after enrich if present, else append
         enrich_idx = next(
             (i for i, s in enumerate(steps) if s.name == "enrich"), len(steps) - 1
         )
-        steps.insert(enrich_idx + 1, GenerateCover(renderer))
+        steps.insert(enrich_idx + 1, cover)
+
+    # Catalog manifest goes last — it needs the final PDF and the cover.
+    if catalog_cfg.get("enabled", False) and catalog_cfg.get("catalog"):
+        steps.append(
+            WriteCatalogManifest(
+                catalog_cfg["catalog"],
+                default_language=catalog_cfg.get("default_language", "slk"),
+                relation=catalog_cfg.get("relation", "open-access"),
+                entry_config=catalog_cfg.get("entry_config"),
+                author_name_order=catalog_cfg.get("author_name_order", "given_first"),
+            )
+        )
     return steps
 
 

@@ -5,11 +5,11 @@ after itself: the staged TIFFs (symlinks or copies), the preprocessed pages and
 the raw (pre-OCR) PDF are removed; only the final PDF, text sidecar and cover
 remain.
 
-Designed to run under ``concurrent.futures.ProcessPoolExecutor`` (notebook 05)
-or as a Prefect task (``orchestration.flows``) — OCRmyPDF / recode_pdf are not
-thread-safe, and separate processes also parallelize the imaging. Everything is
-constructed *inside* the worker from plain arguments, so nothing non-picklable
-crosses the process boundary.
+Designed to run under ``concurrent.futures.ProcessPoolExecutor`` (see
+``runner.py``) — OCRmyPDF / recode_pdf are not thread-safe, and separate
+processes also parallelize the imaging. Everything is constructed *inside* the
+worker from plain arguments, so nothing non-picklable crosses the process
+boundary.
 """
 
 from __future__ import annotations
@@ -37,17 +37,18 @@ def process_book(
     source_key: str,
     book_id: str,
     jobs: int | None = None,
-    min_free_gb: float = 40.0,
+    min_free_gb: float | None = None,
     disk_wait_minutes: float = 30.0,
     keep_cache: bool = False,
     config_path: str | None = None,
 ) -> dict:
     """Digitize one book; returns a plain-dict report row.
 
-    ``jobs`` caps OCR/recode internal parallelism — with N books in flight,
-    pass roughly ``cpu_count // N``. ``min_free_gb`` guards the disk: the worker
-    waits (up to ``disk_wait_minutes``) for other workers' cleanups to free
-    space before staging. ``config_path`` overrides ``configs/pipeline.toml``.
+    ``jobs`` caps OCR/recode internal parallelism (default: ``[orchestration]
+    ocr_jobs``). ``min_free_gb`` guards the disk (default: ``[orchestration]
+    min_free_gb``): the worker waits (up to ``disk_wait_minutes``) for other
+    workers' cleanups to free space before staging. ``config_path`` overrides
+    ``configs/pipeline.toml``.
     """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     for noisy in QUIET_LOGGERS:
@@ -59,6 +60,10 @@ def process_book(
     from evilflowers_books_digitalizer.runtime import build_catalog, load_runtime
 
     rt = load_runtime(config_path)
+    if jobs is None:
+        jobs = rt.orchestration.get("ocr_jobs")
+    if min_free_gb is None:
+        min_free_gb = rt.orchestration.get("min_free_gb", 40.0)
     cache = LocalCache(rt.cache_dir)
     row: dict = {"source": source_key, "book_id": book_id, "status": "ok"}
     started = time.perf_counter()
@@ -86,6 +91,7 @@ def process_book(
         pipeline = build_pipeline(source, cache, jobs=jobs, config=rt.config, catalog=catalog)
         ctx = pipeline.run(ctx)
         cover = ctx.artifacts.get("cover")
+        manifest = ctx.artifacts.get("manifest")
         row.update(
             pdf=str(ctx.artifacts["pdf"]),
             pdf_mb=ctx.artifacts["pdf"].stat().st_size / 1e6,
@@ -96,6 +102,7 @@ def process_book(
             title=ctx.metadata.get("title"),
             catalog_matched=ctx.metadata.get("catalog_matched"),
             cover=str(cover) if cover else None,
+            manifest=str(manifest) if manifest else None,
         )
     except Exception as exc:  # noqa: BLE001 — isolate per-book failures
         row.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500])

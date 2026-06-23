@@ -10,7 +10,7 @@
 [pipeline]
 engine = "scantailor_mrc"
 
-# --- production runtime (consumed by runtime.load_runtime / the CLI / Prefect) ---
+# --- production runtime (consumed by runtime.load_runtime / the CLI / runner) ---
 
 [paths]
 # Relative paths resolve against the project root. On the VM, point output_dir
@@ -35,21 +35,27 @@ svf = "svf/SVF-skeny"
 
 [metadata]
 # Excel catalog mapped to books by directory name (see metadata/catalog.py).
+# Generate a librarian-ready draft with notebook 10 / metadata.draft.
 enabled = true
 excel_path = "configs/catalog.xlsx"
-sheet = 0
-# Which canonical field is used to match the directory id (usually the ISBN).
+sheet = "katalog"
+# key_field is a secondary match (ISBN); the primary join is the exact
+# directory name via the `directory` column below (reliable for slug dirs too).
 key_field = "isbn"
-# Canonical field -> spreadsheet column header. Adjust to the real sheet;
-# missing columns are simply skipped.
+# Model field -> spreadsheet column header (must match metadata.draft.HEADERS).
 [metadata.columns]
-title = "title"
-authors = "authors"
-year = "year"
-publisher = "publisher"
-isbn = "isbn"
-faculty = "faculty"
-language = "language"
+directory = "directory_id"
+title = "názov"
+subtitle = "podnázov"
+authors = "autori"
+year = "rok_vydania"
+publisher = "vydavateľ"
+isbn = "ISBN"
+faculty = "fakulta"
+language = "jazyk"
+# Optional per-book override of the import target catalog (see [catalog]).
+# Blank cells fall back to [catalog].catalog — all faculties land in one catalog.
+catalog = "cieľový_katalog"
 # Source key -> human faculty name (used on covers and for unmatched stubs).
 [metadata.faculty_names]
 fad = "Fakulta architektúry a dizajnu STU"
@@ -61,22 +67,55 @@ svf = "Stavebná fakulta STU"
 [cover]
 # Standalone thumbnail per book (<slug>.cover.jpg); the PDF is left untouched.
 enabled = true
-template = "banner"          # "banner" | "minimal"
-format = "JPEG"             # "JPEG" | "PNG"
+# source: where the cover comes from —
+#   "opac_then_generated" (default): real obalkyknih/OPAC cover by ISBN (~70% of
+#       ISBN books), else a styled cover rendered from metadata;
+#   "opac": only real covers (no artifact when none); "generated": always styled.
+source = "opac_then_generated"
+min_px = 80                 # reject obalkyknih "no cover" placeholders below this
+template = "banner"          # generated-cover style: "banner" | "minimal"
+format = "JPEG"             # "JPEG" | "PNG" (generated covers)
 quality = 88
 # size = [1200, 1697]       # default ~ISO 1:√2 book proportion
 # Per-faculty palette overrides (hex); faculty key -> {bg, accent, text, ...}.
 # [cover.palette.fad]
 # accent = "#A8442A"
 
+[catalog]
+# Import digitized books into an EvilFlowers Catalog instance
+# (https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
+#
+# Each produced book gets a `<slug>.entry.json` manifest written next to its PDF
+# (catalog/mapping.py). `publish-catalog` then pushes manifests to the instance:
+# it creates an Entry (title/language/authors/ISBN + cover) and attaches the PDF
+# as an open-access acquisition. Re-runs are idempotent (duplicates -> skipped).
+enabled = false
+# REST API root of the catalog instance (no trailing slash).
+base_url = "https://elvira.digital/api/v1"
+# Target catalog for EVERY book — a catalog UUID or its `url_name` slug. A
+# per-book override is possible via the `catalog` column in catalog.xlsx.
+catalog = "stu-books"
+# Long-lived API key (a Bearer JWT from the catalog), read from this env var so
+# the secret never lives in the repo. See deploy/.env.example.
+api_key_env = "EVILFLOWERS_API_KEY"
+# Acquisition relation for the PDF: "open-access" | "acquisition" | "borrow".
+relation = "open-access"
+# Fallback language (alpha2/alpha3) when neither the catalog nor OCR set one.
+default_language = "slk"
+# Author string order in catalog.xlsx: "surname_first" (Slovak "Novák Ján") or
+# "given_first" ("Ján Novák"). The librarian draft uses surname-first.
+author_name_order = "surname_first"
+# Per-entry feature flags merged into the catalog's EntryConfig on create.
+[catalog.entry_config]
+evilflowers_ocr_enabled = false
+evilflowers_share_enabled = true
+
 [orchestration]
-# Prefect fan-out limits. max_parallel_books * ocr_jobs should be <= CPU cores.
+# Batch fan-out limits. max_parallel_books * ocr_jobs should be <= CPU cores.
 max_parallel_books = 4
 ocr_jobs = 2
 min_free_gb = 40
-# Mark a source-flow run Failed (-> alert) when this fraction of books error.
-fail_on_error_ratio = 0.5
-# Faculties to process (order matters for digitize_corpus); defaults to
+# Faculties to process (order matters for run-corpus); defaults to
 # [source.paths] keys when omitted.
 sources = ["svf", "sjf", "fad", "fei", "mtf"]
 

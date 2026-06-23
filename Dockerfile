@@ -7,9 +7,9 @@
 #   * archive-pdf-tools (recode_pdf), and the project package itself
 #   * DocRes (optional AI enhancement; CPU inference — slow, see pipeline.toml)
 #
-# This image is also the Prefect worker (see deploy/docker-compose.prefect.yml):
-# `pip install .` pulls in prefect + pandas + openpyxl and bundles the cover
-# fonts, so the worker can run the orchestration flows directly.
+# This image also runs the batch (see deploy/docker-compose.yml): `pip install .`
+# pulls in pandas/openpyxl/rich and bundles the cover fonts, so the container can
+# run `python -m evilflowers_books_digitalizer run-corpus` directly.
 #
 # Build:
 #   docker build -t evilflowers-digitalizer .

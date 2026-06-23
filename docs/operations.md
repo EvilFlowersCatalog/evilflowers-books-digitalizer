@@ -2,42 +2,45 @@
 
 ## Monitoring a run
 
-- **Prefect UI** (`:4200`): live flow/task graph, per-task logs and timings.
-- **Per-book artifact** (`book-<src>-<id>`): status, pages, MB, OCR chars,
-  language, catalog match, minutes — or the error.
-- **Per-source artifact** (`summary-<src>`): one table row per book + status
-  tally in the description.
-- **JSONL report**: `output/batch_report_<src>.jsonl`, one row per book (parity
-  with the notebook-05 batch report; survives UI retention).
+- **`monitor` TUI** — `python -m evilflowers_books_digitalizer monitor`: live
+  per-faculty progress bars, ok/skip/err, pages, output MB, pages/min, ETA.
+  Reads the report files, so run it from anywhere that sees `output_dir` (host,
+  `docker exec`, synced volume) — it doesn't touch the running batch.
+- **`stats`** — one-shot JSON summary (good for cron / a Slack post).
+- **Log** — console and `output/logs/digitizer.log` (timestamped), one line per
+  book completion.
+- **JSONL report** — `output/batch_report_<src>.jsonl`, one row per book
+  (re-runs append; `stats`/`monitor` dedup to the newest per book).
 
 ## Resuming
 
-Re-running a source or corpus flow is safe and cheap: `process_book` skips any
+Re-running `run-source`/`run-corpus` is safe and cheap: `process_book` skips any
 book whose final PDF already exists, so completed books return `skipped` quickly.
-Just trigger the same deployment again after an interruption.
+Just start the same command again after an interruption or reboot. Under systemd,
+`Restart=on-failure` does this automatically.
 
 ## Disk
 
 Low-storage mode is on by default: staged frames (symlinks), ScanTailor output
 and the pre-OCR PDF are deleted per book; only `<slug>.pdf`, `<slug>.txt` and
 `<slug>.cover.jpg` remain. A worker waits (up to `disk_wait_minutes`) for space
-when free disk drops below `[orchestration].min_free_gb`, then errors if it never
-recovers. Offload `output/` to durable storage periodically (the whole corpus is
-~65–70 GB of PDFs).
+when free disk drops below `[orchestration].min_free_gb`, then records an error
+for that book if it never recovers. Offload `output/` to durable storage
+periodically (the whole corpus is ~65–70 GB of PDFs).
 
 ## Concurrency tuning
 
 `max_parallel_books * ocr_jobs ≤ CPU cores`. Start conservative (e.g. 4 × 2 on an
-8-core VM) and watch CPU/disk in the UI. `max_parallel_books` is read at flow
-import, so change it in `configs/pipeline.toml` and restart the worker.
+8-core VM) and watch CPU/disk via `monitor` + `top`. Change it in
+`configs/pipeline.toml` and restart the run (it resumes).
 
 ## Common issues
 
 | Symptom | Likely cause / fix |
 |---|---|
-| Source flow Failed, most books errored | Systematic problem — `scantailor-deviant-cli` / `recode_pdf` / tesseract missing in the worker image, or the mount unreadable. Check a per-book artifact's error. |
+| Most books error | Systematic problem — `scantailor-deviant-cli` / `recode_pdf` / `tesseract` missing, or the mount unreadable. Check `output/logs/digitizer.log` or a report row's `error`. |
 | All titles are de-slugged directory names | Catalog didn't match — run `validate-catalog`, check `[metadata].columns` and `key_field`. |
-| Covers missing for some books | Cover errors are non-fatal (logged). Check the book's task log; usually a font/metadata edge case. |
+| Covers all generated (no real ones) | OPAC/obalkyknih unreachable from the VM, or `[cover].source` set to `generated`. Cover errors are non-fatal. |
 | `low disk` errors | Free space below `min_free_gb`; offload `output/` or raise disk. |
 
 ## Catalog & cover iteration

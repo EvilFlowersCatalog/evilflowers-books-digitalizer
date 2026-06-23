@@ -10,25 +10,27 @@ richer classification for a graph database.
 ## Architecture
 
 The scans are **two-page spreads on a black scanner bed** (uncompressed RGB
-TIFF @ 300 DPI, ~24 MB/frame). Two engines exist, selected by
-`[pipeline] engine` in `configs/pipeline.toml`:
+TIFF @ 300 DPI, ~24 MB/frame). Frames are read by a pluggable **source** (a
+local mount in production, WebDAV in dev — `[source]` in `configs/pipeline.toml`).
+Two engines exist, selected by `[pipeline] engine`:
 
 **`scantailor_mrc`** (production default since 2026-06-07, prototyped in
 notebook 06 — uniform page sizes with real margins, no bleed-through, ~5×
 smaller PDFs):
 
 ```
-WebDAV (TIFF frames per book)                                          output/<source>/
+source (TIFF frames per book)                          output/<source>/<slug>.{pdf,txt,cover.jpg}
         │                                                                    ▲
         ▼                                                                    │
-  DownloadBook ─► ScanTailorScans ──► [DocResEnhance] ─► DetectLanguage ─► MrcPdf ─► EnrichPdfMetadata
-  (local cache)   (split at gutter,    (optional AI       (quick OCR +     (Tesseract -> hOCR;
-                   scantailor-cli:      appearance pass,    langdetect)     recode_pdf: JBIG2 text
-                   content detection,   keeps stamp/photo                   mask over JPEG2000
-                   deskew, dewarp,      tones; ~2 min/page)                 layers — MRC PDF
-                   illumination,                                            + text sidecar)
-                   margins, uniform
-                   page size)
+  DownloadBook ─► ScanTailorScans ─► [DocResEnhance] ─► DetectLanguage ─► MrcPdf
+  (stage to       (split at gutter,   (optional AI        (quick OCR +     (Tesseract -> hOCR;
+   local cache)    scantailor-cli:     appearance pass)    langdetect)      recode_pdf MRC PDF
+                   deskew, dewarp,                                          + text sidecar)
+                   margins, uniform)                                              │
+                                                                                  ▼
+                              AttachMetadata ─► EnrichPdfMetadata ─► GenerateCover ─► FinalizePdf
+                              (Excel catalog,    (XMP: title,         (stylish cover    (bookmarks,
+                               dir-name keyed)    authors, year)       thumbnail)        page labels)
 ```
 
 **`legacy`** (OpenCV preprocess → img2pdf → OCRmyPDF):
@@ -87,31 +89,35 @@ DocRes on the host (Apple Silicon MPS — much faster than the container's CPU) 
 `~/.local/share/evilflowers-tools/` (DocRes repo + its venv + weights); paths are set
 in `[docres]` in `pipeline.toml`.
 
-## Production (local mount + Prefect)
+## Production (local mount, plain runner)
 
 For unattended multi-TB runs on a VM, the scans are a **local mount**
 (`/mnt/digital-library/raw-scans`), books are enriched from an **Excel catalog**,
-each gets a generated **cover thumbnail**, and **Prefect** (self-hosted)
-orchestrates and monitors the batch. Configure it all in `configs/pipeline.toml`
-(`[paths]`, `[source]`, `[metadata]`, `[cover]`, `[orchestration]`).
+and each gets a **cover thumbnail** (real OPAC cover by ISBN, else generated).
+The batch is a single long-running process — **no orchestrator, server, or
+database**. Configure everything in `configs/pipeline.toml` (`[paths]`,
+`[source]`, `[metadata]`, `[cover]`, `[orchestration]`).
 
 ```bash
 # operator CLI (python -m evilflowers_books_digitalizer <command>)
 … list svf                       # books on a source
 … validate-catalog               # Excel match/miss report across sources
 … preview-cover svf <book_id>    # render one cover to iterate on style
-… run-book svf <book_id>         # one book, end to end (no Prefect)
-… run-source svf --limit 3       # a faculty via Prefect (local temp server)
-… run-corpus                     # the whole corpus via Prefect
+… run-book svf <book_id>         # one book, end to end
+… run-source svf --limit 3       # a faculty (process pool)
+… run-corpus                     # the whole corpus
+… monitor                        # live TUI dashboard (progress, throughput, ETA)
+… stats                          # one-shot summary
 ```
 
-Self-hosted Prefect (server + UI + worker) ships in `deploy/`
-(`docker-compose.prefect.yml`, `prefect.yaml`). See:
+Run it under screen / systemd / Docker — see `deploy/` and:
 
+- [docs/testing.md](docs/testing.md) — **end-to-end testing & go-live runbook** (start here)
 - [docs/architecture.md](docs/architecture.md) — components and data flow
-- [docs/deployment.md](docs/deployment.md) — Prefect stack + alerts runbook
+- [docs/deployment.md](docs/deployment.md) — production config + go-live
+- [deploy/README.md](deploy/README.md) — run (screen/systemd/Docker) + monitoring
 - [docs/operations.md](docs/operations.md) — monitoring, resume, disk, tuning
-- [docs/metadata_and_covers.md](docs/metadata_and_covers.md) — Excel mapping + cover templates
+- [docs/metadata_and_covers.md](docs/metadata_and_covers.md) — Excel mapping + cover sourcing
 
 The empirical basis for the engine choice is in
 [docs/digitalization_pipeline_report.md](docs/digitalization_pipeline_report.md).
@@ -130,6 +136,10 @@ Experimentation happens in notebooks first; the module holds the reusable parts.
 | `notebooks/06_scantailor_mrc_lab.ipynb`    | ScanTailor + MRC engine lab: run one cached book through the new engine, eyeball pages, compare against legacy output                                                                        |
 | `notebooks/07_fonts_tables_diagrams.ipynb` | Variant comparison (mixed@300/600, grayscale, DocRes): font quality at 3× zoom, table/diagram survival checks, corpus inventory of figure-heavy books                                        |
 | `notebooks/08_perfect_quality_lab.ipynb`   | Max-quality experiments: Sauvola/Wolf supersampled masks, facsimile-grade MRC profile (V5), potrace vector-glyph demo, prioritized roadmap (PERO-OCR, UVDoc, NAF-DPM, neural SR, smoothscan) |
+| `notebooks/09_finalizer_pero_pilot.ipynb`  | Finalizer + PERO/UVDoc/NAF-DPM pilots and the V2–V5 decision (see the report)                                                                                                                |
+| `notebooks/10_metadata_catalog_draft.ipynb`| **Draft the librarian metadata Excel** — one pre-filled row per book (directory_id, faculty, derived ISBN, guessed title), styled with an instructions sheet                                  |
+| `notebooks/11_local_e2e_experiment.ipynb`  | **Local end-to-end test** on a few small books via `configs/pipeline.local.toml` (WebDAV source); inspect report, covers, rendered pages                                                       |
+| `notebooks/12_stats_and_results.ipynb`     | **Stats & results dashboard** — corpus inventory, catalogue/enrichment coverage, cover sourcing, batch results (sizes, throughput), sample outputs                                            |
 
 > Heads-up: Ghostscript ≥ 10.6 has a known JPEG-encoding bug affecting PDF/A
 > conversion; OCRmyPDF mitigates it, but visually check outputs (notebook 03,
@@ -171,14 +181,16 @@ evilflowers_books_digitalizer/
 ├── sources/              AbstractBookSource + filesystem (mount) / webdav backends
 ├── metadata/             Excel catalog matched to books by directory name
 ├── covers/               PIL cover renderer, templates, palettes, bundled fonts
-├── orchestration/        Prefect flows: digitize_book / _source / _corpus
+├── runner.py             run_source / run_corpus — process-pool batch (no orchestrator)
+├── reporting.py          summarize the JSONL reports (powers stats)
+├── monitor.py            live rich TUI dashboard
 └── pipeline/
     ├── base.py           BookContext, PipelineStep, Pipeline
     ├── factory.py        build_pipeline (engine + metadata/cover tail)
     └── steps/            download, scantailor, mrc, metadata, enrich, cover, finalize, …
 configs/pipeline.toml     production config (source, metadata, cover, orchestration)
 configs/catalog.xlsx      bibliographic metadata (you provide)
-deploy/                   self-hosted Prefect stack (compose, prefect.yaml, runbook)
+deploy/                   run the batch: systemd unit, docker-compose, runbook
 docs/                     architecture, deployment, operations, metadata & covers
 notebooks/                exploration & experimentation
 credentials.toml          WebDAV secrets (gitignored; not needed for the mount backend)

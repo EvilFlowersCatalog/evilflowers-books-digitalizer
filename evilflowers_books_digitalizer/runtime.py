@@ -1,9 +1,9 @@
 """Runtime configuration resolved from ``configs/pipeline.toml``.
 
-This is the single entry point the batch worker, CLI and Prefect flows use to
-turn the TOML config into ready-to-use objects: resolved cache/output dirs, the
-selected source backend, and the (cached) metadata catalog. Paths in the TOML
-are resolved relative to the project root.
+This is the single entry point the batch worker, runner and CLI use to turn the
+TOML config into ready-to-use objects: resolved cache/output dirs, the selected
+source backend, and the (cached) metadata catalog. Paths in the TOML are
+resolved relative to the project root.
 
 Unlike :func:`config.load_settings` (which needs ``credentials.toml`` for the
 WebDAV backend), this loader works credential-free for the production
@@ -56,6 +56,11 @@ class RuntimeConfig:
     @property
     def orchestration(self) -> dict[str, Any]:
         return self.config.get("orchestration", {})
+
+    @property
+    def catalog(self) -> dict[str, Any]:
+        """The ``[catalog]`` block — EvilFlowers Catalog import settings."""
+        return self.config.get("catalog", {})
 
     @property
     def source_keys(self) -> list[str]:

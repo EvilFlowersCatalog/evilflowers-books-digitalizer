@@ -25,10 +25,18 @@ from evilflowers_books_digitalizer.metadata.models import BookMetadata
 logger = logging.getLogger(__name__)
 
 #: Canonical fields a column can map to (everything except book_id/matched/extra).
-KNOWN_FIELDS = {"title", "subtitle", "authors", "year", "publisher", "isbn", "faculty", "language"}
+KNOWN_FIELDS = {
+    "title", "subtitle", "authors", "year", "publisher", "isbn", "faculty", "language", "catalog",
+}
+
+#: Special column that holds the exact book directory name — the most reliable
+#: join key (176/880 books have title-slug dirs with no ISBN). When mapped, it
+#: sets the record's ``book_id`` so lookup matches on the directory exactly.
+JOIN_FIELD = "directory"
 
 #: Default column mapping (override per-sheet in [metadata.columns]).
 DEFAULT_COLUMNS = {
+    "directory": "directory_id",
     "title": "title",
     "authors": "authors",
     "year": "year",
@@ -95,7 +103,7 @@ class MetadataCatalog:
         import pandas as pd
 
         columns = columns or DEFAULT_COLUMNS
-        unknown = set(columns) - KNOWN_FIELDS
+        unknown = set(columns) - KNOWN_FIELDS - {JOIN_FIELD}
         if unknown:
             raise ValueError(f"[metadata.columns] has unknown fields: {sorted(unknown)}")
 
@@ -120,19 +128,29 @@ class MetadataCatalog:
         def cell(field: str) -> Any:
             return _clean(row[present[field]]) if field in present else None
 
+        directory = cell(JOIN_FIELD)
         title = cell("title")
         isbn = cell("isbn")
-        if not title and not isbn:
+        if not directory and not title and not isbn:
             return None  # blank row
+        # book_id is the join key: prefer the exact directory name when present
+        book_id = str(directory) if directory else str(isbn or title)
+        if title:
+            resolved_title = str(title)
+        elif directory:
+            resolved_title = deslug(book_id)  # row exists but title not filled yet
+        else:
+            resolved_title = str(isbn) if isbn else "Untitled"
         return BookMetadata(
-            book_id=str(isbn or title),
-            title=str(title) if title else (str(isbn) if isbn else "Untitled"),
+            book_id=book_id,
+            title=resolved_title,
             authors=_split_authors(cell("authors")),
             year=_coerce_year(cell("year")),
             publisher=_str_or_none(cell("publisher")),
             isbn=_str_or_none(isbn),
             faculty=_str_or_none(cell("faculty")),
             language=_str_or_none(cell("language")),
+            catalog=_str_or_none(cell("catalog")),
             matched=True,
         )
 
