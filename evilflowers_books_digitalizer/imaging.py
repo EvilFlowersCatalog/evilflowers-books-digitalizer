@@ -10,8 +10,9 @@ before OCR:
 4. deskew each page using the paper edge angle
 
 All functions work on OpenCV BGR/grayscale ``numpy`` arrays so they can be
-tuned interactively in notebooks; :class:`...steps.preprocess.PreprocessScans`
-wraps them for pipeline use.
+tuned interactively in notebooks; the ScanTailor step
+(:class:`~evilflowers_books_digitalizer.pipeline.steps.scantailor.ScanTailorScans`)
+uses ``analyze_spread`` to pre-split spreads at the gutter.
 """
 
 from __future__ import annotations
@@ -363,7 +364,7 @@ def is_color_page(img: np.ndarray, saturation_threshold: int = 60, ratio: float 
     """
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     saturated = np.count_nonzero(hsv[:, :, 1] > saturation_threshold)
-    return saturated / hsv[:, :, 1].size > ratio
+    return bool(saturated / hsv[:, :, 1].size > ratio)
 
 
 def to_grayscale(img: np.ndarray) -> np.ndarray:

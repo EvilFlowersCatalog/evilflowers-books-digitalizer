@@ -1,11 +1,9 @@
 """ScanTailor step: raw scanner frames -> clean, uniform single-page TIFFs.
 
-Replaces most of the homegrown OpenCV preprocessing (notebook 06 prototype,
-2026-06-07): ScanTailor's content detection reliably removes facing-page
-slivers and binding shadows, ``--normalize-illumination`` flattens gray
-backgrounds, and the page-layout stage gives every page of a book identical
-physical size with real margins — the main quality gaps of the legacy
-:class:`~.preprocess.PreprocessScans` step.
+ScanTailor's content detection reliably removes facing-page slivers and binding
+shadows, ``--normalize-illumination`` flattens gray backgrounds, and the
+page-layout stage gives every page of a book identical physical size with real
+margins. Spread pre-splitting still uses our own ``imaging.analyze_spread``.
 
 Spread splitting stays in our code (``imaging.analyze_spread``): the
 ``scantailor-deviant-cli`` single-pass batch mode detects the gutter
@@ -80,12 +78,23 @@ class ScanTailorScans(PipelineStep):
         return path
 
     def _split_frames(self, ctx: BookContext) -> tuple[list, int]:
-        """Pre-split spreads at the detected gutter (see module docstring)."""
+        """Pre-split spreads at the detected gutter (see module docstring).
+
+        Unreadable frames (truncated/corrupt scans — there are some in the
+        corpus) are skipped with a warning rather than aborting the whole book;
+        the dropped frame names are recorded in ``metadata['skipped_frames']``.
+        """
         halves_dir = ctx.work_dir / "halves"
         halves_dir.mkdir(parents=True, exist_ok=True)
         outputs, n_spreads = [], 0
+        skipped: list[str] = []
         for frame_path in sorted(ctx.tiffs):
-            frame = load_bgr(frame_path)
+            try:
+                frame = load_bgr(frame_path)
+            except ValueError:
+                logger.warning("%s: skipping unreadable frame %s", ctx.slug, frame_path.name)
+                skipped.append(frame_path.name)
+                continue
             if self.split:
                 layout = analyze_spread(frame)
                 if layout.is_spread:
@@ -100,6 +109,12 @@ class ScanTailorScans(PipelineStep):
                 out = halves_dir / f"{frame_path.stem}_{side}.tif"
                 cv2.imwrite(str(out), half)
                 outputs.append(out)
+        if skipped:
+            ctx.metadata["skipped_frames"] = skipped
+        if not outputs:
+            raise ValueError(
+                f"no readable frames for {ctx.slug} — all {len(ctx.tiffs)} were unreadable"
+            )
         return outputs, n_spreads
 
     def run(self, ctx: BookContext) -> BookContext:

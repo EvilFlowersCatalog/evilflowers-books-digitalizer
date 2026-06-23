@@ -46,7 +46,7 @@ class CoverRenderer:
         size = cfg.get("size")
         return cls(
             template=cfg.get("template", "banner"),
-            size=tuple(size) if size else DEFAULT_SIZE,  # type: ignore[arg-type]
+            size=tuple(size) if size else DEFAULT_SIZE,
             fmt=cfg.get("format", "JPEG"),
             quality=cfg.get("quality", 88),
             fonts=cfg.get("fonts"),

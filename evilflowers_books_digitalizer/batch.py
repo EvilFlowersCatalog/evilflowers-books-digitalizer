@@ -28,9 +28,14 @@ def free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1e9
 
 
-def expected_pdf(output_dir: Path, source_key: str, book_id: str) -> Path:
-    """Final PDF location for a book (mirrors ``BookContext.slug``)."""
-    return output_dir / source_key / f"{source_key}_{book_id}.pdf"
+def expected_pdf(output_dir: Path, source_key: str, book_id: str, layout: str = "flat") -> Path:
+    """Distribution PDF location for a book (mirrors the render layout).
+
+    Used as the resume sentinel: its presence means the book finished.
+    """
+    from evilflowers_books_digitalizer.pipeline.layout import distribution_pdf
+
+    return distribution_pdf(output_dir, source_key, f"{source_key}_{book_id}", layout)  # type: ignore[arg-type]
 
 
 def process_book(
@@ -66,10 +71,11 @@ def process_book(
     if min_free_gb is None:
         min_free_gb = rt.orchestration.get("min_free_gb", 40.0)
     cache = LocalCache(rt.cache_dir)
+    layout = rt.config.get("render", {}).get("layout", "flat")
     row: dict = {"source": source_key, "book_id": book_id, "status": "ok"}
     started = time.perf_counter()
 
-    pdf = expected_pdf(rt.output_dir, source_key, book_id)
+    pdf = expected_pdf(rt.output_dir, source_key, book_id, layout)
     if pdf.exists():
         return {**row, "status": "skipped", "pdf": str(pdf), "pdf_mb": pdf.stat().st_size / 1e6}
 
@@ -85,11 +91,13 @@ def process_book(
         logger.warning("%s_%s: waiting for disk space", source_key, book_id)
         time.sleep(30)
 
+    from evilflowers_books_digitalizer.pipeline.layout import book_dir as _book_dir
+
     ctx = BookContext(
         source=source_key,
         book_id=book_id,
         work_dir=cache.book_dir(source_key, book_id),
-        output_dir=rt.output_dir / source_key,
+        output_dir=_book_dir(rt.output_dir, source_key, layout),
     )
     try:
         source = build_source(rt.source, source_key)
@@ -100,10 +108,12 @@ def process_book(
         cover = ctx.artifacts.get("cover")
         manifest = ctx.artifacts.get("manifest")
         row.update(
-            pdf=str(ctx.artifacts["pdf"]),
+            pdf=str(ctx.artifacts["pdf"]),  # default open target (distribution)
             pdf_mb=ctx.artifacts["pdf"].stat().st_size / 1e6,
+            outputs=ctx.metadata.get("outputs"),  # per-profile {path, mb, pdfa, ...}
             n_frames=ctx.metadata.get("n_frames"),
             n_pages=ctx.metadata.get("n_pages"),
+            skipped_frames=ctx.metadata.get("skipped_frames"),
             language=ctx.metadata.get("ocr_language"),
             ocr_chars=ctx.metadata.get("n_text_chars"),
             title=ctx.metadata.get("title"),
@@ -115,12 +125,10 @@ def process_book(
         row.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500])
     finally:
         progress.finish()
-        # low-storage mode: drop everything except the final PDF + sidecar + cover
+        # low-storage mode: drop the staged scans + ScanTailor work dir; the
+        # rendered PDFs + sidecar + cover in output_dir are all that's kept.
         if not keep_cache:
             shutil.rmtree(cache.book_dir(source_key, book_id), ignore_errors=True)
-        raw_pdf = ctx.artifacts.get("raw_pdf")
-        if raw_pdf is not None:
-            Path(raw_pdf).unlink(missing_ok=True)
 
     row["minutes"] = round((time.perf_counter() - started) / 60, 2)
     return row

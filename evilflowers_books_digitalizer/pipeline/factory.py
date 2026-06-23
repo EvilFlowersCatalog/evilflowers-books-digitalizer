@@ -1,8 +1,15 @@
-"""Build the production pipeline from ``configs/pipeline.toml``.
+"""Build the digitalization pipeline from ``configs/pipeline.toml``.
 
 The TOML config is the contract between the experimentation notebooks (which
-write it, see notebook 03) and batch processing (which consumes it) — settings
-changes don't require code changes.
+write it) and batch processing (which consumes it) — tuning the pipeline does
+not require code changes.
+
+One engine: **ScanTailor → (DocRes) → Tesseract hOCR → MRC render → enrich →
+(metadata/cover) → finalize → PDF/A → (catalog manifest)**. The render step
+emits one PDF per profile (distribution + archival); see
+:mod:`~evilflowers_books_digitalizer.pipeline.profiles`. The legacy OpenCV +
+OCRmyPDF engine was removed — it had been frozen out of production since the
+ScanTailor engine landed.
 """
 
 from __future__ import annotations
@@ -18,18 +25,18 @@ from evilflowers_books_digitalizer.config import PROJECT_ROOT
 from evilflowers_books_digitalizer.covers.renderer import CoverRenderer
 from evilflowers_books_digitalizer.metadata.catalog import MetadataCatalog
 from evilflowers_books_digitalizer.pipeline.base import Pipeline, PipelineStep
+from evilflowers_books_digitalizer.pipeline.profiles import profiles_from_config
 from evilflowers_books_digitalizer.pipeline.steps import (
-    AssemblePdf,
     AttachMetadata,
     DetectLanguage,
     DocResEnhance,
     DownloadBook,
     EnrichPdfMetadata,
+    EnsurePdfA,
     FinalizePdf,
     GenerateCover,
-    MrcPdf,
-    OcrPdf,
-    PreprocessScans,
+    OcrPages,
+    RenderPdf,
     ScanTailorScans,
     WriteCatalogManifest,
 )
@@ -60,50 +67,69 @@ def build_pipeline(
         with path.open("rb") as fh:
             config = tomllib.load(fh)
 
-    engine = config.get("pipeline", {}).get("engine", "legacy")
-    if engine == "scantailor_mrc":
-        steps = _build_scantailor_mrc(source, cache, config)
-    elif engine == "legacy":
-        steps = _build_legacy(source, cache, config, jobs)
-    else:
-        raise ValueError(f"unknown pipeline engine: {engine!r}")
-
-    steps = _append_metadata_and_cover(steps, config, catalog)
-    return Pipeline(steps)
-
-
-def _append_metadata_and_cover(
-    steps: list[PipelineStep], config: dict, catalog: MetadataCatalog | None
-) -> list[PipelineStep]:
-    """Insert AttachMetadata (before enrich) and GenerateCover (after enrich).
-
-    Keeps the engine builders focused on imaging; the enrichment tail is shared.
-    """
+    st = config.get("scantailor", {})
+    docres = config.get("docres", {})
     meta_cfg = config.get("metadata", {})
     cover_cfg = config.get("cover", {})
+    finalize_cfg = config.get("finalize", {})
+    render_cfg = config.get("render", {})
     catalog_cfg = config.get("catalog", {})
+    output_dpi = st.get("output_dpi") or st.get("dpi", 300)
+    language = config.get("ocr", {}).get("language", "auto")
 
+    steps: list[PipelineStep] = [DownloadBook(source, cache)]
+
+    # Metadata is attached *before* rendering so RenderPdf can bake title/authors
+    # into each PDF's XMP — that keeps the archival PDF/A valid (rewriting XMP
+    # with pikepdf afterwards breaks conformance).
     if catalog is not None and meta_cfg.get("enabled", False):
-        attach = AttachMetadata(catalog, faculty_map=meta_cfg.get("faculty_names"))
-        enrich_idx = next(
-            (i for i, s in enumerate(steps) if s.name == "enrich"), len(steps)
+        steps.append(AttachMetadata(catalog, faculty_map=meta_cfg.get("faculty_names")))
+
+    steps.append(
+        ScanTailorScans(
+            binary=st.get("binary", "scantailor-deviant-cli"),
+            color_mode=st.get("color_mode", "mixed"),
+            margins_mm=st.get("margins_mm", 8.0),
+            dewarping=st.get("dewarping", "auto"),
+            normalize_illumination=st.get("normalize_illumination", True),
+            despeckle=st.get("despeckle", "cautious"),
+            dpi=st.get("dpi", 300),
+            output_dpi=st.get("output_dpi"),
         )
-        steps.insert(enrich_idx, attach)
+    )
+    if docres.get("enabled", False):
+        steps.append(_build_docres(docres))
+    if language == "auto":
+        steps.append(DetectLanguage())
+    steps.append(OcrPages(language=None if language == "auto" else language, dpi=output_dpi))
+    steps.append(
+        RenderPdf(
+            profiles=profiles_from_config(config),
+            dpi=output_dpi,
+            layout=render_cfg.get("layout", "flat"),
+        )
+    )
+    steps.append(EnrichPdfMetadata())
 
     if cover_cfg.get("enabled", False):
         renderer = CoverRenderer.from_config(cover_cfg)
-        cover = GenerateCover(
-            renderer,
-            source=cover_cfg.get("source", "opac_then_generated"),
-            min_px=cover_cfg.get("min_px", 80),
+        steps.append(
+            GenerateCover(
+                renderer,
+                source=cover_cfg.get("source", "opac_then_generated"),
+                min_px=cover_cfg.get("min_px", 80),
+            )
         )
-        # after enrich if present, else append
-        enrich_idx = next(
-            (i for i, s in enumerate(steps) if s.name == "enrich"), len(steps) - 1
+    if finalize_cfg.get("enabled", True):
+        steps.append(
+            FinalizePdf(
+                bookmarks=finalize_cfg.get("bookmarks", True),
+                page_labels=finalize_cfg.get("page_labels", True),
+                linearize=finalize_cfg.get("linearize", True),
+            )
         )
-        steps.insert(enrich_idx + 1, cover)
+    steps.append(EnsurePdfA(validate=render_cfg.get("validate_pdfa", False)))
 
-    # Catalog manifest goes last — it needs the final PDF and the cover.
     if catalog_cfg.get("enabled", False) and catalog_cfg.get("catalog"):
         steps.append(
             WriteCatalogManifest(
@@ -114,98 +140,22 @@ def _append_metadata_and_cover(
                 author_name_order=catalog_cfg.get("author_name_order", "given_first"),
             )
         )
-    return steps
+    return Pipeline(steps)
 
 
-def _build_legacy(
-    source: AbstractBookSource, cache: LocalCache, config: dict, jobs: int | None
-) -> list[PipelineStep]:
-    """OpenCV preprocess -> img2pdf -> OCRmyPDF (the original pipeline)."""
-    preprocess = config.get("preprocess", {})
-    # OCRmyPDF knobs live in [legacy_ocr]; the OCR language is shared in [ocr]
-    ocr = dict(config.get("legacy_ocr", {}))
-    ocr["language"] = config.get("ocr", {}).get("language", "auto")
-
-    steps: list[PipelineStep] = [
-        DownloadBook(source, cache),
-        PreprocessScans(
-            split=preprocess.get("split", True),
-            do_deskew=preprocess.get("deskew", True),
-            whiten=preprocess.get("whiten", True),
-            color_mode=preprocess.get("color_mode", "keep"),
+def _build_docres(docres: dict[str, Any]) -> DocResEnhance:
+    """DocRes appearance enhancer, with env overrides for the Docker image."""
+    return DocResEnhance(
+        repo=docres.get(
+            "repo",
+            os.environ.get("EVILFLOWERS_DOCRES_REPO", "~/.local/share/evilflowers-tools/DocRes"),
         ),
-    ]
-    # language = "auto" -> detect per book; otherwise pass the value through
-    if ocr.get("language") == "auto":
-        ocr["language"] = None
-        steps.append(DetectLanguage())
-    steps += [AssemblePdf(), OcrPdf(jobs=jobs, **ocr), EnrichPdfMetadata()]
-    return steps
-
-
-def _build_scantailor_mrc(
-    source: AbstractBookSource, cache: LocalCache, config: dict
-) -> list[PipelineStep]:
-    """ScanTailor cleanup [-> DocRes] -> Tesseract hOCR -> MRC PDF (notebook 06)."""
-    st = config.get("scantailor", {})
-    docres = config.get("docres", {})
-    mrc = dict(config.get("mrc", {}))
-    finalize = config.get("finalize", {})
-    language = config.get("ocr", {}).get("language", "auto")
-
-    steps: list[PipelineStep] = [
-        DownloadBook(source, cache),
-        ScanTailorScans(
-            binary=st.get("binary", "scantailor-deviant-cli"),
-            color_mode=st.get("color_mode", "mixed"),
-            margins_mm=st.get("margins_mm", 8.0),
-            dewarping=st.get("dewarping", "auto"),
-            normalize_illumination=st.get("normalize_illumination", True),
-            despeckle=st.get("despeckle", "cautious"),
-            dpi=st.get("dpi", 300),
-            output_dpi=st.get("output_dpi"),
+        python=docres.get(
+            "python",
+            os.environ.get(
+                "EVILFLOWERS_DOCRES_PYTHON",
+                "~/.local/share/evilflowers-tools/venv-docres/bin/python",
+            ),
         ),
-    ]
-    if docres.get("enabled", False):
-        # env overrides let the Docker image point at its baked-in DocRes
-        steps.append(
-            DocResEnhance(
-                repo=docres.get(
-                    "repo",
-                    os.environ.get(
-                        "EVILFLOWERS_DOCRES_REPO", "~/.local/share/evilflowers-tools/DocRes"
-                    ),
-                ),
-                python=docres.get(
-                    "python",
-                    os.environ.get(
-                        "EVILFLOWERS_DOCRES_PYTHON",
-                        "~/.local/share/evilflowers-tools/venv-docres/bin/python",
-                    ),
-                ),
-                task=docres.get("task", "appearance"),
-            )
-        )
-    if language == "auto":
-        language = None
-        steps.append(DetectLanguage())
-    steps += [
-        MrcPdf(
-            language=language,
-            # pages carry ScanTailor's output dpi (mask/page geometry must match)
-            dpi=st.get("output_dpi") or st.get("dpi", 300),
-            mask_compression=mrc.get("mask_compression", "jbig2"),
-            jpeg2000_encoder=mrc.get("jpeg2000_encoder", "pillow"),
-            bg_downsample=mrc.get("bg_downsample"),
-        ),
-        EnrichPdfMetadata(),
-    ]
-    if finalize.get("enabled", True):
-        steps.append(
-            FinalizePdf(
-                bookmarks=finalize.get("bookmarks", True),
-                page_labels=finalize.get("page_labels", True),
-                linearize=finalize.get("linearize", True),
-            )
-        )
-    return steps
+        task=docres.get("task", "appearance"),
+    )

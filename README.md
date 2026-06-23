@@ -1,9 +1,10 @@
 # EvilFlowers Books Digitalizer
 
-Digitalization pipeline for scanned books: TIFF scans → searchable **PDF/A**
-(Slovak OCR), enriched with metadata and covers, then imported into the
+Digitalization pipeline for scanned books: TIFF scans → **two PDFs per book** —
+a fast **distribution** copy and a **PDF/A-2b archival** master — with Slovak
+OCR, metadata and covers, then imported into the
 [EvilFlowers Catalog](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
-Built entirely on OSS tooling (Tesseract, OCRmyPDF, ScanTailor, img2pdf, pikepdf,
+Built entirely on OSS tooling (Tesseract, ScanTailor, archive-pdf-tools, pikepdf,
 webdav4).
 
 Planned follow-ups on the same pipeline: embeddings for a vector database and
@@ -13,49 +14,64 @@ richer classification for a graph database.
 
 Scans are **two-page spreads on a black scanner bed** (uncompressed RGB TIFF @ 300
 DPI, ~24 MB/frame). Frames are read by a pluggable **source** (a local mount in
-production, WebDAV in dev — `[source]` in `configs/pipeline.toml`). Two engines
-exist, selected by `[pipeline] engine`:
-
-**`scantailor_mrc`** (production default — uniform page sizes with real margins,
-no bleed-through, ~5× smaller PDFs):
+production, WebDAV in dev — `[source]` in `configs/pipeline.toml`). One OCR pass
+feeds a profile-driven renderer that emits **one PDF per output profile**:
 
 ```
-source (TIFF frames per book)                          output/<source>/<slug>.{pdf,txt,cover.jpg,entry.json}
-        │                                                                    ▲
-        ▼                                                                    │
-  DownloadBook ─► ScanTailorScans ─► [DocResEnhance] ─► DetectLanguage ─► MrcPdf
-  (stage to       (split at gutter,   (optional AI        (quick OCR +     (Tesseract -> hOCR;
-   local cache)    deskew, dewarp,     appearance pass)    langdetect)      recode_pdf MRC PDF
-                   margins, uniform)                                        + text sidecar)
-                                                                                  │
-                                                                                  ▼
-                 AttachMetadata ─► EnrichPdfMetadata ─► GenerateCover ─► FinalizePdf ─► WriteCatalogManifest
-                 (Excel catalog)    (XMP: title,         (cover           (bookmarks,    (entry.json
-                                     authors, year)      thumbnail)        page labels)   sidecar)
+source (TIFF frames per book)        output/distribution/<source>/<slug>.pdf,.txt,.cover.jpg
+        │                                   output/archival/<source>/<slug>.pdf  (PDF/A-2b)
+        ▼                                                          ▲
+  DownloadBook ─► [AttachMetadata] ─► ScanTailorScans ─► [DocResEnhance]
+  (stage to        (Excel catalog)     (split at gutter,  (optional AI
+   local cache)                         deskew, margins)   appearance)
+        │
+        ▼
+  [DetectLanguage] ─► OcrPages ─────► RenderPdf ──────────► EnrichPdfMetadata
+   (langdetect)       (Tesseract       (recode_pdf MRC,      (XMP into the
+                       -> hOCR + txt)   one PDF per profile)  non-PDF/A copies)
+        │
+        ▼
+  [GenerateCover] ─► FinalizePdf ──────► EnsurePdfA ─────► [WriteCatalogManifest]
+   (thumbnail)       (merged bookmarks,  (declare archival   (entry.json for the
+                      page labels,        as PDF/A-2b,        distribution copy)
+                      linearize dist.)    veraPDF-validated)
 ```
 
-**`legacy`** (OpenCV preprocess → img2pdf → OCRmyPDF):
+**Output profiles** (`[render]`, presets in `pipeline/profiles.py`):
 
-```
-  DownloadBook ─► PreprocessScans ─► DetectLanguage ─► AssemblePdf ─► OcrPdf ─► EnrichPdfMetadata
-                  (split spreads,                       (img2pdf,     (OCRmyPDF, PDF/A-2
-                   crop bed, deskew)                     lossless)     + text sidecar)
-```
+| profile | encoding | for | notes |
+|---|---|---|---|
+| `distribution` | **JPEG (DCTDecode)** MRC, bg↓3 fg↓2, linearized | readers, the catalog | opens fast in every viewer; ~7× faster to decode than JPEG2000 |
+| `archival` | **JPEG2000** MRC → **PDF/A-2b** | preservation master | compact; opened rarely |
+
+Text stays razor-sharp in both — the JBIG2 1-bit mask is full resolution; only
+the colour layers downsample. (The old single output used 26-MP JPEG2000 layers
+that rendered blank/slow in Preview and PDF.js — fixed by the JPEG distribution
+copy. See `notebooks/03_dual_output_lab.ipynb`.)
+
+**Output layout** (`[render] layout`): `split` (default) separates the trees —
+`<output>/distribution/<faculty>/<slug>.pdf` (+ sidecars/cover) and
+`<output>/archival/<faculty>/<slug>.pdf` — so access copies can be served and
+masters cold-stored independently. `flat` instead writes both PDFs next to the
+sidecars as `<slug>.<profile>.pdf`. Unreadable/truncated source frames are
+skipped (recorded in the report's `skipped_frames`) rather than failing the book.
 
 Each step implements `PipelineStep.run(ctx: BookContext) -> BookContext`; a
-`Pipeline` is just an ordered list of steps, so planned stages (classification,
-embeddings on the OCR text sidecar) slot in without touching existing ones.
-`pipeline.factory.build_pipeline` wires the engine + metadata/cover tail from
+`Pipeline` is an ordered list of steps, so planned stages (classification,
+embeddings on the OCR text sidecar) and new outputs (a new `PdfProfile`) slot in
+without touching existing code. `pipeline.factory.build_pipeline` wires it from
 `configs/pipeline.toml`.
 
-The empirical basis for the engine choice is in
-[docs/digitalization_pipeline_report.md](docs/digitalization_pipeline_report.md).
+The empirical basis for the settings is in
+[docs/digitalization_pipeline_report.md](docs/digitalization_pipeline_report.md)
+and reproducible in `notebooks/03_dual_output_lab.ipynb`.
 
 ## Setup
 
-The pipeline shells out to system tools (Tesseract OCR, Ghostscript, and — for the
-`scantailor_mrc` engine — `scantailor-deviant-cli` + `jbig2enc`). Install those for
-your platform, then the Python package. Or skip the host install entirely and use
+The pipeline shells out to system tools (Tesseract OCR, `scantailor-deviant-cli`,
+`jbig2enc` for the MRC text mask, **`jpegoptim`** for the JPEG distribution PDF,
+and `qpdf` for linearization). Install those for your platform, then the Python
+package. Or skip the host install entirely and use
 **[Docker](#docker-full-toolchain)**, which bakes in the full toolchain.
 
 ### 1. System dependencies
@@ -63,9 +79,9 @@ your platform, then the Python package. Or skip the host install entirely and us
 **macOS (Homebrew)**
 
 ```bash
-brew install tesseract tesseract-lang ghostscript   # required
-brew install jbig2enc                               # scantailor_mrc: MRC text mask
-brew install unpaper pngquant                       # legacy engine
+brew install tesseract tesseract-lang               # required (OCR)
+brew install jbig2enc jpegoptim qpdf                # MRC mask + JPEG output + linearize
+brew install verapdf                                # optional: PDF/A-2b validation
 ```
 
 **Ubuntu / Debian (apt)**
@@ -73,8 +89,7 @@ brew install unpaper pngquant                       # legacy engine
 ```bash
 sudo apt update && sudo apt install -y \
   tesseract-ocr tesseract-ocr-slk tesseract-ocr-ces tesseract-ocr-eng \
-  ghostscript jbig2enc \
-  unpaper pngquant                                  # legacy engine
+  jbig2enc jpegoptim qpdf
 ```
 
 `scantailor-deviant-cli` has no distro/brew package on either platform. Build it
@@ -161,48 +176,41 @@ Run it under screen / systemd / Docker — see `deploy/` and:
 - [docs/metadata_and_covers.md](docs/metadata_and_covers.md) — Excel mapping + cover sourcing
 - [docs/catalog_import.md](docs/catalog_import.md) — manifest → Catalog REST import
 
-> Heads-up: Ghostscript ≥ 10.6 has a known JPEG-encoding bug affecting PDF/A
-> conversion; OCRmyPDF mitigates it, but visually check outputs (notebook 03,
-> "pixel peeping") after Ghostscript upgrades.
-
 ## Notebooks
 
 Experimentation happens in notebooks first; the module holds the reusable parts.
-Install the notebook dependencies (`poetry install --with notebooks`), then
-`poetry run jupyter lab`.
+Every notebook shares the **single cache + output root** via `load_runtime()` —
+no notebook hardcodes its own scratch dir. Install the notebook dependencies
+(`poetry install --with notebooks`), then `poetry run jupyter lab`.
 
-| Notebook                                   | Purpose                                                                 |
-|--------------------------------------------|-------------------------------------------------------------------------|
-| `01_webdav_exploration.ipynb`              | Inventory the shares: books, pages, sizes (interactive Plotly charts)   |
-| `02_single_book_pipeline.ipynb`            | Download one book and run the standard pipeline end to end              |
-| `03_transformation_lab.ipynb`              | Tune TIFF → PDF/A: spread splitting, compression/quality, OCR confidence |
-| `04_produce_samples.ipynb`                 | Run the production pipeline on one small book per faculty               |
-| `05_batch_pipeline.ipynb`                  | Batch: 4 books in parallel, low-storage mode, resumable                 |
-| `06_scantailor_mrc_lab.ipynb`              | ScanTailor + MRC engine lab; compare against legacy output              |
-| `07_fonts_tables_diagrams.ipynb`           | Variant comparison: font quality at 3× zoom, table/diagram survival     |
-| `08_perfect_quality_lab.ipynb`             | Max-quality experiments (Sauvola/Wolf masks, facsimile MRC, roadmap)    |
-| `09_finalizer_pero_pilot.ipynb`            | Finalizer + PERO/UVDoc/NAF-DPM pilots and the V2–V5 decision            |
-| `10_metadata_catalog_draft.ipynb`          | Draft the librarian metadata Excel — one pre-filled row per book        |
-| `11_local_e2e_experiment.ipynb`            | Local end-to-end test on a few small books (WebDAV source)              |
-| `12_stats_and_results.ipynb`               | Stats & results dashboard — coverage, throughput, sample outputs        |
+| Notebook                          | Purpose                                                                  |
+|-----------------------------------|--------------------------------------------------------------------------|
+| `01_explore_corpus.ipynb`         | Survey sources + the local cache; inspect a raw frame                    |
+| `02_clean_pages_lab.ipynb`        | ScanTailor cleaning lab: before/after, knobs                             |
+| `03_dual_output_lab.ipynb`        | **The encoder experiment**: JPEG vs JPEG2000, size + decode time, PDF/A, alternatives |
+| `04_single_book_e2e.ipynb`        | Full production pipeline on one cached book; inspect both PDFs           |
+| `05_batch_pipeline.ipynb`         | Batch over books (resumable, low-storage, monitor)                       |
+| `06_metadata_and_covers.ipynb`    | Metadata draft + ISBN enrichment + cover preview                         |
+| `07_stats_and_results.ipynb`      | Stats dashboard over `output/`: coverage, sizes, throughput              |
 
 Programmatic use:
 
 ```python
-from evilflowers_books_digitalizer import BookContext, BookSource, LocalCache, Pipeline, load_settings
-from evilflowers_books_digitalizer.pipeline.steps import AssemblePdf, DownloadBook, OcrPdf
+from evilflowers_books_digitalizer import BookContext, LocalCache, build_source
+from evilflowers_books_digitalizer.pipeline.factory import build_pipeline
+from evilflowers_books_digitalizer.runtime import build_catalog, load_runtime
 
-settings = load_settings()
-cache = LocalCache(settings.cache_dir)
-source = BookSource(settings.sources["svf"])
+rt = load_runtime()                                  # single cache + output root
+cache = LocalCache(rt.cache_dir)
+source = build_source(rt.source, "svf")
+pipeline = build_pipeline(source, cache, config=rt.config, catalog=build_catalog(rt.metadata))
 
-pipeline = Pipeline([DownloadBook(source, cache), AssemblePdf(), OcrPdf(language="slk")])
 ctx = pipeline.run(BookContext(
     source="svf", book_id="<book-dir>",
     work_dir=cache.book_dir("svf", "<book-dir>"),
-    output_dir=settings.output_dir / "svf",
+    output_dir=rt.output_dir / "svf",
 ))
-print(ctx.artifacts["pdf"])
+print(ctx.artifacts["pdf_distribution"], ctx.artifacts["pdf_archival"])
 ```
 
 ## Layout
@@ -227,8 +235,11 @@ evilflowers_books_digitalizer/
 ├── monitor.py            live rich TUI dashboard
 └── pipeline/
     ├── base.py           BookContext, PipelineStep, Pipeline
-    ├── factory.py        build_pipeline (engine + metadata/cover tail)
-    └── steps/            download, scantailor, mrc, metadata, enrich, cover, finalize, …
+    ├── factory.py        build_pipeline (imaging → render → enrich → finalize → pdfa tail)
+    ├── profiles.py       PdfProfile + DISTRIBUTION / ARCHIVAL presets
+    ├── hocr.py           shared hOCR parser (OCR sidecar + finalize bookmarks)
+    ├── pdfa.py           lossless PDF/A-3b → 2b re-declaration + veraPDF validation
+    └── steps/            download, scantailor, ocr, render, enrich, cover, finalize, pdfa, …
 configs/pipeline.toml     production config (source, metadata, cover, orchestration)
 configs/catalog.xlsx      bibliographic metadata (you provide)
 deploy/                   run the batch: systemd unit, docker-compose, runbook

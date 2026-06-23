@@ -1,0 +1,91 @@
+# Run a full book straight from the local cache — NO VPN, NO mount.
+#
+# Points the filesystem source at .cache/scans (where books are already staged),
+# so `run-book` exercises the real pipeline end to end on a laptop.
+#
+#   evilflowers-digitalizer run-book fad \
+#       "CVI_OPACID_FA_STAVEBNO_EKOLOGICKA)KVALITA_BUDOV" \
+#       --config configs/pipeline.cache.toml --keep-cache
+#
+# IMPORTANT: pass --keep-cache. The book's work dir IS its cache dir here, so a
+# low-storage cleanup would delete the cached source TIFFs. --keep-cache disables it.
+
+[paths]
+cache_dir = ".cache"
+output_dir = "output"
+
+[source]
+backend = "filesystem"
+root = ".cache/scans"          # book dirs live at .cache/scans/<faculty>/<book>
+stage_mode = "symlink"         # src == dst here, so staging is a no-op (already present)
+[source.paths]
+fad = "fad"
+fei = "fei"
+mtf = "mtf"
+sjf = "sjf"
+svf = "svf"
+
+[metadata]
+enabled = true
+excel_path = "configs/catalog.xlsx"   # slug dirs get a stub title — fine for a test
+sheet = "katalog"
+key_field = "isbn"
+[metadata.columns]
+directory = "directory_id"
+title = "názov"
+subtitle = "podnázov"
+authors = "autori"
+year = "rok_vydania"
+publisher = "vydavateľ"
+isbn = "ISBN"
+faculty = "fakulta"
+language = "jazyk"
+[metadata.faculty_names]
+fad = "Fakulta architektúry a dizajnu STU"
+fei = "Fakulta elektrotechniky a informatiky STU"
+mtf = "Materiálovotechnologická fakulta STU"
+sjf = "Strojnícka fakulta STU"
+svf = "Stavebná fakulta STU"
+
+[cover]
+enabled = true
+source = "opac_then_generated"
+min_px = 80
+template = "banner"
+format = "JPEG"
+quality = 88
+
+[render]
+outputs = ["distribution", "archival"]
+# layout = "flat" (default): both PDFs next to the sidecars as <slug>.<profile>.pdf.
+# Set "split" to separate distribution/ and archival/ trees (see pipeline.vm.toml).
+validate_pdfa = true           # run veraPDF on the archival master (installed via brew)
+[render.distribution]
+bg_downsample = 3
+fg_downsample = 2
+[render.archival]
+bg_downsample = 2
+pdfa = "2b"
+
+[ocr]
+language = "auto"
+
+[scantailor]
+binary = "scantailor-deviant-cli"
+color_mode = "mixed"
+margins_mm = 8.0
+dewarping = "auto"
+normalize_illumination = true
+despeckle = "cautious"
+dpi = 300
+output_dpi = 600
+
+[finalize]
+enabled = true
+bookmarks = true
+page_labels = true
+linearize = true
+
+[orchestration]
+ocr_jobs = 2
+min_free_gb = 1

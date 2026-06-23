@@ -6,15 +6,12 @@
 # Differences from the production configs/pipeline.toml:
 #   * source backend = "webdav" (pull a few books over the VPN instead of a mount)
 #   * smaller paths / concurrency / disk guard suited to a laptop
-# Everything else (engine, scantailor, mrc, finalize, cover) inherits the same
+# Everything else (scantailor, render, finalize, cover) inherits the same
 # defaults as production, so a local run exercises the real pipeline.
-
-[pipeline]
-engine = "scantailor_mrc"
 
 [paths]
 cache_dir = ".cache"
-output_dir = "output_local"
+output_dir = "output"
 
 [source]
 # WebDAV for local testing (needs credentials.toml + VPN). Switch to
@@ -73,9 +70,9 @@ despeckle = "cautious"
 dpi = 300
 output_dpi = 600
 
-[mrc]
-mask_compression = "jbig2"
-jpeg2000_encoder = "pillow"
+[render]
+outputs = ["distribution", "archival"]
+validate_pdfa = false
 
 [ocr]
 language = "auto"

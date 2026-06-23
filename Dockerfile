@@ -57,19 +57,20 @@ RUN git clone --depth 1 https://github.com/agl/jbig2enc.git /src/jbig2enc \
 FROM debian:trixie-slim
 ARG SCANTAILOR_DEPS
 
+# jpegoptim: required by recode_pdf for the distribution (JPEG MRC) output.
+# qpdf: linearizes the access copy. ghostscript: PDF/A fallback.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip python3-dev build-essential git ca-certificates \
     tesseract-ocr tesseract-ocr-slk tesseract-ocr-ces tesseract-ocr-eng \
     tesseract-ocr-deu tesseract-ocr-rus \
     $SCANTAILOR_DEPS \
-    # legacy engine extras (OCRmyPDF)
-    ghostscript pngquant unpaper \
+    jpegoptim qpdf ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/bin/scantailor-deviant-cli /usr/local/bin/
 COPY --from=build /usr/local/bin/jbig2 /usr/local/bin/
 COPY --from=build /usr/local/lib/ /usr/local/lib/
-RUN ldconfig && scantailor-deviant-cli --help >/dev/null && command -v jbig2
+RUN ldconfig && scantailor-deviant-cli --help >/dev/null && command -v jbig2 && command -v jpegoptim
 
 # --- project ----------------------------------------------------------------
 WORKDIR /app

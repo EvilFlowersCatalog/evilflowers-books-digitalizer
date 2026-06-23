@@ -36,6 +36,22 @@ class BookContext:
     def slug(self) -> str:
         return f"{self.source}_{self.book_id}"
 
+    def pdf_outputs(self) -> list[tuple[str, Path]]:
+        """Produced PDFs as ``(profile_name, path)`` — one per render profile.
+
+        Falls back to the single ``artifacts['pdf']`` for steps that ran before
+        the multi-profile render (or in tests). Empty when no PDF exists yet.
+        """
+        named = [
+            (key.removeprefix("pdf_"), path)
+            for key, path in self.artifacts.items()
+            if key.startswith("pdf_")
+        ]
+        if named:
+            return named
+        single = self.artifacts.get("pdf")
+        return [("default", single)] if single is not None else []
+
 
 class PipelineStep(ABC):
     """One transformation applied to a :class:`BookContext`."""

@@ -1,83 +1,80 @@
-"""OCR step: searchable PDF/A via OCRmyPDF (Tesseract under the hood)."""
+"""OCR step: cleaned page TIFFs -> multi-page hOCR + plain-text sidecar.
+
+Tesseract runs once over the whole book. The hOCR is the single OCR artifact
+the rest of the pipeline builds on:
+
+* :class:`~evilflowers_books_digitalizer.pipeline.steps.render.RenderPdf` feeds
+  it to ``recode_pdf`` as the searchable text layer for every output profile;
+* :class:`~evilflowers_books_digitalizer.pipeline.steps.finalize.FinalizePdf`
+  mines it for outline bookmarks and printed-page-number labels.
+
+Splitting OCR out of PDF assembly (it used to live inside the old ``MrcPdf``)
+means the expensive Tesseract pass happens once even though we now render two
+PDFs (distribution + archival).
+"""
 
 from __future__ import annotations
 
-import ocrmypdf
+import logging
+import subprocess
 
 from evilflowers_books_digitalizer.pipeline.base import BookContext, PipelineStep
+from evilflowers_books_digitalizer.pipeline.hocr import parse_hocr
+
+logger = logging.getLogger(__name__)
 
 
-class OcrPdf(PipelineStep):
-    """``artifacts['raw_pdf']`` -> searchable ``artifacts['pdf']`` + ``artifacts['text']``.
+class OcrPages(PipelineStep):
+    """``ctx.tiffs`` -> ``artifacts['hocr']`` + ``artifacts['text']``.
 
-    The sidecar text file holds the plain OCR text — the input for the later
-    enrichment, classification and embedding stages.
-
-    Notes on the knobs (see notebook 03 for the experiments behind them):
-
-    * ``deskew``/``clean`` (unpaper) are off by default — the
-      :class:`~.preprocess.PreprocessScans` step already straightens and
-      crops pages; enable them when feeding raw frames instead.
-    * ``optimize=2`` engages pngquant; with jbig2enc installed monochrome
-      images get JBIG2-compressed as well.
-    * ``jpg_quality`` controls the optimizer's JPEG re-encoding quality.
-    * Any other ``ocrmypdf.ocr`` keyword can be passed via ``extra``.
+    ``language`` is the Tesseract language string (e.g. ``"slk+eng"``); ``None``
+    defers to ``metadata['ocr_language']`` (set by the language-detection step)
+    and finally ``"slk"``. ``dpi`` must match the cleaned pages' resolution
+    (ScanTailor ``output_dpi``) so glyph geometry is correct.
     """
 
     name = "ocr"
 
     def __init__(
         self,
-        language: str | None = None,  # None -> metadata['ocr_language'] (DetectLanguage) or "slk"
-        deskew: bool = False,
-        rotate_pages: bool = True,
-        clean: bool = False,  # requires `unpaper`
-        output_type: str = "pdfa-2",
-        optimize: int = 2,
-        jpg_quality: int | None = None,
-        png_quality: int | None = None,
-        oversample: int = 0,
-        jobs: int | None = None,
-        **extra,
-    ):
+        language: str | None = None,
+        dpi: int = 300,
+        tesseract: str = "tesseract",
+    ) -> None:
         self.language = language
-        self.deskew = deskew
-        self.rotate_pages = rotate_pages
-        self.clean = clean
-        self.output_type = output_type
-        self.optimize = optimize
-        self.jpg_quality = jpg_quality
-        self.png_quality = png_quality
-        self.oversample = oversample
-        self.jobs = jobs
-        self.extra = extra
+        self.dpi = dpi
+        self.tesseract = tesseract
 
     def run(self, ctx: BookContext) -> BookContext:
-        raw_pdf = ctx.artifacts.get("raw_pdf")
-        if raw_pdf is None:
-            raise ValueError(f"no raw_pdf for {ctx.slug} — run the assemble step first")
+        if not ctx.tiffs:
+            raise ValueError(f"no pages for {ctx.slug} — run the scantailor step first")
+        # resolve(): Leptonica/Tesseract choke on paths through macOS /tmp symlinks
+        pages = sorted(p.resolve() for p in ctx.tiffs)
+        language = self.language or ctx.metadata.get("ocr_language", "slk")
 
-        pdf = ctx.output_dir / f"{ctx.slug}.pdf"
-        sidecar = ctx.output_dir / f"{ctx.slug}.txt"
-        options = dict(
-            language=self.language or ctx.metadata.get("ocr_language", "slk"),
-            deskew=self.deskew,
-            rotate_pages=self.rotate_pages,
-            clean=self.clean,
-            output_type=self.output_type,
-            optimize=self.optimize,
-            oversample=self.oversample,
-            jobs=self.jobs,
-            sidecar=sidecar,
-            progress_bar=False,
+        ctx.work_dir.mkdir(parents=True, exist_ok=True)
+        list_file = ctx.work_dir / "pagelist.txt"
+        list_file.write_text("\n".join(str(p) for p in pages))
+        hocr_base = ctx.work_dir / "book"
+        result = subprocess.run(
+            [self.tesseract, str(list_file), str(hocr_base),
+             "-l", language, "--dpi", str(self.dpi), "hocr"],
+            capture_output=True,
+            text=True,
         )
-        if self.jpg_quality is not None:
-            options["jpg_quality"] = self.jpg_quality
-        if self.png_quality is not None:
-            options["png_quality"] = self.png_quality
-        options.update(self.extra)
+        hocr = hocr_base.with_suffix(".hocr")
+        if result.returncode != 0 or not hocr.exists():
+            raise RuntimeError(
+                f"tesseract failed for {ctx.slug} (exit {result.returncode}): "
+                f"{result.stderr[-2000:]}"
+            )
 
-        ocrmypdf.ocr(raw_pdf, pdf, **options)
-        ctx.artifacts["pdf"] = pdf
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = ctx.output_dir / f"{ctx.slug}.txt"
+        sidecar.write_text(parse_hocr(hocr.read_text(errors="ignore")).plain_text())
+
+        ctx.artifacts["hocr"] = hocr
         ctx.artifacts["text"] = sidecar
+        ctx.metadata["ocr_language"] = language
+        logger.info("%s: OCR'd %d pages (lang=%s)", ctx.slug, len(pages), language)
         return ctx

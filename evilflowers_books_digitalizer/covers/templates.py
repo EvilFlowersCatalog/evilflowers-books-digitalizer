@@ -47,7 +47,7 @@ def _gradient(size: tuple[int, int], top: RGB, bottom: RGB) -> Image.Image:
         for y in range(height)
     ]
     base = Image.new("RGB", (1, height))
-    base.putdata(column)  # type: ignore[arg-type]
+    base.putdata(column)
     return base.resize(size)
 
 

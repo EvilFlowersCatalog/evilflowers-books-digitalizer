@@ -57,3 +57,10 @@ target-version = "py312"
 python_version = "3.12"
 strict = false
 ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# The pipeline package is held to a higher bar (it's the refactored core).
+[[tool.mypy.overrides]]
+module = "evilflowers_books_digitalizer.pipeline.*"
+disallow_untyped_defs = true

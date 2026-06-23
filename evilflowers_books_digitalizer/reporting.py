@@ -49,7 +49,8 @@ def summarize_reports(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     ok = [r for r in rows if r.get("status") == "ok"]
     pages = sum(r.get("n_pages") or 0 for r in ok)
-    pdf_mb = sum(r.get("pdf_mb") or 0.0 for r in ok)
+    pdf_mb = sum(r.get("pdf_mb") or 0.0 for r in ok)  # distribution (access) copy
+    archival_mb = sum(_output_mb(r, "archival") for r in ok)
     minutes = sum(r.get("minutes") or 0.0 for r in rows)
     chars = sum(r.get("ocr_chars") or 0 for r in ok)
 
@@ -59,12 +60,20 @@ def summarize_reports(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "produced": len(ok),
         "pages": pages,
         "pdf_mb": round(pdf_mb, 1),
+        "archival_mb": round(archival_mb, 1),
         "mb_per_page": round(pdf_mb / pages, 3) if pages else None,
         "ocr_chars": chars,
         "minutes": round(minutes, 1),
         "pages_per_min": round(pages / minutes, 1) if minutes else None,
         "mean_minutes_per_book": round(minutes / len(rows), 2) if rows else None,
     }
+
+
+def _output_mb(row: dict[str, Any], profile: str) -> float:
+    """Size of a named render profile from a report row's ``outputs`` map."""
+    outputs = row.get("outputs") or {}
+    info = outputs.get(profile) or {}
+    return float(info.get("mb") or 0.0)
 
 
 def summarize_by_source(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

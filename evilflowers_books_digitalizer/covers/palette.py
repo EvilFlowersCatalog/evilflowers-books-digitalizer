@@ -40,7 +40,7 @@ class Palette:
         for key in ("bg", "accent", "text", "banner_text", "muted"):
             if key in data:
                 base[key] = hex_to_rgb(data[key])
-        return cls(**base)  # type: ignore[arg-type]
+        return cls(**base)
 
 
 DEFAULT = Palette(bg=(244, 243, 239), accent=(51, 65, 85), text=(28, 30, 36))

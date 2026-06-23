@@ -1,0 +1,182 @@
+# Production VM config (LUN-mounted scans -> /mnt/digital-library/content).
+#
+# Pipeline: ScanTailor cleanup [-> DocRes] -> Tesseract hOCR -> MRC render ->
+#   enrich -> [metadata/cover] -> finalize -> PDF/A -> [catalog manifest].
+# The render step emits one PDF per profile in [render] (distribution + archival).
+#
+# Run:  evilflowers-digitalizer run-corpus --config configs/pipeline.vm.toml
+
+# --- production runtime (consumed by runtime.load_runtime / the CLI / runner) ---
+
+[paths]
+# Durable output on the LUN; cache on FAST LOCAL scratch (NOT the LUN) — only
+# ScanTailor's cleaned pages + hOCR live there transiently, deleted per book.
+cache_dir = "/var/tmp/evilflowers-cache"
+output_dir = "/mnt/digital-library/content"
+
+[source]
+# backend = "filesystem": read the raw scans off a local mount (production).
+# backend = "webdav": pull over WebDAV (dev; needs credentials.toml + VPN).
+backend = "filesystem"
+root = "/mnt/digital-library/raw-scans"
+# stage_mode: "symlink" (zero-copy, default), "copy", or "hardlink".
+stage_mode = "symlink"
+# Faculty key -> directory under `root` that holds the book directories.
+[source.paths]
+fad = "fad/FA-skeny"
+fei = "fei/FEI-skeny"
+mtf = "mtf/MTF-skeny"
+sjf = "sjf/SJF-skeny"
+svf = "svf/SVF-skeny"
+
+[metadata]
+# Excel catalog mapped to books by directory name (see metadata/catalog.py).
+# Generate a librarian-ready draft with notebook 10 / metadata.draft.
+enabled = true
+excel_path = "configs/catalog.xlsx"
+sheet = "katalog"
+# key_field is a secondary match (ISBN); the primary join is the exact
+# directory name via the `directory` column below (reliable for slug dirs too).
+key_field = "isbn"
+# Model field -> spreadsheet column header (must match metadata.draft.HEADERS).
+[metadata.columns]
+directory = "directory_id"
+title = "názov"
+subtitle = "podnázov"
+authors = "autori"
+year = "rok_vydania"
+publisher = "vydavateľ"
+isbn = "ISBN"
+faculty = "fakulta"
+language = "jazyk"
+# Optional per-book override of the import target catalog (see [catalog]).
+# Blank cells fall back to [catalog].catalog — all faculties land in one catalog.
+catalog = "cieľový_katalog"
+# Source key -> human faculty name (used on covers and for unmatched stubs).
+[metadata.faculty_names]
+fad = "Fakulta architektúry a dizajnu STU"
+fei = "Fakulta elektrotechniky a informatiky STU"
+mtf = "Materiálovotechnologická fakulta STU"
+sjf = "Strojnícka fakulta STU"
+svf = "Stavebná fakulta STU"
+
+[cover]
+# Standalone thumbnail per book (<slug>.cover.jpg); the PDF is left untouched.
+enabled = true
+# source: where the cover comes from —
+#   "opac_then_generated" (default): real obalkyknih/OPAC cover by ISBN (~70% of
+#       ISBN books), else a styled cover rendered from metadata;
+#   "opac": only real covers (no artifact when none); "generated": always styled.
+source = "opac_then_generated"
+min_px = 80                 # reject obalkyknih "no cover" placeholders below this
+template = "banner"          # generated-cover style: "banner" | "minimal"
+format = "JPEG"             # "JPEG" | "PNG" (generated covers)
+quality = 88
+# size = [1200, 1697]       # default ~ISO 1:√2 book proportion
+# Per-faculty palette overrides (hex); faculty key -> {bg, accent, text, ...}.
+# [cover.palette.fad]
+# accent = "#A8442A"
+
+[catalog]
+# Import digitized books into an EvilFlowers Catalog instance
+# (https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
+#
+# Each produced book gets a `<slug>.entry.json` manifest written next to its PDF
+# (catalog/mapping.py). `publish-catalog` then pushes manifests to the instance:
+# it creates an Entry (title/language/authors/ISBN + cover) and attaches the PDF
+# as an open-access acquisition. Re-runs are idempotent (duplicates -> skipped).
+enabled = false
+# REST API root of the catalog instance (no trailing slash).
+base_url = "https://elvira.digital/api/v1"
+# Target catalog for EVERY book — a catalog UUID or its `url_name` slug. A
+# per-book override is possible via the `catalog` column in catalog.xlsx.
+catalog = "stu-books"
+# Long-lived API key (a Bearer JWT from the catalog), read from this env var so
+# the secret never lives in the repo. See deploy/.env.example.
+api_key_env = "EVILFLOWERS_API_KEY"
+# Acquisition relation for the PDF: "open-access" | "acquisition" | "borrow".
+relation = "open-access"
+# Fallback language (alpha2/alpha3) when neither the catalog nor OCR set one.
+default_language = "slk"
+# Author string order in catalog.xlsx: "given_first" ("Ján Novák") or
+# "surname_first" (Slovak "Novák Ján").
+author_name_order = "given_first"
+# Per-entry feature flags merged into the catalog's EntryConfig on create.
+[catalog.entry_config]
+evilflowers_ocr_enabled = false
+evilflowers_share_enabled = true
+
+[orchestration]
+# Batch fan-out. Books within a faculty run in parallel across this many worker
+# processes; each worker uses `ocr_jobs` threads. Keep
+#   max_parallel_books * ocr_jobs  <=  nproc.
+# Tune to the VM: e.g. 16-core -> 6 x 2 (=12, leaving headroom); 8-core -> 3 x 2.
+max_parallel_books = 6
+ocr_jobs = 2
+# Disk guard on the scratch volume (cache_dir's filesystem). A worker waits for
+# others' per-book cleanups before staging if free space drops below this.
+min_free_gb = 20
+# Faculties to process (order matters for run-corpus); defaults to
+# [source.paths] keys when omitted.
+sources = ["svf", "sjf", "fad", "fei", "mtf"]
+
+[scantailor]
+binary = "scantailor-deviant-cli"
+# "mixed": text binarized (crisp, kills bleed-through), picture zones keep tones.
+# "color_grayscale": tones kept everywhere — pair with [docres] enabled = true.
+color_mode = "mixed"
+margins_mm = 8.0
+dewarping = "auto"
+normalize_illumination = true
+despeckle = "cautious"
+dpi = 300
+# supersampled binarization (notebook 07): 600dpi B/W output from 300dpi scans
+# gives much smoother glyphs at ~2x the (still small) file size.
+output_dpi = 600
+
+[docres]
+# AI appearance enhancement (keeps stamp/photo tones; ~2 min/page) — only
+# worthwhile with color_mode = "color_grayscale" on covers / photo-heavy books.
+enabled = false
+repo = "~/.local/share/evilflowers-tools/DocRes"
+python = "~/.local/share/evilflowers-tools/venv-docres/bin/python"
+task = "appearance"
+
+[render]
+# Which output PDFs to produce (presets in pipeline/profiles.py):
+#   "distribution" — JPEG (DCTDecode) MRC, downsampled background, linearized.
+#       Opens fast in every viewer (Preview, browser PDF.js, mobile); the JBIG2
+#       text mask stays full-res so glyphs are razor-sharp. This is the access
+#       copy and the one imported into the catalog.
+#   "archival" — JPEG2000 MRC preservation master, declared PDF/A-2b.
+outputs = ["distribution", "archival"]
+# layout = "split": separate top-level trees (serve distribution/, cold-store
+#   archival/); sidecars travel with the distribution copy:
+#     content/distribution/<faculty>/<slug>.pdf,.txt,.cover.jpg,.entry.json
+#     content/archival/<faculty>/<slug>.pdf
+# layout = "flat": both PDFs next to the sidecars as <slug>.<profile>.pdf.
+layout = "split"
+# Validate the PDF/A master with veraPDF (quality gate; fail-safe if not installed).
+validate_pdfa = true
+# Per-profile overrides (optional) — any PdfProfile field:
+[render.distribution]
+bg_downsample = 3
+fg_downsample = 2
+# hq_pages = "1,2,3,4,-4,-3,-2,-1"   # keep covers/endpapers full quality
+[render.archival]
+bg_downsample = 2
+pdfa = "2b"
+
+[ocr]
+language = "auto"
+
+[finalize]
+# Reading-experience polish (notebook 09): outline bookmarks from hOCR
+# headings, /PageLabels from printed page numbers, web-optimized (linearized)
+# save. Heuristic and fail-safe — skipped pieces are logged, never fatal.
+enabled = true
+bookmarks = true
+page_labels = true
+# Linearize (Fast Web View) the distribution copy; the archival master is left
+# un-linearized. Per-profile `linearize` in [render.<name>] overrides this.
+linearize = true
