@@ -45,6 +45,14 @@ doxapy = "^0.9.7"
 ruff = "^0.9"
 mypy = "^1.14"
 pytest = "^8.0"
+pytest-cov = "^6.0"
+
+# Docs site (Zensical — https://zensical.org). Install with: poetry install --with docs
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+zensical = ">=0.0.46"
 
 [build-system]
 requires = ["poetry-core>=2.0"]
@@ -65,3 +73,26 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = "evilflowers_books_digitalizer.pipeline.*"
 disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+branch = true
+source = ["evilflowers_books_digitalizer"]
+omit = [
+    "*/__main__.py",
+    "*/notebooks/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]

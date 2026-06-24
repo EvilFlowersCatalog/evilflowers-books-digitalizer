@@ -158,7 +158,7 @@ When you're satisfied with quality and numbers locally, go to production.
 
 The batch is just a long-running process (`run-corpus`) — run it under
 **screen/tmux**, **systemd**, or **Docker**. Full run/monitor mechanics are in
-[deploy/README.md](../deploy/README.md). Go-live sequence:
+[deploy/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/README.md). Go-live sequence:
 
 1. **VM prerequisites** — scans mounted at `/mnt/digital-library/raw-scans`; the
    toolchain installed (or use the Docker image); `configs/catalog.xlsx` in
@@ -178,7 +178,7 @@ The batch is just a long-running process (`run-corpus`) — run it under
    ```
 
 4. **Run the corpus** under your chosen supervisor (screen / systemd / Docker —
-   see [deploy/README.md](../deploy/README.md)):
+   see [deploy/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/README.md)):
    ```bash
    screen -S digitize
    python -m evilflowers_books_digitalizer run-corpus

@@ -1,0 +1,68 @@
+# Zensical static-site config — https://zensical.org
+# Build:   zensical build --clean      (output -> ./site)
+# Preview: zensical serve              (http://localhost:8000)
+# Published to GitHub Pages by .github/workflows/docs.yml
+
+[project]
+site_name = "EvilFlowers Books Digitalizer"
+site_description = """\
+Digitalization pipeline for scanned books: TIFF scans to searchable, \
+archival PDF/A — with Slovak OCR, metadata, covers and catalog import."""
+site_author = "Jakub Dubec"
+site_url = "https://evilflowerscatalog.github.io/evilflowers-books-digitalizer/"
+copyright = "&copy; EvilFlowers Catalog"
+
+repo_url = "https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer"
+repo_name = "EvilFlowersCatalog/evilflowers-books-digitalizer"
+
+docs_dir = "docs"
+site_dir = "site"
+use_directory_urls = true
+
+nav = [
+  { "Home" = "index.md" },
+  { "Architecture" = "architecture.md" },
+  { "Pipeline" = [
+    "digitalization_pipeline_report.md",
+    "metadata_and_covers.md",
+    "catalog_import.md",
+  ] },
+  { "Run & operate" = [
+    "testing.md",
+    "deployment.md",
+    "operations.md",
+  ] },
+]
+
+[project.theme]
+variant = "modern"
+
+features = [
+  "navigation.sections",
+  "navigation.top",
+  "navigation.footer",
+  "toc.follow",
+  "content.code.copy",
+  "search.suggest",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "deep-purple"
+accent = "purple"
+
+[project.theme.palette.toggle]
+icon = "lucide/sun"
+name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "deep-purple"
+accent = "purple"
+
+[project.theme.palette.toggle]
+icon = "lucide/moon"
+name = "Switch to light mode"

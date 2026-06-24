@@ -3,7 +3,7 @@
 The batch is a single long-running process — **no orchestrator, no database, no
 server**. The mechanics of running it (screen / systemd / Docker) and monitoring
 it live with the `monitor` TUI to `stats` and logs, are in
-**[../deploy/README.md](../deploy/README.md)**. This page is the production
+**[../deploy/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/README.md)**. This page is the production
 configuration checklist.
 
 ## Configure `configs/pipeline.toml`
@@ -32,7 +32,7 @@ batch inside the project Docker image, which bakes them all in
 2. Pilot one faculty: `run-source svf --limit 20`, then `stats`, and eyeball a
    few PDFs/covers.
 3. Start the full run (`run-corpus`) under screen / systemd / Docker
-   ([deploy/README.md](../deploy/README.md)).
+   ([deploy/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/README.md)).
 4. Watch with `monitor`; offload `output/` periodically; re-run any time to
    resume (finished books are skipped).
 5. Import into the catalog (if `[catalog]` is on): `publish-catalog --dry-run`,

@@ -1,0 +1,73 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+    # Advisory: surfaces ruff/format/mypy findings without blocking merges on
+    # pre-existing debt. Drop `continue-on-error` once the tree is clean to make
+    # these checks required.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Poetry
+        run: pipx install poetry
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: poetry
+      - run: poetry install --no-interaction --only main,dev
+      - name: Ruff (lint)
+        run: poetry run ruff check evilflowers_books_digitalizer tests
+      - name: Ruff (format check)
+        run: poetry run ruff format --check evilflowers_books_digitalizer tests
+      - name: mypy
+        run: poetry run mypy evilflowers_books_digitalizer
+
+  test:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Poetry
+        run: pipx install poetry
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: poetry
+      - run: poetry install --no-interaction --only main,dev
+      - name: Run tests with coverage
+        run: >-
+          poetry run pytest
+          --cov --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml
+          --junitxml=junit.xml
+      - name: Coverage summary
+        if: ${{ always() }}
+        run: |
+          echo "## Coverage (py${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
+          poetry run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            junit.xml
+          if-no-files-found: ignore

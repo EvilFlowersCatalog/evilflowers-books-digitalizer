@@ -1,5 +1,11 @@
 # EvilFlowers Books Digitalizer
 
+[![Tests](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/tests.yml/badge.svg)](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/tests.yml)
+[![Docker](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/docker.yml/badge.svg)](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/docker.yml)
+[![Documentation](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/docs.yml/badge.svg)](https://evilflowerscatalog.github.io/evilflowers-books-digitalizer/)
+
+📖 **Documentation:** <https://evilflowerscatalog.github.io/evilflowers-books-digitalizer/>
+
 Digitalization pipeline for scanned books: TIFF scans → **two PDFs per book** —
 a fast **distribution** copy and a **PDF/A-2b archival** master — with Slovak
 OCR, metadata and covers, then imported into the

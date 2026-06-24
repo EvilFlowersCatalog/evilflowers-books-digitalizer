@@ -22,8 +22,21 @@ __pycache__/
 dist/
 build/
 
+# Test / coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
 # Jupyter
 .ipynb_checkpoints/
+
+# Zensical docs build output (zensical build -> ./site)
+site/
 
 # OS
 .DS_Store
