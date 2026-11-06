@@ -14,15 +14,22 @@
 # Build:
 #   docker build -t evilflowers-digitalizer .
 #   docker build --build-arg DOCRES_WEIGHTS=0 -t evilflowers-digitalizer .   # skip the ~900 MB weights
+#   docker build --build-arg PROTOCOL_REF=<commit> ...   # another evilflowers-protocol commit
 #
-# Run one book directly (production: mount the raw-scans volume + output):
-#   docker run --rm -it \
-#     -v /mnt/digital-library/raw-scans:/mnt/digital-library/raw-scans:ro \
-#     -v $PWD/configs:/app/configs:ro \
-#     -v $PWD/output:/app/output \
-#     -v $PWD/.cache:/app/.cache \
-#     evilflowers-digitalizer \
-#     python -m evilflowers_books_digitalizer run-book fad '<BOOK_ID>'
+# Runtime contract (the k8s Job relies on it):
+#   * `evilflowers-digitalizer` is on PATH for any uid; the default USER is 10001
+#     but any non-root uid:gid works (nothing writes under /app or /opt).
+#   * config: --config > $EVILFLOWERS_DIGITALIZER_CONFIG (default below) ;
+#     relative paths in it resolve against the config file's directory.
+#   * logs on stderr, EVILFLOWERS_LOG_FORMAT=json for one JSON object per line.
+#
+# Run one book (mount scans read-only, output/cache writable, config read-only):
+#   docker run --rm --user "$(id -u):$(id -g)" \
+#     -v /mnt/digital-library/raw-scans:/data/raw-scans:ro \
+#     -v $PWD/output:/data/output -v $PWD/.cache:/data/cache \
+#     -v $PWD/my-pipeline.toml:/etc/digitalizer/pipeline.toml:ro \
+#     -e EVILFLOWERS_DIGITALIZER_CONFIG=/etc/digitalizer/pipeline.toml \
+#     evilflowers-digitalizer run-book fad '<BOOK_ID>'
 
 # dev packages double as runtime deps below — exact runtime soname package
 # names churn across Debian releases (t64 transition); -dev names are stable.
@@ -77,10 +84,17 @@ WORKDIR /app
 ENV VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH
 RUN python3 -m venv /opt/venv && pip install --no-cache-dir --upgrade pip
 
+# EvilFlowers Catalog client (not on PyPI; public repo, pinned commit). Installed
+# first so `pip install .` finds `evilflowers-protocol` already satisfied.
+ARG PROTOCOL_REF=62c05d7650381bfcc3dd8ebeb0d733fc9c83e494
+RUN pip install --no-cache-dir \
+      "evilflowers-protocol @ git+https://github.com/EvilFlowersCatalog/evilflowers-protocol-python.git@${PROTOCOL_REF}"
+
 COPY pyproject.toml README.md ./
 COPY evilflowers_books_digitalizer ./evilflowers_books_digitalizer
 COPY configs ./configs
-RUN pip install --no-cache-dir . && recode_pdf --version
+RUN pip install --no-cache-dir . && recode_pdf --version \
+ && evilflowers-digitalizer --help >/dev/null
 
 # --- DocRes (optional, CPU) -------------------------------------------------
 ARG DOCRES_WEIGHTS=1
@@ -105,4 +119,17 @@ shutil.copy(hf_hub_download('presencesw/DocRes', 'mbd.pkl'), root / 'data/MBD/ch
 ENV EVILFLOWERS_DOCRES_REPO=/opt/evilflowers-tools/DocRes \
     EVILFLOWERS_DOCRES_PYTHON=/opt/evilflowers-tools/venv-docres/bin/python
 
-CMD ["bash"]
+# --- runtime user -------------------------------------------------------------
+# Everything the pipeline reads at runtime (venvs, DocRes, tessdata, bundled
+# fonts/logos, the default config) must be readable — never writable — by an
+# arbitrary uid: the k8s Job runs as the owner of the scans, unknown here.
+RUN chmod -R a+rX /opt/venv /opt/evilflowers-tools /app /usr/share/tesseract-ocr \
+ && useradd --uid 10001 --gid 0 --home-dir /tmp --no-create-home --shell /usr/sbin/nologin digitalizer
+
+ENV EVILFLOWERS_DIGITALIZER_CONFIG=/app/configs/pipeline.toml \
+    HOME=/tmp \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 10001
+
+CMD ["evilflowers-digitalizer", "--help"]

@@ -33,7 +33,7 @@ svf = "svf/SVF-skeny"
 # Excel catalog mapped to books by directory name (see metadata/catalog.py).
 # Generate a librarian-ready draft with notebook 10 / metadata.draft.
 enabled = true
-excel_path = "configs/catalog.xlsx"
+excel_path = "catalog.xlsx"   # relative to this file
 sheet = "katalog"
 # key_field is a secondary match (ISBN); the primary join is the exact
 # directory name via the `directory` column below (reliable for slug dirs too).
@@ -87,17 +87,19 @@ quality = 88
 # as an open-access acquisition. Re-runs are idempotent (duplicates -> skipped).
 enabled = false
 # REST API root of the catalog instance (no trailing slash).
-base_url = "https://elvira.digital/api/v1"
-# Target catalog for EVERY book — a catalog UUID or its `url_name` slug. A
-# per-book override is possible via the `catalog` column in catalog.xlsx.
-catalog = "stu-books"
+base_url = "https://dev.evilflowers.elvira.stuba.sk/api/v1"
+# Target catalog, first match wins: the per-book `catalog` column in
+# catalog.xlsx, then the source key when by_source = true (one catalog per
+# faculty), then `catalog` (a UUID or url_name).
+by_source = true
+catalog = ""
 # Long-lived API key (a Bearer JWT from the catalog), read from this env var so
 # the secret never lives in the repo. See deploy/.env.example.
 api_key_env = "EVILFLOWERS_API_KEY"
 # Acquisition relation for the PDF: "open-access" | "acquisition" | "borrow".
 relation = "open-access"
-# Fallback language (alpha2/alpha3) when neither the catalog nor OCR set one.
-default_language = "slk"
+# Fallback language (ISO 639-1) when neither the catalog nor OCR set one.
+default_language = "sk"
 # Author string order in catalog.xlsx: "given_first" ("Ján Novák") or
 # "surname_first" (Slovak "Novák Ján").
 author_name_order = "given_first"

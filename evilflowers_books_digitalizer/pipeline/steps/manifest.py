@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from evilflowers_books_digitalizer.catalog.manifest import write_manifest
-from evilflowers_books_digitalizer.catalog.mapping import build_manifest
+from evilflowers_books_digitalizer.catalog.mapping import DEFAULT_LANGUAGE, build_manifest
 from evilflowers_books_digitalizer.metadata.models import BookMetadata
 from evilflowers_books_digitalizer.pipeline.base import BookContext, PipelineStep
 
@@ -32,12 +32,14 @@ class WriteCatalogManifest(PipelineStep):
         self,
         catalog: str,
         *,
-        default_language: str = "slk",
+        by_source: bool = False,
+        default_language: str = DEFAULT_LANGUAGE,
         relation: str = "open-access",
         entry_config: dict[str, Any] | None = None,
         author_name_order: str = "given_first",
-    ):
+    ) -> None:
         self.catalog = catalog
+        self.by_source = by_source
         self.default_language = default_language
         self.relation = relation
         self.entry_config = dict(entry_config or {})
@@ -57,6 +59,7 @@ class WriteCatalogManifest(PipelineStep):
                 pdf=pdf,
                 cover=ctx.artifacts.get("cover"),
                 catalog=self.catalog,
+                by_source=self.by_source,
                 ocr_language=ctx.metadata.get("ocr_language"),
                 default_language=self.default_language,
                 relation=self.relation,

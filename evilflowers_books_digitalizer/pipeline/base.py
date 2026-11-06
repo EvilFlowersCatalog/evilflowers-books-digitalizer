@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from evilflowers_books_digitalizer.logs import log_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,9 +96,13 @@ class Pipeline:
         for index, step in enumerate(self.steps):
             if on_step is not None:
                 on_step(index, total, step.name)
-            started = time.perf_counter()
-            ctx = step.run(ctx)
-            elapsed = time.perf_counter() - started
-            logger.info("step %-16s done in %6.1fs (%s)", step.name, elapsed, ctx.slug)
+            with log_context(step=step.name):
+                started = time.perf_counter()
+                ctx = step.run(ctx)
+                elapsed = time.perf_counter() - started
+                logger.info(
+                    "step %-16s done in %6.1fs (%s)", step.name, elapsed, ctx.slug,
+                    extra={"duration_ms": round(elapsed * 1000)},
+                )
         logger.info("pipeline done: %s", ctx.slug)
         return ctx

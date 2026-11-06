@@ -76,6 +76,51 @@ python -m evilflowers_books_digitalizer validate-catalog
 
 The matched fields flow into the PDF XMP (`EnrichPdfMetadata`) and the cover.
 
+## Metadata from the OCR text (`[enrich]`)
+
+Many books have no Excel row (or `[metadata]` is off, as in the k8s Job), yet
+their colophon ("tiráž") on the title-page verso or the last page prints the
+ISBN, year and publisher. The `ExtractMetadata` step
+(`pipeline/steps/extract_metadata.py`) reads them from the OCR text and looks
+the ISBN up. It runs **between OCR and render**, so the result reaches the XMP of
+both PDFs (rewriting XMP after render would break PDF/A), the cover (a real
+OPAC cover by the found ISBN) and the `.entry.json` (`identifiers.isbn`,
+`publisher`, `published_at`).
+
+1. **Input** — the OCR text of the first `head_pages` and last `tail_pages`
+   pages, taken from the `<slug>.txt` the OCR step wrote (no second OCR pass).
+2. **Extract** (`metadata/ocr_extract.py`, stdlib only):
+   - ISBN-10/13 in tolerant forms (`ISBN 80-227-1234-5`, `ISBN: 978…`, `ISBN-13`,
+     OCR noise like `O`→`0`, `l`/`I`→`1` inside digit runs), checksum-validated;
+     ISBN-10 becomes ISBN-13. Preference: the directory-name ISBN, then a
+     candidate on the colophon page, then a labelled one, then the earliest.
+   - the year: `©`/`(c)`/`Copyright` + year first, then a
+     `vydanie`/`vydal`/`Vydavateľstvo … YYYY` imprint; clamped to 1800 – this year.
+   - the publisher (best effort): `Vydavateľstvo …`, `Nakladateľstvo …`,
+     `Edičné stredisko …`, `Vydala …`, or an `STU` line on the colophon.
+3. **Look up** — with `lookup = true`, the ISBN goes to the same `IsbnEnricher`
+   `build-catalog` uses (STU OPAC, then Open Library; cached under
+   `cache_dir/isbn_lookup`) for title, subtitle, authors, publisher and year.
+4. **Merge** into the book's metadata, per field, by source:
+   **excel > stu_opac/openlibrary/google > ocr > dirname**. Only empty fields
+   are filled; a de-slugged directory title counts as empty. With
+   `override = true` the lookup also replaces Excel values (OCR still only fills
+   gaps). A book the lookup resolved is no longer a stub (`matched`).
+   `extra.provenance` (`{field: source}`) and `extra.ocr_candidates` travel into
+   the manifest (`provenance`, `ocr_candidates`), which the publisher does not send.
+
+The step is never fatal: a network error is a `WARN` line and the book continues
+with what OCR found.
+
+```toml
+[enrich]
+enabled = true
+head_pages = 8
+tail_pages = 4
+lookup = true
+override = false
+```
+
 ## Covers
 
 `GenerateCover` writes a standalone `<slug>.cover.jpg` per book (the PDF is left

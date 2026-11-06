@@ -16,6 +16,7 @@ absolute/relative path given directly is honoured as-is. This is the single
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 #: Bundled asset tree (``fonts/``, ``logos/``) shipped with the package.
@@ -25,7 +26,7 @@ BUNDLED_DIR = Path(__file__).parent / "assets"
 class ResourceResolver:
     """Resolve a cover resource by ``category`` + ``name`` to a real path."""
 
-    def __init__(self, assets_dir: str | Path | list[str | Path] | None = None):
+    def __init__(self, assets_dir: str | Path | Sequence[str | Path] | None = None):
         roots: list[Path] = []
         if isinstance(assets_dir, (str, Path)):
             roots.append(Path(assets_dir).expanduser())

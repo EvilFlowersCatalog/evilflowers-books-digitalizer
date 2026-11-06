@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -24,7 +26,9 @@ class BookMetadata(BaseModel):
     language: str | None = None  # catalog hint (ISO), may override detection
     catalog: str | None = None  # target EvilFlowers catalog override (id/url_name)
     matched: bool = True  # False -> stub (no catalog row found)
-    extra: dict[str, str] = Field(default_factory=dict)
+    #: free-form annotations, e.g. ``provenance`` ({field: source}) and
+    #: ``ocr_candidates`` written by the ExtractMetadata step
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def author_line(self) -> str:

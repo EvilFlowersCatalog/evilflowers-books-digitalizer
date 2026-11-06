@@ -7,10 +7,11 @@
 # --- production runtime (consumed by runtime.load_runtime / the CLI / runner) ---
 
 [paths]
-# Relative paths resolve against the project root. On the VM, point output_dir
-# at durable storage and cache_dir at fast local scratch.
-cache_dir = ".cache"
-output_dir = "output"
+# Relative paths resolve against THIS FILE's directory (configs/), so "../output"
+# is <checkout>/output. On the VM / in k8s use absolute paths: output_dir on
+# durable storage, cache_dir on fast local scratch.
+cache_dir = "../.cache"
+output_dir = "../output"
 
 [source]
 # backend = "filesystem": read the raw scans off a local mount (production).
@@ -31,7 +32,7 @@ svf = "svf/SVF-skeny"
 # Excel catalog mapped to books by directory name (see metadata/catalog.py).
 # Generate a librarian-ready draft with notebook 10 / metadata.draft.
 enabled = true
-excel_path = "configs/catalog.xlsx"
+excel_path = "catalog.xlsx"   # relative to this file
 sheet = "katalog"
 # key_field is a secondary match (ISBN); the primary join is the exact
 # directory name via the `directory` column below (reliable for slug dirs too).
@@ -48,7 +49,7 @@ isbn = "ISBN"
 faculty = "fakulta"
 language = "jazyk"
 # Optional per-book override of the import target catalog (see [catalog]).
-# Blank cells fall back to [catalog].catalog — all faculties land in one catalog.
+# Blank cells fall back to the source key ([catalog].by_source) or [catalog].catalog.
 catalog = "cieľový_katalog"
 # Source key -> human faculty name (used on covers and for unmatched stubs).
 [metadata.faculty_names]
@@ -57,6 +58,19 @@ fei = "Fakulta elektrotechniky a informatiky STU"
 mtf = "Materiálovotechnologická fakulta STU"
 sjf = "Strojnícka fakulta STU"
 svf = "Stavebná fakulta STU"
+
+[enrich]
+# Metadata from the OCR text (runs between OCR and render, so it reaches the XMP
+# of both PDFs, the cover and the catalog manifest). Never fatal.
+enabled = true
+head_pages = 8     # OCR text of the first N pages (title page, colophon)...
+tail_pages = 4     # ...and the last N (colophon at the back, back cover)
+# Look the found ISBN up in STU OPAC, then Open Library (cached in cache_dir/isbn_lookup).
+lookup = true
+# Precedence: excel > opac/openlibrary/google > ocr > dirname. Only empty fields
+# (and dirname-derived stub titles) are filled; override = true lets the lookup
+# replace Excel values too.
+override = false
 
 [cover]
 # Standalone thumbnail per book (<slug>.cover.jpg); the PDF is left untouched.
@@ -93,23 +107,25 @@ quality = 90
 # Import digitized books into an EvilFlowers Catalog instance
 # (https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
 #
-# Each produced book gets a `<slug>.entry.json` manifest written next to its PDF
-# (catalog/mapping.py). `publish-catalog` then pushes manifests to the instance:
-# it creates an Entry (title/language/authors/ISBN + cover) and attaches the PDF
-# as an open-access acquisition. Re-runs are idempotent (duplicates -> skipped).
+# Each produced book gets a `<slug>.entry.json` manifest written next to its
+# distribution PDF (catalog/mapping.py). `publish-book` / `publish-catalog` (or
+# `run-book --publish`) create an Entry (title/language/authors/ISBN + cover) and
+# attach the distribution PDF. Re-runs resume and never duplicate an entry.
 enabled = false
 # REST API root of the catalog instance (no trailing slash).
-base_url = "https://elvira.digital/api/v1"
-# Target catalog for EVERY book — a catalog UUID or its `url_name` slug. A
-# per-book override is possible via the `catalog` column in catalog.xlsx.
-catalog = "stu-books"
+base_url = "https://dev.evilflowers.elvira.stuba.sk/api/v1"
+# Target catalog, first match wins: the per-book `catalog` column in
+# catalog.xlsx, then the source key when by_source = true (one catalog per
+# faculty: svf, sjf, fad, fei, mtf), then `catalog` (a UUID or url_name).
+by_source = true
+catalog = ""
 # Long-lived API key (a Bearer JWT from the catalog), read from this env var so
 # the secret never lives in the repo. See deploy/.env.example.
 api_key_env = "EVILFLOWERS_API_KEY"
 # Acquisition relation for the PDF: "open-access" | "acquisition" | "borrow".
 relation = "open-access"
-# Fallback language (alpha2/alpha3) when neither the catalog nor OCR set one.
-default_language = "slk"
+# Fallback language (ISO 639-1) when neither the catalog nor OCR set one.
+default_language = "sk"
 # Author string order in catalog.xlsx: "given_first" ("Ján Novák") or
 # "surname_first" (Slovak "Novák Ján").
 author_name_order = "given_first"
@@ -117,6 +133,8 @@ author_name_order = "given_first"
 [catalog.entry_config]
 evilflowers_ocr_enabled = false
 evilflowers_share_enabled = true
+# let the catalog fetch a BibTeX citation by ISBN on create
+evilflowers_metadata_fetch = true
 
 [orchestration]
 # Batch fan-out limits. max_parallel_books * ocr_jobs should be <= CPU cores.

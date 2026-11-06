@@ -167,6 +167,10 @@ class MetadataCatalog:
     def stub(book_id: str, *, faculty: str | None = None) -> BookMetadata:
         return BookMetadata(book_id=book_id, title=deslug(book_id), faculty=faculty, matched=False)
 
+    def catalog_overrides(self) -> list[str]:
+        """Distinct per-book target catalogs (the ``catalog`` column), sorted."""
+        return sorted({rec.catalog for rec in self._records if rec.catalog})
+
     def match_report(self, book_ids: list[str]) -> dict[str, Any]:
         """Match/miss summary for a set of directory names (CLI validate-catalog)."""
         misses = [bid for bid in book_ids if not self.lookup(bid).matched]

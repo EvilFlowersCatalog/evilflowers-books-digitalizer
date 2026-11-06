@@ -19,6 +19,10 @@ dependencies = [
     "pandas (>=2.2,<3.0)",
     "openpyxl (>=3.1,<4.0)",
     "rich (>=13,<15)",
+    # EvilFlowers Catalog REST client (catalog/publisher.py). Not on PyPI: the
+    # source is pinned in [tool.poetry.dependencies] below; the Docker image
+    # installs it from git first (see Dockerfile, PROTOCOL_REF).
+    "evilflowers-protocol (>=0.2.0,<0.3.0)",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +36,11 @@ include = [
     { path = "evilflowers_books_digitalizer/covers/assets/fonts/*.ttf", format = ["sdist", "wheel"] },
     { path = "evilflowers_books_digitalizer/covers/assets/logos/*.png", format = ["sdist", "wheel"] },
 ]
+
+[tool.poetry.dependencies]
+# Local development against a sibling checkout. Once the client is pushed, switch to:
+# evilflowers-protocol = { git = "https://github.com/EvilFlowersCatalog/evilflowers-protocol-python.git", rev = "<commit>" }
+evilflowers-protocol = { path = "../evilflowers-protocol-python", develop = true }
 
 [tool.poetry.group.notebooks.dependencies]
 jupyterlab = "^4.0"
@@ -64,6 +73,8 @@ target-version = "py312"
 
 [tool.mypy]
 python_version = "3.12"
+# needed to read evilflowers_protocol's generated `Field(None, ...)` defaults correctly
+plugins = ["pydantic.mypy"]
 strict = false
 ignore_missing_imports = true
 check_untyped_defs = true

@@ -74,6 +74,24 @@ def is_valid_isbn(isbn: str) -> bool:
     return False
 
 
+def to_isbn13(isbn: str | None) -> str | None:
+    """A valid ISBN as its 13-digit form (ISBN-10 converted), else ``None``.
+
+    Two spellings of the same book (``80-227-1234-5`` and ``9788022712345``)
+    compare equal after this.
+    """
+    if not isbn:
+        return None
+    s = normalize_isbn(isbn)
+    if not is_valid_isbn(s):
+        return None
+    if len(s) == 13:
+        return s
+    core = "978" + s[:9]
+    check = (10 - sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(core)) % 10) % 10
+    return f"{core}{check}"
+
+
 def _map_language(code: str | None) -> str | None:
     if not code:
         return None

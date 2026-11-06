@@ -25,8 +25,11 @@ def _manifest(book_id: str = "b1") -> EntryManifest:
 
 
 def test_manifest_path_layout(tmp_path):
-    path = manifest_path(tmp_path, "svf", "b1")
+    path = manifest_path(tmp_path, "svf", "b1")  # flat is the code default
     assert path == tmp_path / "svf" / "svf_b1.entry.json"
+    assert manifest_path(tmp_path, "svf", "b1", "flat") == path
+    assert manifest_path(tmp_path, "svf", "b1", "split") == (
+        tmp_path / "distribution" / "svf" / "svf_b1.entry.json")
 
 
 def test_write_read_roundtrip(tmp_path):

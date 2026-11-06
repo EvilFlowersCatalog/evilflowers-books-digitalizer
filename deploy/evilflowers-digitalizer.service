@@ -13,7 +13,11 @@ Wants=network-online.target
 Type=simple
 User=digitizer
 WorkingDirectory=/opt/evilflowers-books-digitalizer
-ExecStart=/opt/evilflowers-books-digitalizer/.venv/bin/python -m evilflowers_books_digitalizer run-corpus
+# Relative paths in the config resolve against the config file's directory.
+Environment=EVILFLOWERS_DIGITALIZER_CONFIG=/opt/evilflowers-books-digitalizer/configs/pipeline.vm.toml
+# Environment=EVILFLOWERS_LOG_FORMAT=json
+# EnvironmentFile=-/etc/evilflowers-digitalizer.env   # EVILFLOWERS_API_KEY=...
+ExecStart=/opt/evilflowers-books-digitalizer/.venv/bin/evilflowers-digitalizer run-corpus
 # resumable: a crash restarts and skips already-finished books; clean finish does not restart
 Restart=on-failure
 RestartSec=30

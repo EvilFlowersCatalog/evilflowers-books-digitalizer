@@ -20,11 +20,13 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from evilflowers_books_digitalizer import logs
 from evilflowers_books_digitalizer.cache import LocalCache
-from evilflowers_books_digitalizer.config import PROJECT_ROOT
+from evilflowers_books_digitalizer.catalog.mapping import DEFAULT_LANGUAGE
 from evilflowers_books_digitalizer.covers.renderer import CoverRenderer
 from evilflowers_books_digitalizer.metadata.catalog import MetadataCatalog
 from evilflowers_books_digitalizer.pipeline.base import Pipeline, PipelineStep
+from evilflowers_books_digitalizer.pipeline.layout import layout_from_config
 from evilflowers_books_digitalizer.pipeline.profiles import profiles_from_config
 from evilflowers_books_digitalizer.pipeline.steps import (
     AttachMetadata,
@@ -33,6 +35,7 @@ from evilflowers_books_digitalizer.pipeline.steps import (
     DownloadBook,
     EnrichPdfMetadata,
     EnsurePdfA,
+    ExtractMetadata,
     FinalizePdf,
     GenerateCover,
     OcrPages,
@@ -43,8 +46,6 @@ from evilflowers_books_digitalizer.pipeline.steps import (
 from evilflowers_books_digitalizer.sources.base import AbstractBookSource
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "pipeline.toml"
 
 
 def build_pipeline(
@@ -63,11 +64,13 @@ def build_pipeline(
     metadata + cover tail when the ``[metadata]`` block is on.
     """
     if config is None:
-        path = config_path or DEFAULT_CONFIG_PATH
-        with path.open("rb") as fh:
+        from evilflowers_books_digitalizer.runtime import resolve_config_path
+
+        with resolve_config_path(config_path).open("rb") as fh:
             config = tomllib.load(fh)
 
     st = config.get("scantailor", {})
+    enrich_cfg = config.get("enrich", {})
     docres = config.get("docres", {})
     meta_cfg = config.get("metadata", {})
     cover_cfg = config.get("cover", {})
@@ -77,7 +80,8 @@ def build_pipeline(
     output_dpi = st.get("output_dpi") or st.get("dpi", 300)
     language = config.get("ocr", {}).get("language", "auto")
 
-    steps: list[PipelineStep] = [DownloadBook(source, cache)]
+    # no tqdm bars when stderr carries JSON log lines
+    steps: list[PipelineStep] = [DownloadBook(source, cache, progress=not logs.is_json())]
 
     # Metadata is attached *before* rendering so RenderPdf can bake title/authors
     # into each PDF's XMP — that keeps the archival PDF/A valid (rewriting XMP
@@ -102,11 +106,23 @@ def build_pipeline(
     if language == "auto":
         steps.append(DetectLanguage())
     steps.append(OcrPages(language=None if language == "auto" else language, dpi=output_dpi))
+    # OCR-text metadata goes in before RenderPdf for the same XMP reason as above.
+    if enrich_cfg.get("enabled", False):
+        steps.append(
+            ExtractMetadata(
+                head_pages=int(enrich_cfg.get("head_pages", 8)),
+                tail_pages=int(enrich_cfg.get("tail_pages", 4)),
+                lookup=bool(enrich_cfg.get("lookup", True)),
+                override=bool(enrich_cfg.get("override", False)),
+                cache_dir=Path(cache.root) / "isbn_lookup",
+                faculty_map=meta_cfg.get("faculty_names"),
+            )
+        )
     steps.append(
         RenderPdf(
             profiles=profiles_from_config(config),
             dpi=output_dpi,
-            layout=render_cfg.get("layout", "flat"),
+            layout=layout_from_config(config),
         )
     )
     steps.append(EnrichPdfMetadata())
@@ -130,11 +146,13 @@ def build_pipeline(
         )
     steps.append(EnsurePdfA(validate=render_cfg.get("validate_pdfa", False)))
 
-    if catalog_cfg.get("enabled", False) and catalog_cfg.get("catalog"):
+    by_source = bool(catalog_cfg.get("by_source", False))
+    if catalog_cfg.get("enabled", False) and (catalog_cfg.get("catalog") or by_source):
         steps.append(
             WriteCatalogManifest(
-                catalog_cfg["catalog"],
-                default_language=catalog_cfg.get("default_language", "slk"),
+                catalog_cfg.get("catalog") or "",
+                by_source=by_source,
+                default_language=catalog_cfg.get("default_language", DEFAULT_LANGUAGE),
                 relation=catalog_cfg.get("relation", "open-access"),
                 entry_config=catalog_cfg.get("entry_config"),
                 author_name_order=catalog_cfg.get("author_name_order", "given_first"),

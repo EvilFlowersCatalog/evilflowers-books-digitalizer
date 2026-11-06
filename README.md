@@ -139,13 +139,18 @@ DocRes model — so no host install is required:
 
 ```bash
 docker build -t evilflowers-digitalizer .            # --build-arg DOCRES_WEIGHTS=0 to skip ~900 MB
-docker run --rm -it \
+docker run --rm --user "$(id -u):$(id -g)" \
   -v /mnt/digital-library/raw-scans:/mnt/digital-library/raw-scans:ro \
   -v $PWD/configs:/app/configs:ro \
   -v $PWD/output:/app/output -v $PWD/.cache:/app/.cache \
   evilflowers-digitalizer \
-  python -m evilflowers_books_digitalizer run-book fad '<BOOK_ID>'
+  evilflowers-digitalizer run-book fad '<BOOK_ID>'
 ```
+
+The image runs as a non-root user and reads its config from
+`$EVILFLOWERS_DIGITALIZER_CONFIG` (default `/app/configs/pipeline.toml`); relative
+paths in a config resolve against the config file's directory. Env vars, exit
+codes and JSON logs: [docs/deployment.md](docs/deployment.md).
 
 > **DocRes (optional AI enhancement).** On Apple Silicon the host MPS path is far
 > faster than the container's CPU; it lives in `~/.local/share/evilflowers-tools/`
@@ -161,16 +166,21 @@ Configure everything in `configs/pipeline.toml`.
 
 ```bash
 evilflowers-digitalizer <command>        # or: python -m evilflowers_books_digitalizer <command>
+  check [--catalog]          # preflight: mounts, writable dirs, disk, binaries [, catalog]
   list svf                   # books on a source
   validate-catalog           # Excel match/miss report across sources
   preview-cover svf <id>     # render one cover to iterate on style
-  run-book svf <id>          # one book, end to end
-  run-source svf --limit 3   # a faculty (process pool)
+  run-book svf <id> [<id>…] [--publish]   # books end to end, one after another
+  run-source svf --limit 3 [--publish]    # a faculty (process pool)
   run-corpus                 # the whole corpus
   monitor                    # live TUI dashboard (progress, throughput, ETA)
   stats                      # snapshot table (--json | --export csv|json|html)
-  publish-catalog            # import produced books into EvilFlowers Catalog
+  publish-book svf <id>… [--dry-run] [--force]   # import given books into EvilFlowers Catalog
+  publish-catalog            # import all produced books (resumable)
 ```
+
+`--config` is optional when `EVILFLOWERS_DIGITALIZER_CONFIG` is set;
+`EVILFLOWERS_LOG_FORMAT=json` switches stderr to JSON lines.
 
 Run it under screen / systemd / Docker — see `deploy/` and:
 

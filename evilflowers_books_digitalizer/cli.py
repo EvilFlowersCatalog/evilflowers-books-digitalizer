@@ -1,11 +1,13 @@
 """Command-line interface for the digitalization pipeline.
 
+    evilflowers-digitalizer <command> [...]
     python -m evilflowers_books_digitalizer <command> [...]
 
 Commands:
+    check            preflight: mounts, writable dirs, disk, binaries [, catalog]
     list             list books on a source
-    run-book         digitize one book (direct, for testing)
-    run-source       digitize a faculty (process-pool runner)
+    run-book         digitize the given books in turn [and publish each]
+    run-source       digitize a faculty (process-pool runner) [and publish]
     run-corpus       digitize every configured faculty
     build-catalog    walk the sources and write a (ISBN-enriched) catalog .xlsx
     validate-catalog report Excel catalog match/miss against the mounted sources
@@ -13,8 +15,16 @@ Commands:
     stats            summarize results (rich table; --json or --export csv|json|html)
     monitor          live TUI dashboard over the batch reports
     export-manifests write catalog entry manifests (*.entry.json) for produced books
-    publish-book     import one produced book into the EvilFlowers Catalog
+    publish-book     import produced books into the EvilFlowers Catalog
     publish-catalog  import produced books into the EvilFlowers Catalog (idempotent)
+
+Environment:
+    EVILFLOWERS_DIGITALIZER_CONFIG  config file when --config is not given
+    EVILFLOWERS_LOG_FORMAT          text (default) | json — log lines on stderr
+    EVILFLOWERS_LOG_LEVEL           DEBUG | INFO (default) | WARN | ERROR
+    EVILFLOWERS_API_KEY             catalog token (name set by [catalog].api_key_env)
+
+Results (JSON rows/summaries) go to stdout; logs go to stderr.
 """
 
 from __future__ import annotations
@@ -23,14 +33,66 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from evilflowers_books_digitalizer.runtime import build_catalog, load_runtime
+from evilflowers_books_digitalizer.logs import add_file_handler, setup_logging
+from evilflowers_books_digitalizer.runtime import CONFIG_ENV, build_catalog, load_runtime
 from evilflowers_books_digitalizer.sources import build_source
+
+logger = logging.getLogger("evilflowers_books_digitalizer.cli")
 
 
 def _add_config_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config", help="path to pipeline.toml (default: configs/pipeline.toml)")
+    parser.add_argument(
+        "--config",
+        help=f"path to pipeline.toml (default: ${CONFIG_ENV}, else configs/pipeline.toml)",
+    )
+
+
+def _has_error(rows: list[dict[str, Any]]) -> bool:
+    """True if a book failed to digitize or to publish."""
+    return any(
+        row.get("status") == "error" or (row.get("publish") or {}).get("status") == "error"
+        for row in rows
+    )
+
+
+def _publish_hook(config_path: str | None) -> Callable[[dict[str, Any]], None]:
+    """``on_result`` hook: publish each book that digitized (or was already done)."""
+    from evilflowers_books_digitalizer.catalog.publisher import Publisher
+
+    publisher: Publisher | None = None
+
+    def hook(row: dict[str, Any]) -> None:
+        nonlocal publisher
+        if row.get("status") not in ("ok", "skipped"):
+            return
+        if publisher is None:
+            publisher = Publisher(load_runtime(config_path))
+        if not publisher.settings.enabled:
+            row["publish"] = {"status": "error", "error": "[catalog].enabled is false"}
+            return
+        row["publish"] = publisher.publish_book(str(row["source"]), str(row["book_id"]))
+
+    return hook
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    from evilflowers_books_digitalizer.preflight import Check, run_checks
+
+    try:
+        rt = load_runtime(args.config)
+    except (OSError, ValueError) as exc:  # missing file, bad TOML
+        print(Check("config", False, str(exc)).line())
+        return 1
+    checks = run_checks(rt, catalog=args.catalog)
+    for check in checks:
+        print(check.line())
+    failed = [c for c in checks if not c.ok]
+    print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed", file=sys.stderr)
+    return 1 if failed else 0
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -45,26 +107,42 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_run_book(args: argparse.Namespace) -> int:
-    from evilflowers_books_digitalizer.batch import process_book
+    from evilflowers_books_digitalizer.runner import run_source
 
-    row = process_book(
+    _setup_run_logging(args)
+    res = run_source(
         args.source,
-        args.book_id,
+        book_ids=list(args.book_ids),
+        max_parallel=1,  # "each id in turn"
         jobs=args.jobs,
         keep_cache=args.keep_cache,
         config_path=args.config,
+        on_result=_publish_hook(args.config) if args.publish else None,
     )
-    print(json.dumps(row, indent=2, ensure_ascii=False))
-    return 1 if row.get("status") == "error" else 0
+    print(json.dumps(res["rows"], indent=2, ensure_ascii=False))
+    return 1 if _has_error(res["rows"]) else 0
 
 
 def cmd_run_source(args: argparse.Namespace) -> int:
     from evilflowers_books_digitalizer.runner import run_source
 
     _setup_run_logging(args)
-    res = run_source(args.source, limit=args.limit, config_path=args.config)
-    print(json.dumps(res["counts"], indent=2))
-    return 0
+    res = run_source(
+        args.source,
+        limit=args.limit,
+        config_path=args.config,
+        on_result=_publish_hook(args.config) if args.publish else None,
+    )
+    if args.publish:
+        published: dict[str, int] = {}
+        for row in res["rows"]:
+            status = (row.get("publish") or {}).get("status")
+            if status:
+                published[status] = published.get(status, 0) + 1
+        print(json.dumps({"digitize": res["counts"], "publish": published}, indent=2))
+    else:  # unchanged shape: the bare digitization counts
+        print(json.dumps(res["counts"], indent=2))
+    return 1 if _has_error(res["rows"]) else 0
 
 
 def cmd_run_corpus(args: argparse.Namespace) -> int:
@@ -86,13 +164,14 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 def _setup_run_logging(args: argparse.Namespace) -> None:
     """Add a timestamped file log (alongside the console) for long runs."""
     rt = load_runtime(args.config)
-    log_file = Path(args.log_file) if args.log_file else rt.output_dir / "logs" / "digitizer.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(log_file)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logging.getLogger().addHandler(handler)
-    logging.getLogger().setLevel(logging.INFO)
-    logging.info("logging to %s", log_file)
+    log_arg = getattr(args, "log_file", None)
+    log_file = Path(log_arg) if log_arg else rt.output_dir / "logs" / "digitizer.log"
+    try:
+        add_file_handler(log_file)
+    except OSError as exc:  # a read-only output volume must not stop the run
+        logger.warning("cannot write log file %s: %s", log_file, exc)
+        return
+    logger.info("logging to %s", log_file)
 
 
 def cmd_build_catalog(args: argparse.Namespace) -> int:
@@ -129,7 +208,10 @@ def cmd_build_catalog(args: argparse.Namespace) -> int:
         print(f"  resolved {enricher.hits}, no match {enricher.misses}, "
               f"transient {enricher.transient}", file=sys.stderr)
 
-    out = Path(args.out) if args.out else Path(rt.metadata.get("excel_path", "configs/catalog.xlsx"))
+    out = (
+        Path(args.out) if args.out
+        else Path(rt.metadata.get("excel_path") or rt.config_dir / "catalog.xlsx")
+    )
     write_draft_xlsx(drafts, out, enricher=enricher)
     print(f"wrote {out}  ({len(drafts)} books)")
     return 0
@@ -137,7 +219,7 @@ def cmd_build_catalog(args: argparse.Namespace) -> int:
 
 def cmd_validate_catalog(args: argparse.Namespace) -> int:
     rt = load_runtime(args.config)
-    catalog = build_catalog(rt.metadata)
+    catalog = build_catalog(rt.metadata, base_dir=rt.config_dir)
     if catalog is None:
         print("metadata disabled or no excel_path — nothing to validate", file=sys.stderr)
         return 1
@@ -175,7 +257,7 @@ def cmd_preview_cover(args: argparse.Namespace) -> int:
     cover_cfg.setdefault("enabled", True)
     renderer = CoverRenderer.from_config(cover_cfg)
 
-    catalog = build_catalog(rt.metadata)
+    catalog = build_catalog(rt.metadata, base_dir=rt.config_dir)
     faculty = rt.faculty_names().get(args.source, args.source.upper())
     if catalog is not None:
         meta = catalog.lookup(args.book_id, faculty=faculty)
@@ -249,11 +331,14 @@ def cmd_export_manifests(args: argparse.Namespace) -> int:
 
 
 def cmd_publish_book(args: argparse.Namespace) -> int:
-    from evilflowers_books_digitalizer.catalog.publisher import publish_book
+    from evilflowers_books_digitalizer.catalog.publisher import publish_books
 
-    row = publish_book(args.source, args.book_id, config_path=args.config, dry_run=args.dry_run)
-    print(json.dumps(row, indent=2, ensure_ascii=False))
-    return 1 if row.get("status") == "error" else 0
+    rows = publish_books(
+        args.source, list(args.book_ids),
+        config_path=args.config, dry_run=args.dry_run, force=args.force,
+    )
+    print(json.dumps(rows, indent=2, ensure_ascii=False))
+    return 1 if _has_error(rows) else 0
 
 
 def cmd_publish_catalog(args: argparse.Namespace) -> int:
@@ -279,23 +364,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p = sub.add_parser("check", help="preflight: mounts, dirs, disk, binaries; exit 1 on failure")
+    p.add_argument("--catalog", action="store_true",
+                   help="also check the API key, catalog reachability and target catalogs")
+    _add_config_arg(p)
+    p.set_defaults(func=cmd_check)
+
     p = sub.add_parser("list", help="list books on a source")
     p.add_argument("source")
     p.add_argument("--limit", type=int)
     _add_config_arg(p)
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("run-book", help="digitize one book directly")
+    p = sub.add_parser("run-book", help="digitize books one after another (resumable)")
     p.add_argument("source")
-    p.add_argument("book_id")
-    p.add_argument("--jobs", type=int)
+    p.add_argument("book_ids", nargs="+", metavar="ID", help="book directory name(s)")
+    p.add_argument("--publish", action="store_true",
+                   help="publish each book to the catalog right after it succeeds")
+    p.add_argument("--jobs", type=int, help="OCR threads (default: [orchestration].ocr_jobs)")
     p.add_argument("--keep-cache", action="store_true")
+    p.add_argument("--log-file", help="log file (default: <output_dir>/logs/digitizer.log)")
     _add_config_arg(p)
     p.set_defaults(func=cmd_run_book)
 
     p = sub.add_parser("run-source", help="digitize a faculty (process pool)")
     p.add_argument("source")
     p.add_argument("--limit", type=int)
+    p.add_argument("--publish", action="store_true",
+                   help="publish each book to the catalog as soon as it succeeds")
     p.add_argument("--log-file", help="log file (default: <output_dir>/logs/digitizer.log)")
     _add_config_arg(p)
     p.set_defaults(func=cmd_run_source)
@@ -347,10 +443,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_arg(p)
     p.set_defaults(func=cmd_export_manifests)
 
-    p = sub.add_parser("publish-book", help="import one produced book into the catalog")
+    p = sub.add_parser("publish-book", help="import produced books into the catalog")
     p.add_argument("source")
-    p.add_argument("book_id")
-    p.add_argument("--dry-run", action="store_true", help="build the manifest but don't push")
+    p.add_argument("book_ids", nargs="+", metavar="ID", help="book directory name(s)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="build + validate payloads and write manifests; no HTTP")
+    p.add_argument("--force", action="store_true",
+                   help="ignore earlier published/skipped report rows (never duplicates)")
     _add_config_arg(p)
     p.set_defaults(func=cmd_publish_book)
 
@@ -367,9 +466,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    try:
+        setup_logging()
+    except ValueError as exc:  # bad EVILFLOWERS_LOG_FORMAT / _LEVEL
+        print(f"evilflowers-digitalizer: {exc}", file=sys.stderr)
+        return 2
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    return int(args.func(args))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from evilflowers_books_digitalizer.pipeline.steps.detect_language import DetectL
 from evilflowers_books_digitalizer.pipeline.steps.docres import DocResEnhance
 from evilflowers_books_digitalizer.pipeline.steps.download import DownloadBook
 from evilflowers_books_digitalizer.pipeline.steps.enrich import EnrichPdfMetadata
+from evilflowers_books_digitalizer.pipeline.steps.extract_metadata import ExtractMetadata
 from evilflowers_books_digitalizer.pipeline.steps.finalize import FinalizePdf
 from evilflowers_books_digitalizer.pipeline.steps.manifest import WriteCatalogManifest
 from evilflowers_books_digitalizer.pipeline.steps.ocr import OcrPages
@@ -20,6 +21,7 @@ __all__ = [
     "DownloadBook",
     "EnrichPdfMetadata",
     "EnsurePdfA",
+    "ExtractMetadata",
     "FinalizePdf",
     "GenerateCover",
     "OcrPages",

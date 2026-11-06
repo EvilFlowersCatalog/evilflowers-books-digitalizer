@@ -88,3 +88,41 @@ def test_catalog_manifest_skipped_without_target(tmp_path):
     config = {**BASE_CONFIG, "catalog": {"enabled": True}}
     pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
     assert "manifest" not in _names(pipe)
+
+
+def test_catalog_manifest_with_by_source_and_no_default(tmp_path):
+    config = {**BASE_CONFIG, "catalog": {"enabled": True, "catalog": "", "by_source": True}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    manifest = pipe.steps[-1]
+    assert manifest.name == "manifest" and manifest.by_source is True
+
+
+def test_extract_metadata_sits_between_ocr_and_render(tmp_path):
+    config = {**BASE_CONFIG, "enrich": {"enabled": True, "head_pages": 5, "tail_pages": 2,
+                                        "lookup": False, "override": True}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    names = _names(pipe)
+    assert names.index("extract_metadata") == names.index("ocr") + 1
+    assert names.index("render") == names.index("extract_metadata") + 1
+    step = pipe.steps[names.index("extract_metadata")]
+    assert (step.head_pages, step.tail_pages, step.lookup, step.override) == (5, 2, False, True)
+    assert step.cache_dir == tmp_path / "isbn_lookup"
+
+
+def test_extract_metadata_off_by_default(tmp_path):
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=BASE_CONFIG)
+    assert "extract_metadata" not in _names(pipe)
+
+
+def test_k8s_config_builds_the_expected_pipeline(tmp_path):
+    import tomllib
+
+    from test_runtime import K8S_CONFIG
+
+    config = tomllib.loads(K8S_CONFIG)
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config, catalog=None)
+    assert _names(pipe) == [
+        "download", "scantailor", "language", "ocr", "extract_metadata", "render",
+        "enrich", "cover", "finalize", "pdfa", "manifest",
+    ]
+    assert next(s for s in pipe.steps if s.name == "render").layout == "split"

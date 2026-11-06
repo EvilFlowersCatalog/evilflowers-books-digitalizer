@@ -63,7 +63,7 @@ def _paste_logo(
     """Paste ``logo`` scaled to ``target_w`` centred at ``center_x``; return its bottom y."""
     scale = target_w / logo.width
     w, h = target_w, max(1, round(logo.height * scale))
-    resized = logo.resize((w, h), Image.LANCZOS)
+    resized = logo.resize((w, h), Image.Resampling.LANCZOS)
     x = round(center_x - w / 2)
     img.paste(resized, (x, top), resized)
     return top + h
@@ -170,7 +170,7 @@ class StuTemplate(CoverTemplate):
             draw, title_lines, title_font, top=y, line_height=title_lh,
             color=palette.text, center_x=center_x,
         )
-        if sub_lines:
+        if sub_lines and sub_font is not None and sub_lh is not None:
             y += round(height * 0.022)
             y = draw_block(
                 draw, sub_lines, sub_font, top=y, line_height=sub_lh,
@@ -187,7 +187,7 @@ class StuTemplate(CoverTemplate):
         )
         y += rule_gap
 
-        if author_lines:
+        if author_lines and author_font is not None and author_lh is not None:
             draw_block(
                 draw, author_lines, author_font, top=y, line_height=author_lh,
                 color=palette.text, center_x=center_x,

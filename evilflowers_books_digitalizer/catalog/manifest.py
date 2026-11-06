@@ -1,7 +1,9 @@
 """Read/write the per-book catalog *manifest* sidecar.
 
-A manifest is a small JSON file written next to a book's PDF
-(``output/<source>/<slug>.entry.json``) describing the catalog ``Entry`` to
+A manifest is a small JSON file written next to a book's distribution PDF
+(``<output>/distribution/<source>/<slug>.entry.json`` in the ``split`` layout,
+``<output>/<source>/<slug>.entry.json`` in ``flat``; see
+:mod:`evilflowers_books_digitalizer.pipeline.layout`) describing the catalog ``Entry`` to
 create and the artifacts to attach. It is a durable, reviewable, re-runnable
 artifact: digitization produces it (see ``WriteCatalogManifest``), and
 publishing consumes it (see :mod:`.publisher`) — the two are decoupled, so an
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import Iterator
 
 from evilflowers_books_digitalizer.catalog.mapping import EntryManifest
+from evilflowers_books_digitalizer.pipeline.layout import DEFAULT_LAYOUT, Layout, sidecar_path
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +27,11 @@ logger = logging.getLogger(__name__)
 MANIFEST_SUFFIX = ".entry.json"
 
 
-def manifest_path(output_dir: Path, source: str, book_id: str) -> Path:
-    """Where a book's manifest lives (sibling of its PDF)."""
-    return Path(output_dir) / source / f"{source}_{book_id}{MANIFEST_SUFFIX}"
+def manifest_path(
+    output_dir: Path, source: str, book_id: str, layout: Layout = DEFAULT_LAYOUT
+) -> Path:
+    """Where a book's manifest lives (sibling of its distribution PDF)."""
+    return sidecar_path(Path(output_dir), source, f"{source}_{book_id}", MANIFEST_SUFFIX, layout)
 
 
 def write_manifest(manifest: EntryManifest, path: Path) -> Path:

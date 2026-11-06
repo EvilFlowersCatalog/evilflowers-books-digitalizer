@@ -19,6 +19,8 @@ import shutil
 import time
 from pathlib import Path
 
+from evilflowers_books_digitalizer.logs import log_context, setup_logging
+
 logger = logging.getLogger(__name__)
 
 QUIET_LOGGERS = ("httpx", "httpcore", "ocrmypdf", "fontTools", "pikepdf")
@@ -55,10 +57,35 @@ def process_book(
     workers' cleanups to free space before staging. ``config_path`` overrides
     ``configs/pipeline.toml``.
     """
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # a spawned/forkserver worker inherits no handlers; this is a no-op in-process
+    setup_logging()
     for noisy in QUIET_LOGGERS:
         logging.getLogger(noisy).setLevel(logging.ERROR)
+    with log_context(source=source_key, book_id=book_id, slug=f"{source_key}_{book_id}"):
+        row = _process_book(
+            source_key, book_id, jobs=jobs, min_free_gb=min_free_gb,
+            disk_wait_minutes=disk_wait_minutes, keep_cache=keep_cache, config_path=config_path,
+        )
+        level = logging.ERROR if row.get("status") == "error" else logging.INFO
+        logger.log(
+            level, "book %s%s", row.get("status"),
+            f": {row['error']}" if row.get("error") else "",
+            extra={"status": row.get("status"),
+                   "duration_ms": round(float(row.get("minutes") or 0) * 60_000)},
+        )
+        return row
 
+
+def _process_book(
+    source_key: str,
+    book_id: str,
+    *,
+    jobs: int | None,
+    min_free_gb: float | None,
+    disk_wait_minutes: float,
+    keep_cache: bool,
+    config_path: str | None,
+) -> dict:
     # heavy imports stay inside the worker so the parent stays light
     from evilflowers_books_digitalizer import BookContext, LocalCache, build_source
     from evilflowers_books_digitalizer.pipeline.factory import build_pipeline
@@ -71,7 +98,7 @@ def process_book(
     if min_free_gb is None:
         min_free_gb = rt.orchestration.get("min_free_gb", 40.0)
     cache = LocalCache(rt.cache_dir)
-    layout = rt.config.get("render", {}).get("layout", "flat")
+    layout = rt.layout
     row: dict = {"source": source_key, "book_id": book_id, "status": "ok"}
     started = time.perf_counter()
 
@@ -83,8 +110,11 @@ def process_book(
     progress = BookProgress(rt.output_dir, source_key, book_id)
     progress.start()
 
+    # measure the cache volume itself: its parent may be another filesystem
+    # (in the k8s Job /data/cache is a mount, /data is the container root)
+    rt.cache_dir.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + disk_wait_minutes * 60
-    while free_gb(rt.cache_dir.parent) < min_free_gb:
+    while free_gb(rt.cache_dir) < min_free_gb:
         if time.monotonic() > deadline:
             progress.finish()
             return {**row, "status": "error", "error": f"low disk (<{min_free_gb} GB) — timed out"}
@@ -101,7 +131,7 @@ def process_book(
     )
     try:
         source = build_source(rt.source, source_key)
-        catalog = build_catalog(rt.metadata)
+        catalog = build_catalog(rt.metadata, base_dir=rt.config_dir)
         pipeline = build_pipeline(source, cache, jobs=jobs, config=rt.config, catalog=catalog)
         progress.start(len(pipeline.steps))
         ctx = pipeline.run(ctx, on_step=progress.update)
@@ -122,6 +152,7 @@ def process_book(
             manifest=str(manifest) if manifest else None,
         )
     except Exception as exc:  # noqa: BLE001 — isolate per-book failures
+        logger.error("pipeline failed", exc_info=True)
         row.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500])
     finally:
         progress.finish()

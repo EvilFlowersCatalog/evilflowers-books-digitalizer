@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,10 @@ def _append(report: Path, row: dict[str, Any]) -> None:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+#: called in the parent process with each finished book's row (may add keys to it)
+OnResult = Callable[[dict[str, Any]], None]
+
+
 def run_source(
     source_key: str,
     *,
@@ -52,11 +57,20 @@ def run_source(
     limit: int | None = None,
     max_parallel: int | None = None,
     config_path: str | None = None,
+    jobs: int | None = None,
+    keep_cache: bool = False,
+    on_result: OnResult | None = None,
 ) -> dict[str, Any]:
-    """Digitize all books of one faculty; returns a counts/rows summary."""
+    """Digitize books of one faculty (all, or ``book_ids`` in order).
+
+    ``on_result(row)`` runs in this process right after each book finishes and
+    before the row is written to the report — ``--publish`` hooks in here.
+    Returns a counts/rows summary.
+    """
     rt = load_runtime(config_path)
     orch = rt.orchestration
-    jobs = orch.get("ocr_jobs")
+    if jobs is None:
+        jobs = orch.get("ocr_jobs")
     parallel = max_parallel if max_parallel is not None else orch.get("max_parallel_books", 4)
 
     ids = book_ids or build_source(rt.source, source_key).list_books()
@@ -70,15 +84,26 @@ def run_source(
     started = time.monotonic()
     rows: list[dict[str, Any]] = []
 
+    def finished(index: int, row: dict[str, Any]) -> None:
+        if on_result is not None:
+            try:
+                on_result(row)
+            except Exception as exc:  # noqa: BLE001 — a hook must not stop the batch
+                logger.error("result hook failed for %s: %s", row.get("book_id"), exc,
+                             exc_info=True)
+                row["hook_error"] = f"{type(exc).__name__}: {exc}"[:500]
+        rows.append(row)
+        _append(report, row)
+        _log_progress(index, len(ids), row)
+
     if parallel <= 1:
         for i, book_id in enumerate(ids, 1):
-            rows.append(self_row := _run_one(source_key, book_id, jobs, config_path))
-            _append(report, self_row)
-            _log_progress(i, len(ids), self_row)
+            finished(i, _run_one(source_key, book_id, jobs, config_path, keep_cache))
     else:
         with ProcessPoolExecutor(max_workers=parallel) as executor:
             futures = {
-                executor.submit(process_book, source_key, b, jobs=jobs, config_path=config_path): b
+                executor.submit(process_book, source_key, b, jobs=jobs,
+                                keep_cache=keep_cache, config_path=config_path): b
                 for b in ids
             }
             for i, future in enumerate(as_completed(futures), 1):
@@ -88,9 +113,7 @@ def run_source(
                 except Exception as exc:  # noqa: BLE001 — isolate per-book crashes
                     row = {"source": source_key, "book_id": book_id, "status": "error",
                            "error": f"{type(exc).__name__}: {exc}"[:500]}
-                rows.append(row)
-                _append(report, row)
-                _log_progress(i, len(ids), row)
+                finished(i, row)
 
     counts = _tally(rows)
     logger.info("source %s done in %.1f min: %s — report %s",
@@ -118,10 +141,17 @@ def run_corpus(
     return {"totals": totals, "sources": {k: v["counts"] for k, v in results.items()}}
 
 
-def _run_one(source_key: str, book_id: str, jobs: int | None, config_path: str | None) -> dict:
+def _run_one(
+    source_key: str,
+    book_id: str,
+    jobs: int | None,
+    config_path: str | None,
+    keep_cache: bool = False,
+) -> dict:
     """Sequential in-process call (notebook/test-safe path)."""
     try:
-        return process_book(source_key, book_id, jobs=jobs, config_path=config_path)
+        return process_book(source_key, book_id, jobs=jobs, keep_cache=keep_cache,
+                            config_path=config_path)
     except Exception as exc:  # noqa: BLE001
         return {"source": source_key, "book_id": book_id, "status": "error",
                 "error": f"{type(exc).__name__}: {exc}"[:500]}
@@ -129,4 +159,6 @@ def _run_one(source_key: str, book_id: str, jobs: int | None, config_path: str |
 
 def _log_progress(done: int, total: int, row: dict[str, Any]) -> None:
     logger.info("[%d/%d] %s/%s: %s (%s min)", done, total, row.get("source"),
-                row.get("book_id"), row.get("status"), row.get("minutes"))
+                row.get("book_id"), row.get("status"), row.get("minutes"),
+                extra={"source": row.get("source"), "book_id": row.get("book_id"),
+                       "status": row.get("status")})

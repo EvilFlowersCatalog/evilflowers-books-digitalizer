@@ -11,12 +11,13 @@
 # low-storage cleanup would delete the cached source TIFFs. --keep-cache disables it.
 
 [paths]
-cache_dir = ".cache"
-output_dir = "output"
+# relative paths resolve against this file's directory (configs/)
+cache_dir = "../.cache"
+output_dir = "../output"
 
 [source]
 backend = "filesystem"
-root = ".cache/scans"          # book dirs live at .cache/scans/<faculty>/<book>
+root = "../.cache/scans"       # book dirs live at .cache/scans/<faculty>/<book>
 stage_mode = "symlink"         # src == dst here, so staging is a no-op (already present)
 [source.paths]
 fad = "fad"
@@ -27,7 +28,7 @@ svf = "svf"
 
 [metadata]
 enabled = true
-excel_path = "configs/catalog.xlsx"   # slug dirs get a stub title — fine for a test
+excel_path = "catalog.xlsx"   # slug dirs get a stub title — fine for a test
 sheet = "katalog"
 key_field = "isbn"
 [metadata.columns]

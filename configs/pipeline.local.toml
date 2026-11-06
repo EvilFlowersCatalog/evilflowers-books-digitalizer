@@ -10,20 +10,21 @@
 # defaults as production, so a local run exercises the real pipeline.
 
 [paths]
-cache_dir = ".cache"
-output_dir = "output"
+# relative paths resolve against this file's directory (configs/)
+cache_dir = "../.cache"
+output_dir = "../output"
 
 [source]
 # WebDAV for local testing (needs credentials.toml + VPN). Switch to
 # "filesystem" + a local root if you manually stage books to disk instead.
 backend = "webdav"
 # Used only by the filesystem backend; harmless for webdav.
-root = ".cache/raw-scans"
+root = "../.cache/raw-scans"
 stage_mode = "symlink"
 
 [metadata]
 enabled = true
-excel_path = "configs/catalog.xlsx"   # absent -> books get stub titles (fine for a test)
+excel_path = "catalog.xlsx"   # absent -> books get stub titles (fine for a test)
 sheet = "katalog"
 key_field = "isbn"
 [metadata.columns]
