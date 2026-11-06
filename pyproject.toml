@@ -38,9 +38,10 @@ include = [
 ]
 
 [tool.poetry.dependencies]
-# Local development against a sibling checkout. Once the client is pushed, switch to:
-# evilflowers-protocol = { git = "https://github.com/EvilFlowersCatalog/evilflowers-protocol-python.git", rev = "<commit>" }
-evilflowers-protocol = { path = "../evilflowers-protocol-python", develop = true }
+# Pinned to the same commit as PROTOCOL_REF in the Dockerfile; bump both together.
+# For local development against a sibling checkout, temporarily use:
+# evilflowers-protocol = { path = "../evilflowers-protocol-python", develop = true }
+evilflowers-protocol = { git = "https://github.com/EvilFlowersCatalog/evilflowers-protocol-python.git", rev = "62c05d7650381bfcc3dd8ebeb0d733fc9c83e494" }
 
 [tool.poetry.group.notebooks.dependencies]
 jupyterlab = "^4.0"
