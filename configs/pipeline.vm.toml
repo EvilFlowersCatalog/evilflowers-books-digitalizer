@@ -172,6 +172,17 @@ pdfa = "2b"
 [ocr]
 language = "auto"
 
+[database]
+enabled = true                  # sqlite at <output_dir>/digitizer.db (see pipeline.toml)
+
+[viewer]
+previews = true
+preview_px = 1600
+
+[reflow]
+enabled = false                 # opt-in EPUB edition (docs/reflow_edition.md)
+vlm = "none"
+
 [finalize]
 # Reading-experience polish (notebook 09): outline bookmarks from hOCR
 # headings, /PageLabels from printed page numbers, web-optimized (linearized)

@@ -1,0 +1,111 @@
+# Shared pod template for every Deployment that runs the studio image (api + workers).
+# Applied by kustomization.yaml as a patch on `app.kubernetes.io/component in (api,worker)`,
+# so the five manifests stay short and cannot drift apart (one place for security,
+# telemetry, config, secrets and mounts). Each target names its container "studio".
+#
+# Conventions: evilflowers-knowledge Cookbooks/Deploy-a-Service (§2 pod template,
+# §3 telemetry contract).
+#
+# Traces: NO `elvira.stuba.sk/instrumentation: otel-sdk` label, on purpose. The app has no
+# OpenTelemetry SDK (no opentelemetry-* import or dependency): it exports no spans, so
+# Beyla is the only tracer and nothing is traced twice. The OTEL_* env below names the
+# service for Beyla/alloy. Add the label in the same change that adds an SDK exporter.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: studio-pod-defaults           # ignored: the patch target selects the Deployments
+spec:
+  template:
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      imagePullSecrets: [{ name: ghcr-pull }]
+      nodeSelector: { elvira.stuba.sk/workload: apps }
+      securityContext:
+        runAsNonRoot: true
+        # Any non-root uid works: the NFS exports squash every client uid to the scans
+        # owner (all_squash,anonuid=…), and local-path dirs are world-writable.
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      # Every studio pod migrates before it starts: a worker of a new image must never run
+      # against an older schema (e.g. 0003 runs.heartbeat_at, used by studio.recover_runs).
+      # An init container, not a pre-sync Job: k3s applies the manifests directory with no
+      # hook ordering, and a Job's pod template is immutable (a new image tag would fail to
+      # apply). `alembic upgrade head` is a no-op when current. Pods starting together may
+      # race on the same revision: Postgres DDL is transactional, so the loser rolls back,
+      # exits non-zero, and its retry finds the schema at head.
+      initContainers:
+        - name: migrate
+          image: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer:master
+          imagePullPolicy: Always
+          # $STUDIO_DATABASE_URL overrides the config file's database_url.
+          command: ["evilflowers-digitalizer", "studio", "migrate"]
+          envFrom:
+            - configMapRef: { name: studio-env }        # STUDIO_CONFIG=/etc/studio/studio.toml
+          env:
+            - name: STUDIO_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: studio-secrets, key: database-url } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/studio, readOnly: true }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      containers:
+        - name: studio
+          image: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer:master
+          imagePullPolicy: Always        # floating tag: a restart is a redeploy
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          envFrom:
+            - configMapRef: { name: studio-env }
+          env:
+            # --- secrets (Secret studio-secrets; see secret.example.yaml) ---
+            - name: STUDIO_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: studio-secrets, key: database-url } }
+            - name: STUDIO_REDIS_URL
+              valueFrom: { secretKeyRef: { name: studio-secrets, key: redis-url } }
+            - name: EVILFLOWERS_API_KEY
+              valueFrom: { secretKeyRef: { name: studio-secrets, key: evilflowers-api-key, optional: true } }
+            # --- telemetry contract (alloy-node on the pod's own node) ---
+            - name: HOST_IP
+              valueFrom: { fieldRef: { fieldPath: status.hostIP } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_UID
+              valueFrom: { fieldRef: { fieldPath: metadata.uid } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: DEPLOYMENT_ENVIRONMENT
+              valueFrom: { configMapKeyRef: { name: studio-env, key: DEPLOYMENT_ENVIRONMENT } }
+            - name: OTEL_SERVICE_NAME
+              valueFrom: { fieldRef: { fieldPath: "metadata.labels['app.kubernetes.io/name']" } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(HOST_IP):4318"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: >-
+                service.namespace=elvira,deployment.environment.name=$(DEPLOYMENT_ENVIRONMENT),service.instance.id=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),k8s.node.name=$(NODE_NAME)
+          volumeMounts:
+            - { name: config, mountPath: /etc/studio, readOnly: true }
+            - { name: raw-scans, mountPath: /data/raw-scans, readOnly: true }
+            - { name: digitized, mountPath: /data/digitized }
+            - { name: scratch, mountPath: /scratch }
+            # per-pod /tmp on scratch, not the node's small root disk (HOME=/tmp too)
+            - { name: scratch, mountPath: /tmp, subPathExpr: "tmp/$(POD_NAME)" }
+      volumes:
+        - name: config
+          configMap: { name: studio-config }
+        - name: raw-scans
+          persistentVolumeClaim: { claimName: raw-scans, readOnly: true }
+        - name: digitized
+          persistentVolumeClaim: { claimName: digitized }
+        - name: scratch
+          persistentVolumeClaim: { claimName: scratch }

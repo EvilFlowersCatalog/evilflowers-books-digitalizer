@@ -1,0 +1,267 @@
+/* Layout shared by the list/detail screens (the page studio has its own). */
+.screen {
+  max-width: 1480px;
+  padding: var(--sp-5) var(--sp-6) var(--sp-7);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px var(--sp-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 5px var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.table tr[aria-selected="true"] {
+  background: color-mix(in srgb, var(--focus) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.titleCell a {
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.titleCell a:hover {
+  text-decoration: underline;
+}
+
+.titleCell small {
+  display: block;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.flags {
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.dl dt {
+  color: var(--text-muted);
+}
+
+.dl dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* `input`/`select` are global classes (styles/global.css): inside a CSS module they
+   must be marked :global, or they compile to hashed local names that match nothing */
+.toolbar :global(.input),
+.toolbar :global(.select) {
+  width: auto;
+}
+
+.bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.feed {
+  max-height: 420px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.feed li {
+  display: grid;
+  grid-template-columns: 64px 92px 1fr;
+  gap: var(--sp-3);
+  padding: 4px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.feed time {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.feedType {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+.kpi {
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.kpi b {
+  display: block;
+  font-size: var(--fs-xxl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.kpi span {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.collection {
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.collection:last-child {
+  border-bottom: 0;
+}
+
+.collectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.collectionHead strong {
+  font-weight: 600;
+}
+
+.collectionHead code {
+  color: var(--text-faint);
+}
+
+.runRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px 70px;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.runRow a {
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.runRow small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.formGrid .wide {
+  grid-column: 1 / -1;
+}
+
+.hint {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}

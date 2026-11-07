@@ -1,0 +1,77 @@
+# Storage for the restoration studio.
+#
+# The 10 TB scan disk (vdc, xfs) is attached to gateway only. gateway's nfsd exports
+# two subtrees to the k3s node IPs (today only control, 192.168.122.60). The server
+# address lives in ONE place, nfs-server.yaml (the value the Ansible role templates):
+#
+#   /mnt/digital-library/raw-scans   ro  -> PV digitalizer-raw-scans  (ReadOnlyMany)
+#   /mnt/digital-library/digitized   rw  -> PV digitalizer-digitized  (ReadWriteMany)
+#
+# Two exports, not one with a read-only volumeMount: the scans are irreplaceable, so
+# "read-only" is enforced by the server, not by a pod spec someone may edit.
+# Static PVs (no NFS provisioner): storageClassName "" + volumeName pins each claim
+# to its volume; Retain so deleting a claim never touches the data.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: digitalizer-raw-scans
+  labels: { app.kubernetes.io/component: storage }
+spec:
+  capacity: { storage: 10Ti }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.2, hard, ro, noatime]
+  nfs:
+    server: NFS_SERVER               # set from nfs-server.yaml (kustomize replacements)
+    path: /mnt/digital-library/raw-scans
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: digitalizer-digitized
+  labels: { app.kubernetes.io/component: storage }
+spec:
+  capacity: { storage: 10Ti }
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.2, hard, noatime]
+  nfs:
+    server: NFS_SERVER               # set from nfs-server.yaml (kustomize replacements)
+    path: /mnt/digital-library/digitized
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: raw-scans
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  volumeName: digitalizer-raw-scans
+  resources: { requests: { storage: 10Ti } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: digitized
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: digitalizer-digitized
+  resources: { requests: { storage: 10Ti } }
+---
+# Fast local scratch on the workload node (/var/lib/rancher, 200 GB disk): cleaned
+# TIFFs, tile cache and every pod's /tmp (ScanTailor/pandoc temp files are large and
+# the node's root disk is only 24 GB). local-path is RWO but hostPath-backed, so all
+# studio pods share it as long as they land on the same node, which local-path's
+# node affinity guarantees.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: scratch
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: { requests: { storage: 80Gi } }

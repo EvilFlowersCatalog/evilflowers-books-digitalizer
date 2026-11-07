@@ -13,6 +13,7 @@ import evilflowers_books_digitalizer.runner as runner_mod
 
 def _fake_rt(tmp_path, **orch):
     return types.SimpleNamespace(
+        config={},   # -> default sqlite DB under output_dir (exercises migrate + queued)
         source={"backend": "filesystem", "root": "/x", "paths": {"svf": "svf", "mtf": "mtf"}},
         orchestration={"ocr_jobs": 2, "max_parallel_books": 1, **orch},
         output_dir=tmp_path / "out",

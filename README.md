@@ -1,4 +1,4 @@
-# EvilFlowers Books Digitalizer
+# EvilFlowers Restoration Studio
 
 [![Tests](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/tests.yml/badge.svg)](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/tests.yml)
 [![Docker](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/docker.yml/badge.svg)](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/actions/workflows/docker.yml)
@@ -6,17 +6,142 @@
 
 📖 **Documentation:** <https://evilflowerscatalog.github.io/evilflowers-books-digitalizer/>
 
-Digitalization pipeline for scanned books: TIFF scans → **two PDFs per book** —
-a fast **distribution** copy and a **PDF/A-2b archival** master — with Slovak
-OCR, metadata and covers, then imported into the
+![Page studio: regions coloured by kind; the two layout detectors disagree (formula vs text) and the operator decides](docs/screenshots/page-studio.png)
+
+A reusable studio for restoring scanned books. Workers turn raw TIFF scans into
+cleaned pages, OCR, layout regions, a distribution PDF, a PDF/A-2b master and an EPUB;
+operators review in the browser only what the machine was unsure about, and every book
+becomes an **Internet Archive "texts" item** that is published to the
 [EvilFlowers Catalog](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
+
+**Why.** Batch OCR of 880 scanned university books gets most pages right and some badly wrong:
+stamps over text, formulas read as prose, crops that lose a column. A pure batch
+pipeline can only rerun everything; a studio lets a person fix one region on one page,
+re-run that page in seconds, and approve the book. Everything that varies between
+libraries (scan layout, identifiers, detectors, publishing) is project configuration,
+so the same studio serves other collections.
+
+## Features
+
+- **Pipeline as workers.** Spread splitting, ScanTailor cleaning, Tesseract OCR, layout
+  detection (heuristic; DocLayout-YOLO behind config), formula recognition (PaddleOCR-VL
+  behind config), MRC rendering with archive-pdf-tools, PDF/A-2b, and a reflowable EPUB.
+  Celery queues `interactive` / `cpu` / `ai` / `io`.
+- **Quality gate.** OCR confidence, disputed regions, formula fallbacks and missing pages
+  give a score; books that fail go to a review queue, the rest are approved (and
+  optionally published) automatically.
+- **Page studio.** Deep-zoom viewer with original / spread / cleaned / PDF layers,
+  side-by-side and swipe compare, region rectangles coloured by kind, one-click decisions
+  on disputed regions, overrides (crop, deskew, split, despeckle, colour mode, OCR
+  language), LaTeX editing with a live preview, and an interactive re-run of one page.
+- **Live.** Server-sent events drive every screen; nothing polls while the stream is up.
+- **IA compatible.** `_meta.xml`, `_scandata.xml`, `_page_numbers.json`, `_files.xml`,
+  `_jp2.zip`, `_hocr.html`, `_djvu.txt`: the output tree *is* an IA item, and the IA
+  export zip unpacks into one.
+- **Catalog publishing** through `evilflowers-protocol`, idempotent: a republish updates
+  the same entry and records a new version.
+- **Training data.** Confirmed regions export as COCO / DocLayNet JSON with crops.
+
+| | |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Book](docs/screenshots/book.png) |
+| ![Swipe compare](docs/screenshots/compare-swipe.png) | ![Review queue](docs/screenshots/review-queue.png) |
+
+## Architecture
+
+```
+ SPA (React, OpenSeadragon, Annotorious)
+   │  REST /api/v1 + SSE /api/v1/events + Deep Zoom tiles
+   ▼
+ studio/api (FastAPI) ── studio/application (use cases, one transaction each)
+   │ enqueue studio.run                         │ SQLAlchemy
+   ▼                                            ▼
+ Redis (Celery broker + event bus) ◄──── Postgres (books, pages = IA leaves, regions,
+   │                                            runs, reviews, notes, publications)
+   ▼
+ studio/workers (Celery: discover, run, clean, analyze, formulas, render, gate, publish)
+   │ ports (studio/ports.py)
+   ▼
+ studio/adapters: scans · artifacts (IA tree) · imaging (ScanTailor, Pillow) · ocr
+                  layout · formula · render (pipeline/steps, reflow) · metadata
+                  catalog (EvilFlowers) · ia (meta/scandata/page_numbers/files, zip)
+```
+
+The use cases depend only on the domain, the ports and the events; adapters implement
+the ports and reuse the batch pipeline's steps (`pipeline/steps`, `reflow/`,
+`catalog/`) rather than copying them. The binding contract is
+[docs/design/studio-spec.md](docs/design/studio-spec.md); the diagrams are
+[component](docs/design/component-restoration-studio.puml),
+[deployment](docs/design/deployment-restoration-studio.puml),
+[ingest sequence](docs/design/sequence-restoration-ingest.puml) and
+[review sequence](docs/design/sequence-restoration-review.puml).
+
+## Quick start (dev stack)
+
+Needs the system tools from [Setup](#setup) (Tesseract, `scantailor-deviant-cli`,
+`jbig2enc`, `jpegoptim`, `qpdf`, pandoc), Docker for Postgres + Redis, and Node 20+ with
+pnpm for the SPA.
+
+```bash
+uv sync                                                   # or: poetry install
+docker compose -f deploy/dev/compose.yml up -d            # Postgres :55432, Redis :56379
+export STUDIO_CONFIG=$PWD/configs/studio.dev.toml         # project stu-local
+pnpm --dir frontend install && pnpm --dir frontend build  # SPA -> frontend/dist
+
+evilflowers-digitalizer studio migrate                    # schema
+evilflowers-digitalizer studio serve --port 8000          # API + SPA: http://127.0.0.1:8000
+evilflowers-digitalizer studio worker -Q interactive,cpu,ai,io
+```
+
+Then **Import** on the dashboard, open a book and click **Full run**. Point
+`scans_root` in `configs/studio.dev.toml` at your own scan tree first. The operator
+workflow is in [docs/studio.md](docs/studio.md), the screens in
+[docs/web_ui.md](docs/web_ui.md), and the split-process setup (one worker per pool,
+`pnpm dev` with hot reload) in [deploy/dev/README.md](deploy/dev/README.md).
+
+Measured on the synthetic 6-frame book (12 leaves) on a laptop: a full run takes about
+2 minutes, an interactive page re-run about 5 seconds, and the IA export is 32 MB.
+
+CLI: `evilflowers-digitalizer studio serve | worker | import | run | export-ia |
+export-training | migrate`.
+
+## Internet Archive compatibility
+
+`books.item_id` is a permanent, IA-valid identifier (`ProjectConfig.item_identifier()`),
+and every artifact is named after it. Book metadata follows `_meta.xml` (IA field names,
+repeatable fields as lists, MARC language codes, `evilflowers_` custom fields). One
+`pages` row is one IA *leaf* with scandata semantics (`pageType`, `handSide`,
+`addToAccessFormats`, `cropBox`, printed page number); only `add_to_access` decides what
+goes into the PDF and EPUB. The output tree under
+`<artifacts_root>/<project>/<item_id>/` uses IA file names, so `ia upload`,
+archive-pdf-tools, hocr-tools and BookReader work on it directly, and
+`GET /api/v1/books/{id}/export/ia` (or `studio export-ia`) builds the item zip. Details:
+[studio-spec, "Internet Archive compatibility"](docs/design/studio-spec.md#internet-archive-compatibility-mandatory).
+
+## Deployment
+
+One image (`Dockerfile`) runs the API and every worker pool; the container command picks
+the role, and the SPA is built into it. Kubernetes manifests (kustomize base + dev
+overlay, namespace `digitalizer`) are in [deploy/k8s/](deploy/k8s/README.md): `studio-api`
+with a migrating init container and `/healthz` probes, `worker-cpu`, `worker-ai`,
+`worker-io` (with beat), NFS volumes for the read-only scans and the output tree, and
+secrets from `studio-secrets`. The config is `configs/studio.k8s.toml`.
+
+```bash
+kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
+```
+
+---
+
+# Classic batch pipeline
+
+The studio grew out of this unattended batch pipeline, which still works on its own:
+TIFF scans → **two PDFs per book** (a fast **distribution** copy and a **PDF/A-2b
+archival** master) with Slovak OCR, metadata and covers, imported into the catalog.
 Built entirely on OSS tooling (Tesseract, ScanTailor, archive-pdf-tools, pikepdf,
 webdav4).
 
-Planned follow-ups on the same pipeline: embeddings for a vector database and
-richer classification for a graph database.
-
-## Architecture
+## Pipeline architecture
 
 Scans are **two-page spreads on a black scanner bed** (uncompressed RGB TIFF @ 300
 DPI, ~24 MB/frame). Frames are read by a pluggable **source** (a local mount in
@@ -88,6 +213,7 @@ package. Or skip the host install entirely and use
 brew install tesseract tesseract-lang               # required (OCR)
 brew install jbig2enc jpegoptim qpdf                # MRC mask + JPEG output + linearize
 brew install verapdf                                # optional: PDF/A-2b validation
+brew install pandoc potrace hunspell                # optional: [reflow] EPUB edition
 ```
 
 **Ubuntu / Debian (apt)**
@@ -161,7 +287,9 @@ codes and JSON logs: [docs/deployment.md](docs/deployment.md).
 For unattended multi-TB runs on a VM, the scans are a **local mount**
 (`/mnt/digital-library/raw-scans`), books are enriched from an **Excel catalog**,
 and each gets a **cover thumbnail** (real OPAC cover by ISBN, else generated). The
-batch is a single long-running process — **no orchestrator, server, or database**.
+batch is a single long-running process — no orchestrator. Progress and every path
+land in a small database (SQLite by default, fail-safe).
+Optionally each book also gets a reflowable **EPUB edition** (`[reflow]`).
 Configure everything in `configs/pipeline.toml`.
 
 ```bash
@@ -177,6 +305,8 @@ evilflowers-digitalizer <command>        # or: python -m evilflowers_books_digit
   stats                      # snapshot table (--json | --export csv|json|html)
   publish-book svf <id>… [--dry-run] [--force]   # import given books into EvilFlowers Catalog
   publish-catalog            # import all produced books (resumable)
+  db upgrade | import        # migrate the processing DB / record already-produced books
+  studio …                   # the Restoration Studio (see the top of this README)
 ```
 
 `--config` is optional when `EVILFLOWERS_DIGITALIZER_CONFIG` is set;
@@ -191,6 +321,9 @@ Run it under screen / systemd / Docker — see `deploy/` and:
 - [docs/operations.md](docs/operations.md) — monitoring, resume, disk, tuning
 - [docs/metadata_and_covers.md](docs/metadata_and_covers.md) — Excel mapping + cover sourcing
 - [docs/catalog_import.md](docs/catalog_import.md) — manifest → Catalog REST import
+- [docs/studio.md](docs/studio.md) — Restoration Studio operator guide
+- [docs/web_ui.md](docs/web_ui.md) — Studio UI screens, live updates, processing database
+- [docs/reflow_edition.md](docs/reflow_edition.md) — the born-digital EPUB edition
 
 ## Notebooks
 
@@ -243,6 +376,10 @@ evilflowers_books_digitalizer/
 ├── metadata/             Excel catalog matched to books by directory name
 ├── covers/               PIL cover renderer, templates, palettes, bundled fonts
 ├── catalog/              import layer: book -> EvilFlowers Catalog entry (manifest + REST)
+├── studio/               Restoration Studio: domain, ports, events, metadata, config,
+│                         application (use cases), api (FastAPI), workers (Celery), adapters
+├── reflow/               EPUB reflow edition (layout analysis, anchoring, VLM sidecar)
+├── db/                   SQLAlchemy models + Alembic migrations
 ├── runner.py             run_source / run_corpus — process-pool batch (no orchestrator)
 ├── reporting.py          summarize the JSONL reports (powers stats)
 ├── progress.py           per-book heartbeats (live parallel-worker view)
@@ -257,9 +394,11 @@ evilflowers_books_digitalizer/
     ├── pdfa.py           lossless PDF/A-3b → 2b re-declaration + veraPDF validation
     └── steps/            download, scantailor, ocr, render, enrich, cover, finalize, pdfa, …
 configs/pipeline.toml     production config (source, metadata, cover, orchestration)
+configs/studio.*.toml     studio configs: dev (synthetic scans) and k8s
+frontend/                 the studio SPA (React + TypeScript + Vite)
 configs/catalog.xlsx      bibliographic metadata (you provide)
-deploy/                   run the batch: systemd unit, docker-compose, runbook
-docs/                     architecture, deployment, operations, metadata & covers
+deploy/                   batch (systemd, compose, runbook); studio dev stack + k8s manifests
+docs/                     studio guide + spec, architecture, deployment, operations, metadata & covers
 notebooks/                exploration & experimentation
 credentials.toml          WebDAV secrets (gitignored; not needed for the mount backend)
 .cache/                   staged scans + share stats (gitignored)

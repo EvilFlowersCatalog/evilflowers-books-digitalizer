@@ -1,0 +1,45 @@
+# Restoration studio — local development config (dev stack: deploy/dev/compose.yml).
+#
+#   docker compose -f deploy/dev/compose.yml up -d
+#   STUDIO_CONFIG=configs/studio.dev.toml evilflowers-digitalizer studio …
+#
+# Relative paths resolve against this file's directory.
+
+[studio]
+database_url = "postgresql+psycopg://studio:studio@127.0.0.1:55432/studio"
+redis_url = "redis://127.0.0.1:56379/0"
+artifacts_root = "../output/studio"
+cache_dir = "../.cache/studio"
+
+[projects.stu-local]
+name = "STU (local synthetic scans)"
+scans_root = "/private/tmp/claude-501/-Users-jdubec-Projects-EvilFlowers-evilflowers-books-digitalizer/6dab462b-be87-4faf-8b44-afb98fe19ba7/scratchpad/e2e/scans"
+book_pattern = "{collection}/{book}"
+frames_glob = "*.tif"
+item_id = "stu-{collection}-{book}"
+language = "slk"
+ocr_language = "slk+eng"
+layout_detectors = ["heuristic", "doclayout"]   # doclayout: [pipeline.layout] below
+formula_recognizer = "none"          # "paddleocr-vl" when the tool venv + weights exist
+outputs = ["pdf", "pdfa", "epub"]
+auto_publish = "never"
+
+[projects.stu-local.collections]
+fei = "Fakulta elektrotechniky a informatiky STU"
+
+[projects.stu-local.publish]
+target = "none"
+
+[projects.stu-local.pipeline.scantailor]
+color_mode = "mixed"
+margins_mm = 8.0
+dpi = 300
+output_dpi = 600
+
+# DocLayout-YOLO (ONNX, CPU). model defaults to
+# ~/.local/share/evilflowers-tools/models/doclayout-yolo/doclayout_yolo_docstructbench_imgsz1024.onnx
+[projects.stu-local.pipeline.layout]
+conf = 0.25        # drop detections below this score
+iou = 0.5          # per-class NMS
+imgsz = 1024       # the model's training size
+threads = 0        # onnxruntime intra-op threads; 0 = all cores

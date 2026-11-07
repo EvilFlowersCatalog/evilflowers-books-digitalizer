@@ -17,6 +17,9 @@ Commands:
     export-manifests write catalog entry manifests (*.entry.json) for produced books
     publish-book     import produced books into the EvilFlowers Catalog
     publish-catalog  import produced books into the EvilFlowers Catalog (idempotent)
+    db               upgrade | current | import | revision — the processing database
+    studio           restoration studio: serve | worker | import | run | export-ia |
+                     export-training | db-upgrade (alias migrate) (config: $STUDIO_CONFIG)
 
 Environment:
     EVILFLOWERS_DIGITALIZER_CONFIG  config file when --config is not given
@@ -33,7 +36,7 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -356,6 +359,172 @@ def cmd_publish_catalog(args: argparse.Namespace) -> int:
     return 1 if res["totals"].get("error") else 0
 
 
+def cmd_db(args: argparse.Namespace) -> int:
+    from evilflowers_books_digitalizer.db import store
+
+    rt = load_runtime(args.config)
+    url = store.database_url(rt)
+    match args.db_command:
+        case "upgrade":
+            store.upgrade(url, args.revision)
+            print(f"{url}: at revision {store.current_revision(url)}")
+        case "current":
+            print(f"{url}: revision {store.current_revision(url) or '(empty — run db upgrade)'}")
+        case "revision":
+            store.revision(url, args.message)
+        case "import":
+            from evilflowers_books_digitalizer.db.importer import import_outputs
+
+            store.upgrade(url)
+            counts = import_outputs(url, rt.output_dir, rt.source_keys)
+            print(json.dumps({"database": url, **counts}, indent=2))
+    return 0
+
+
+# ---------------------------------------------------------------- restoration studio
+#: Celery app of the batch side (docs/design/studio-spec.md, "Queues and tasks")
+STUDIO_CELERY_APP = "evilflowers_books_digitalizer.studio.workers.app:celery"
+
+
+def _studio_services(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.api.wiring import build_services
+    from evilflowers_books_digitalizer.studio.config import load_config
+
+    return build_services(load_config(args.config))
+
+
+def _studio_command(fn: Callable[[argparse.Namespace], Any]) -> Callable[[argparse.Namespace], int]:
+    """Print a use case's result as JSON; an application refusal is one stderr line + exit 1."""
+    def run(args: argparse.Namespace) -> int:
+        from evilflowers_books_digitalizer.studio.application.errors import ApplicationError
+
+        try:
+            result = fn(args)
+        except ApplicationError as exc:
+            print(f"evilflowers-digitalizer studio: {exc}", file=sys.stderr)
+            return 1
+        if result is not None:
+            data = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+            print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+        return 0
+    return run
+
+
+def cmd_studio_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from evilflowers_books_digitalizer.studio.api.app import create_app
+    from evilflowers_books_digitalizer.studio.config import load_config
+
+    print(f"studio: serving http://{args.host}:{args.port}  (no auth — VPN only)", file=sys.stderr)
+    uvicorn.run(create_app(load_config(args.config)), host=args.host, port=args.port,
+                log_level="info")
+    return 0
+
+
+def cmd_studio_worker(args: argparse.Namespace) -> int:
+    """Replace this process with a Celery worker (same interpreter, the batch side's app)."""
+    import os
+
+    # argparse.REMAINDER keeps a leading "--"; celery would read it as "extra config" and fail
+    extra = args.celery_args[1:] if args.celery_args[:1] == ["--"] else args.celery_args
+    argv = [sys.executable, "-m", "celery", "-A", STUDIO_CELERY_APP, "worker", "-Q", args.queues,
+            *(["--concurrency", str(args.concurrency)] if args.concurrency else []),
+            *extra]
+    if args.config:
+        os.environ["STUDIO_CONFIG"] = str(Path(args.config).resolve())
+    os.execv(sys.executable, argv)
+    return 0   # unreachable
+
+
+@_studio_command
+def cmd_studio_import(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.application.books import import_collection
+
+    return import_collection(_studio_services(args), args.project, args.collection)
+
+
+@_studio_command
+def cmd_studio_run(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.application.dto import RunIn
+    from evilflowers_books_digitalizer.studio.application.lookup import find_book
+    from evilflowers_books_digitalizer.studio.application.runs import create_run
+
+    svc = _studio_services(args)
+    with svc.uow() as uow:
+        book_id = find_book(uow.session, args.book).id
+    pages = [int(p) for p in args.pages.split(",")] if args.pages else None
+    cmd = RunIn(kind=args.kind, pages=pages, interactive=args.interactive or None)
+    return create_run(svc, book_id, cmd, args.operator)
+
+
+@_studio_command
+def cmd_studio_export_ia(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.api.wiring import build_ia_exporter
+    from evilflowers_books_digitalizer.studio.application.export import export_ia
+    from evilflowers_books_digitalizer.studio.application.lookup import find_book
+
+    svc = _studio_services(args)
+    with svc.uow() as uow:
+        book_id = find_book(uow.session, args.book).id
+    path = export_ia(svc, build_ia_exporter(svc.config), book_id, Path(args.out))
+    return {"book_id": book_id, "zip": str(path)}
+
+
+@_studio_command
+def cmd_studio_export_training(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.application.export import export_training
+
+    return export_training(_studio_services(args), args.project)
+
+
+@_studio_command
+def cmd_studio_db_upgrade(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.db import store
+    from evilflowers_books_digitalizer.studio.config import load_config
+
+    url = load_config(args.config).database_url
+    store.upgrade(url, args.revision)
+    return {"database": url.split("@")[-1], "revision": store.current_revision(url)}
+
+
+def _add_studio_parser(sub: Any) -> None:
+    p = sub.add_parser("studio", help="restoration studio: API, workers, imports, runs, exports")
+    st = p.add_subparsers(dest="studio_command", required=True)
+
+    def add(name: str, help_: str, func: Callable[[argparse.Namespace], int],
+            aliases: Sequence[str] = ()) -> argparse.ArgumentParser:
+        q: argparse.ArgumentParser = st.add_parser(name, help=help_, aliases=list(aliases))
+        q.add_argument("--config", help="studio TOML (default: $STUDIO_CONFIG, else configs/studio.toml)")
+        q.set_defaults(func=func)
+        return q
+
+    q = add("serve", "REST + SSE API and the SPA", cmd_studio_serve)
+    q.add_argument("--host", default="127.0.0.1", help="bind address (no auth — VPN only)")
+    q.add_argument("--port", type=int, default=8000)
+    q = add("worker", "start a Celery worker (batch side)", cmd_studio_worker)
+    q.add_argument("-Q", "--queues", default="interactive,cpu,ai,io")
+    q.add_argument("--concurrency", type=int)
+    q.add_argument("celery_args", nargs=argparse.REMAINDER, help="passed through to celery worker")
+    q = add("import", "enqueue discovery of a project's scan tree", cmd_studio_import)
+    q.add_argument("project")
+    q.add_argument("collection", nargs="?")
+    q = add("run", "create and enqueue a run for one book", cmd_studio_run)
+    q.add_argument("book", help="book id or IA item identifier")
+    q.add_argument("--kind", choices=("full", "rerun", "render", "publish"), default="full")
+    q.add_argument("--pages", help="leaf indices for a rerun, comma separated")
+    q.add_argument("--interactive", action="store_true", help="use the interactive queue")
+    q.add_argument("--operator", help="recorded as the run's author")
+    q = add("export-ia", "write a book's Internet Archive item zip", cmd_studio_export_ia)
+    q.add_argument("book", help="book id or IA item identifier")
+    q.add_argument("--out", default=".", help="output directory")
+    q = add("export-training", "enqueue the labelled-regions export", cmd_studio_export_training)
+    q.add_argument("project")
+    q = add("db-upgrade", "apply the studio database migrations", cmd_studio_db_upgrade,
+            aliases=("migrate",))
+    q.add_argument("revision", nargs="?", default="head")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="evilflowers-digitalizer",
@@ -437,6 +606,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_arg(p)
     p.set_defaults(func=cmd_monitor)
 
+    p = sub.add_parser("db", help="processing database: migrations + import of existing outputs")
+    db_sub = p.add_subparsers(dest="db_command", required=True)
+    q = db_sub.add_parser("upgrade", help="apply migrations (default: to head)")
+    q.add_argument("revision", nargs="?", default="head")
+    _add_config_arg(q)
+    q = db_sub.add_parser("current", help="show the schema revision")
+    _add_config_arg(q)
+    q = db_sub.add_parser("import", help="record already-produced books (reports + output tree)")
+    _add_config_arg(q)
+    q = db_sub.add_parser("revision", help="autogenerate a migration from model changes (dev)")
+    q.add_argument("-m", "--message", required=True)
+    _add_config_arg(q)
+    p.set_defaults(func=cmd_db)
+
     p = sub.add_parser("export-manifests", help="write catalog entry manifests for produced books")
     p.add_argument("source", nargs="?", help="one source, or all if omitted")
     p.add_argument("--limit", type=int)
@@ -462,6 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_arg(p)
     p.set_defaults(func=cmd_publish_catalog)
 
+    _add_studio_parser(sub)
     return parser
 
 

@@ -39,10 +39,13 @@ from evilflowers_books_digitalizer.pipeline.steps import (
     FinalizePdf,
     GenerateCover,
     OcrPages,
+    PagePreviews,
+    ReflowEdition,
     RenderPdf,
     ScanTailorScans,
     WriteCatalogManifest,
 )
+from evilflowers_books_digitalizer.reflow import ReflowSettings, VlmSettings
 from evilflowers_books_digitalizer.sources.base import AbstractBookSource
 
 logger = logging.getLogger(__name__)
@@ -118,6 +121,10 @@ def build_pipeline(
                 faculty_map=meta_cfg.get("faculty_names"),
             )
         )
+    viewer_cfg = config.get("viewer", {})
+    if viewer_cfg.get("previews", True):
+        # exactly the pages that go into the PDF, kept for the web viewer
+        steps.append(PagePreviews(max_px=int(viewer_cfg.get("preview_px", 1600))))
     steps.append(
         RenderPdf(
             profiles=profiles_from_config(config),
@@ -145,6 +152,9 @@ def build_pipeline(
             )
         )
     steps.append(EnsurePdfA(validate=render_cfg.get("validate_pdfa", False)))
+    reflow_cfg = config.get("reflow", {})
+    if reflow_cfg.get("enabled", False):
+        steps.append(ReflowEdition(_reflow_settings(reflow_cfg)))
 
     by_source = bool(catalog_cfg.get("by_source", False))
     if catalog_cfg.get("enabled", False) and (catalog_cfg.get("catalog") or by_source):
@@ -159,6 +169,35 @@ def build_pipeline(
             )
         )
     return Pipeline(steps)
+
+
+def _reflow_settings(cfg: dict[str, Any]) -> ReflowSettings:
+    """``[reflow]`` -> settings; tool paths overridable by env (Docker image)."""
+    vlm = None
+    if cfg.get("vlm", "none") == "paddleocr-vl":
+        vlm = VlmSettings(
+            python=Path(cfg.get("vlm_python") or os.environ.get(
+                "EVILFLOWERS_VLM_PYTHON", "~/.local/share/evilflowers-tools/venv-docres/bin/python"
+            )).expanduser(),
+            model=Path(cfg.get("vlm_model") or os.environ.get(
+                "EVILFLOWERS_VLM_MODEL", "~/.local/share/evilflowers-tools/models/PaddleOCR-VL-1.6"
+            )).expanduser(),
+            device=cfg.get("vlm_device", "auto"),
+        )
+    return ReflowSettings(
+        vlm=vlm,
+        hunspell_dict=cfg.get("hunspell_dict") or _default_hunspell(),
+        pandoc=cfg.get("pandoc", "pandoc"),
+        vector_figures=bool(cfg.get("vector_figures", True)),
+    )
+
+
+def _default_hunspell() -> str | None:
+    """First Slovak hunspell dictionary found (macOS user dir, Debian package)."""
+    for base in ("~/Library/Spelling/sk_SK", "/usr/share/hunspell/sk_SK"):
+        if Path(base).expanduser().with_suffix(".dic").exists():
+            return str(Path(base).expanduser())
+    return None
 
 
 def _build_docres(docres: dict[str, Any]) -> DocResEnhance:

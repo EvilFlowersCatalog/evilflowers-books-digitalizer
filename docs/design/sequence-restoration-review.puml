@@ -1,0 +1,79 @@
+@startuml sequence-restoration-review
+!include ../../../tools/diagrams/elvira.iuml
+' =============================================================================
+' What: the human-in-the-loop path. An operator opens a flagged book in the
+'       page studio (deep-zoom tiles over IIIF), fixes a disputed region (draws
+'       or relabels a rectangle: stamp, table, figure, formula…), adds a note or
+'       a page override, and re-runs just that page on the priority queue; the
+'       result streams back over SSE. Every confirmed region is also stored as a
+'       labelled training example. Approving the book rebuilds its outputs and
+'       publishes (or republishes) it to the catalog (dev now, prod later) in place: the
+'       entry is created or updated and its acquisitions point at the digitized
+'       tree (external_url), the publication row keeps the entry id and version.
+' Kind: UML sequence diagram, one review session, proposal. Scope: the operator
+'       request/response, job and event flow. Omitted: tile generation details,
+'       telemetry, catalog authentication (API key), PDF/A validation.
+' Source: design session 2026-11-07 (review only when flagged, feedback = re-run
+'         affected pages + training data export, prod publish in place);
+'         Cookbooks/Digitalizer.md §6 (import contract, 409 handling) and §8
+'         (external_url), 2026-11-06.
+' Render: python3 tools/diagrams/render.py vault/evilflowers-knowledge/Diagrams/sequence-restoration-review.puml
+' =============================================================================
+
+title Operator review: fix a disputed region, re-run one page, approve, republish (proposal, 2026-11-07)
+
+actor "**Operator**\nSPA page studio" as op
+participant "**studio-api**\nFastAPI" as api <<focus>>
+database "**postgresql18**\ndb digitalizer" as pg
+queue "**redis**\nqueues · pub/sub" as redis
+participant "**worker-cpu**\nqueues interactive, cpu" as wcpu
+participant "**worker-io**" as wio
+participant "**NFS** · gateway\ndigitized/studio/" as nfs
+participant "**evilflowers** catalog\nREST /api/v1\n(dev now, prod later)" as cat
+
+op -> api : GET /books/{id} (pages, regions, disputes, notes)
+api -> pg : read book
+api --> op : JSON
+op -> api : GET /iiif/{page}/… (deep-zoom tiles)
+api -> nfs : read tile
+api --> op : tiles (immutable, cached)
+op -> api : GET /events?book={id} (SSE, stays open)
+
+== fix one disputed region ==
+op -> api : PATCH /regions/{r} {kind: stamp, action: remove}\n+ note "library seal, not content"
+api -> pg : region confirmed (source operator)\n+ training example (DocLayNet label)
+op -[$accent_msg()]-> api : <b>POST /books/{id}/reruns {pages: [12]}</b>
+api -> pg : run (pages 12, overrides pinned)
+api -> redis : enqueue page 12 (priority: interactive)
+api --> op : 202 + run id
+redis -> wcpu : process page 12 (jumps the bulk backlog)
+wcpu -> nfs : re-clean · re-OCR · new tiles + page render
+wcpu -> pg : page version 2, disputes resolved
+wcpu -> redis : publish page.updated
+redis --> api : event
+api -[$accent_msg()]-> op : <b>SSE page.updated → studio swaps the tile</b>
+
+== approve and publish ==
+op -> api : POST /books/{id}/approve {operator: "jana"}
+api -> pg : review decision (who, when, notes)
+api -> redis : enqueue rebuild + publish
+redis -> wcpu : rebuild PDF · PDF/A-2b · EPUB
+wcpu -> nfs : write digitized/studio/<project>/<item_id>/…
+redis -> wio : publish
+wio -> pg : read publication (entry id, version)
+alt first publication
+  wio -> cat : POST /entries (title, authors, ISBN…)
+  cat --> wio : 201 entry id
+else republish
+  wio -> cat : PUT /entries/{id} (corrected metadata)
+end
+wio -> cat : acquisitions: external_url →\nhttps://elvira.stuba.sk/digitized/<project>/<item_id>/….pdf, .epub
+cat --> wio : 200
+wio -> pg : publication v(n+1), entry id
+wio -> redis : publish book.published
+redis --> api : event
+api --> op : SSE book.published (v2)
+
+caption An operator decision never waits for the bulk backlog: re-runs go to an interactive priority queue, and the page studio swaps\nthe tile when the SSE event arrives. Republishing is idempotent through the stored entry id; files are served in place\n(external_url), so a republish only swaps files on the volume and updates the entry, never re-uploads gigabytes.
+footer ELVIRA · FIIT STU · evilflowers-knowledge · Diagrams/sequence-restoration-review.puml
+@enduml

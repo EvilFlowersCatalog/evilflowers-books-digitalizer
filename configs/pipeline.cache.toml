@@ -81,6 +81,13 @@ despeckle = "cautious"
 dpi = 300
 output_dpi = 600
 
+[viewer]
+previews = true
+
+[reflow]
+enabled = true                  # EPUB edition; formulas -> MathML via the local VLM
+vlm = "paddleocr-vl"
+
 [finalize]
 enabled = true
 bookmarks = true

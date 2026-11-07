@@ -38,5 +38,10 @@ junit.xml
 # Zensical docs build output (zensical build -> ./site)
 site/
 
+# Studio SPA build / deps, Playwright scratch
+frontend/node_modules/
+frontend/dist/
+.playwright-mcp/
+
 # OS
 .DS_Store

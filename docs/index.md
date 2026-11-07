@@ -1,5 +1,14 @@
 # EvilFlowers Books Digitalizer
 
+!!! tip "Restoration Studio"
+    The project now also ships the **EvilFlowers Restoration Studio**: a web app plus
+    Celery workers where operators review and correct what the pipeline produced (regions,
+    crops, page types, formulas) and every book becomes an Internet Archive compatible
+    item. Start with the [operator guide](studio.md) and the [Studio UI](web_ui.md).
+    The batch CLI described below keeps working unchanged.
+
+    ![Page studio](screenshots/page-studio.png)
+
 Digitalization pipeline for scanned books. It turns raw flatbed **TIFF scans**
 into two compact PDFs per book — a fast **distribution** copy and a
 **PDF/A-2b archival** master — with Slovak OCR, bibliographic metadata and a
@@ -62,6 +71,8 @@ or use the project Docker image, which bakes them all in.
 
 | If you want to… | Read |
 | --- | --- |
+| Review and correct books in the web studio | [Restoration Studio guide](studio.md) |
+| Implement against the studio's contract | [Studio spec](design/studio-spec.md) |
 | Understand the layers and the engine choice | [Architecture](architecture.md) |
 | See the full engine evaluation & measurements | [Pipeline report](digitalization_pipeline_report.md) |
 | Configure the catalog match & cover generation | [Metadata & covers](metadata_and_covers.md) |

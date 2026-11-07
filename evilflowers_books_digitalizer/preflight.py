@@ -117,6 +117,12 @@ def check_binaries(
         yield Check(f"binary {binary}", found is not None, found or "not on PATH")
     found = _recode_pdf(which)
     yield Check("binary recode_pdf", found is not None, found or "not found")
+    if rt.config.get("reflow", {}).get("enabled", False):
+        found = which("pandoc")
+        yield Check("binary pandoc (reflow)", found is not None, found or "not on PATH — no EPUB")
+        for optional in ("potrace", "hunspell"):   # vector figures / dictionary arbitration
+            found = which(optional)
+            yield Check(f"binary {optional} (reflow, optional)", True, found or "not on PATH — degraded")
 
     if which("tesseract") is None:
         return

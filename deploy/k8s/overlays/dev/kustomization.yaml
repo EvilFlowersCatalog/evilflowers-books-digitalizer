@@ -1,0 +1,32 @@
+# Dev overlay: the studio on control (workload=apps) against the DEV catalog.
+#
+#   kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
+#
+# Render only; the cluster applies manifests through the Ansible role
+# (Cookbooks/Deploy-a-Service §2), never `kubectl apply` by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      elvira.stuba.sk/environment: development
+    includeTemplates: true
+    includeSelectors: false
+
+images:
+  # Pin a build with: newTag: sha-<short>
+  - name: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer
+    newTag: master
+  # Dockerfile target `vlm` (no CI job builds it yet: build and push it by hand)
+  - name: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer-vlm
+    newTag: master
+
+configMapGenerator:
+  - name: studio-env
+    behavior: merge
+    literals:
+      - DEPLOYMENT_ENVIRONMENT=development
+      - EVILFLOWERS_LOG_LEVEL=DEBUG

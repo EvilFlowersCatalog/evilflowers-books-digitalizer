@@ -1,0 +1,109 @@
+# vlm: PaddleOCR-VL-1.6 formula recognition, HTTP :8000, called by worker-ai's
+# studio.formulas (formula_recognizer = "paddleocr-vl-http", [pipeline.vlm] url).
+# Code: evilflowers_books_digitalizer/vlm_service. Image: Dockerfile target `vlm`
+# (CPU torch, weights baked in at a pinned revision; no volumes needed).
+#
+# OFF by default (replicas 0). control has 6 CPUs; the studio's other pods bring the
+# requests to ~4.86 CPU, so this pod's 1-CPU request makes 5.86 (98%). Scale it up for
+# a formula pass and back down after:
+#   kubectl -n digitalizer scale deploy/vlm --replicas=1
+#   kubectl -n digitalizer rollout status deploy/vlm      # waits for /readyz (model loaded)
+#   ... run/re-run books ...
+#   kubectl -n digitalizer scale deploy/vlm --replicas=0
+# While it is at 0, studio.formulas fails with "vlm service unavailable" after its
+# retries (~2 min) and the stage can be re-run later; nothing is lost.
+#
+# Sizing (measured on Apple M-series CPU, 4 torch threads, KV cache on, fp32;
+# docs/studio.md "Formula recognition service"): ~8 s per formula on average
+# (2.5-9 s for a display formula, ~22 s for a page-wide two-line one), RSS ~3.8 GB
+# peak (fp32 weights are 3.6 GB in memory). The limit lets it burst onto idle cores;
+# at the 1-CPU request alone a formula takes ~4x longer.
+# One inference at a time per pod (VLM_MAX_QUEUE requests wait, the rest get 503).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vlm
+  labels:
+    app.kubernetes.io/name: studio-vlm
+    app.kubernetes.io/component: vlm
+spec:
+  replicas: 0
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: studio-vlm }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: studio-vlm
+        app.kubernetes.io/component: vlm
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      imagePullSecrets: [{ name: ghcr-pull }]
+      nodeSelector: { elvira.stuba.sk/workload: apps }
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: vlm
+          image: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer-vlm:master
+          imagePullPolicy: Always            # floating tag: a scale-up pulls the latest build
+          env:
+            - { name: VLM_PORT, value: "8000" }
+            - { name: VLM_MODEL_DIR, value: /models/PaddleOCR-VL-1.6 }
+            - { name: VLM_DEVICE, value: cpu }
+            - { name: VLM_DTYPE, value: float32 }
+            # = the cpu limit: torch would otherwise size its pool from the HOST's cores
+            - { name: VLM_THREADS, value: "4" }
+            - { name: OMP_NUM_THREADS, value: "4" }
+            - { name: VLM_MAX_QUEUE, value: "2" }
+            - { name: VLM_KV_CACHE, value: "1" }
+            - { name: HOME, value: /tmp }
+            # no OTel SDK in this process: Beyla traces it (see pod-defaults.yaml)
+            - { name: OTEL_SERVICE_NAME, value: studio-vlm }
+          ports:
+            - { name: http, containerPort: 8000 }
+          # The model loads in a background thread; /healthz answers at once, /readyz
+          # only once the weights are in memory (~10 s on a laptop SSD; allow 10 min
+          # for a cold node and a slow disk).
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:                     # 500 when the model failed to load -> restart
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: "1", memory: 4Gi }
+            limits: { cpu: "4", memory: 6Gi }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vlm
+  labels:
+    app.kubernetes.io/name: studio-vlm
+    app.kubernetes.io/component: vlm
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: studio-vlm }
+  ports:
+    - { name: http, port: 8000, targetPort: http }

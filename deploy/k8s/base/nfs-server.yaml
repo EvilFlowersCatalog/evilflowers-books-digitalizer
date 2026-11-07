@@ -1,0 +1,16 @@
+# THE NFS server address, in one place: kustomization.yaml `replacements` copies
+# data.server into spec.nfs.server of both PersistentVolumes in storage.yaml.
+#
+# The Ansible role (docs/handoff/knowledge-repo-agent.md §3.6) templates this value as
+# `studio_nfs_server: "{{ hostvars['gateway'].k3s_node_ip }}"`. To override it without
+# editing this file, patch this ConfigMap's data.server in an overlay.
+#
+# local-config: kustomize uses it during the build and leaves it out of the output.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nfs-server
+  annotations:
+    config.kubernetes.io/local-config: "true"
+data:
+  server: 192.168.122.227            # gateway, private NIC enp1s0

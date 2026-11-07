@@ -1,0 +1,1382 @@
+{
+ "p004_b0": {
+  "text": "\\[\\mathrm{N a~ú v o d}\\]",
+  "secs": 5.69,
+  "task": "formula"
+ },
+ "p005_b0": {
+  "text": "\\[1\\]",
+  "secs": 1.48,
+  "task": "formula"
+ },
+ "p006_b2_s2": {
+  "text": "vyjadrujúce absolutnu hodnotu: \\(|a|\\), \\(|E|\\). Veľkosť vektora sa nazýva aj absolutna",
+  "secs": 4.38,
+  "task": "ocr"
+ },
+ "p006_b5": {
+  "text": "\\[a\\quad\\begin{array}{c}E\\\\ \\hline\\end{array}\\quad\\begin{array}{c}f\\\\ \\downarrow\\end{array}\\]",
+  "secs": 3.37,
+  "task": "formula"
+ },
+ "p004_formula_584_497_748_533": {
+  "text": "\\[\\mathrm{N a uí v o d}\\]",
+  "secs": 3.26,
+  "task": "formula"
+ },
+ "p006_ocr_395_448_1626_481": {
+  "text": "vyjadrujúce absolutnu hodnotu: |a|, |E|. Veľkosť vektora sa nazýva aj absolutna",
+  "secs": 3.99,
+  "task": "ocr"
+ },
+ "p006_formula_604_721_1109_839": {
+  "text": "\\[a\\quad\\begin{array}{c}E\\\\ \\hline\\end{array}\\quad\\begin{array}{c}f\\\\\\downarrow\\quad\\nearrow\\\\ \\downarrow\\quad\\rightarrow\\end{array}\\]",
+  "secs": 3.61,
+  "task": "formula"
+ },
+ "p007_formula_772_564_1058_582": {
+  "text": "\\[c\\quad c\\]",
+  "secs": 1.3,
+  "task": "formula"
+ },
+ "p007_formula_362_648_577_664": {
+  "text": "\\[\\longleftarrow^{\\cdot}\\longrightarrow\\]",
+  "secs": 1.1,
+  "task": "formula"
+ },
+ "p007_formula_769_844_1004_870": {
+  "text": "\\[a+b=b+a.\\]",
+  "secs": 1.11,
+  "task": "formula"
+ },
+ "p007_formula_610_1048_1506_1119": {
+  "text": "\\[\\begin{array}{r l r}{a+b+c}&{=}&{(a+b)+c\\;=\\;a+(b+c)\\;.}\\\\ &{}&{~(1.1.2.2)}\\end{array}\\]",
+  "secs": 4.46,
+  "task": "formula"
+ },
+ "p007_ocr_274_1333_1504_1366": {
+  "text": "vektorov \\(c - d = f\\) chápeme ako súčet vektorov \\(c\\) a \\((-d)\\), t.j. \\(f = c + (-d)\\).",
+  "secs": 3.39,
+  "task": "ocr"
+ },
+ "p007_formula_971_1587_1240_1619": {
+  "text": "\\[f=c-d=c+(-d)\\]",
+  "secs": 1.19,
+  "task": "formula"
+ },
+ "p008_ocr_918_1026_1646_1059": {
+  "text": "ν vektor \\(q = a + (1/2)(b - a) = (1/2)(a + b)\\). Ak",
+  "secs": 2.17,
+  "task": "ocr"
+ },
+ "p008_ocr_918_1105_1645_1141": {
+  "text": "vektory p a q rovnaké: (1/2)(a + c) =",
+  "secs": 1.71,
+  "task": "ocr"
+ },
+ "p009_formula_820_514_932_543": {
+  "text": "\\[b=s a,\\]",
+  "secs": 0.93,
+  "task": "formula"
+ },
+ "p009_formula_418_898_1234_1004": {
+  "text": "\\[\\begin{align*}a\\quad&b=3a\\quad&c=-0.5a\\end{align*}\\]",
+  "secs": 2.35,
+  "task": "formula"
+ },
+ "p009_formula_373_1534_1447_1686": {
+  "text": "\\[\\begin{array}{ccc}\\longrightarrow&\\longrightarrow&\\longrightarrow a=aj\\\\\\quad j&\\xrightarrow{\\quad}&\\quad b=bj\\\\\\quad&\\xrightarrow{\\quad}&\\quad c=ci\\end{array}\\quad\\begin{array}{c}\\longleftarrow\\\\ f=-3j\\end{array}\\]",
+  "secs": 8.41,
+  "task": "formula"
+ },
+ "p010_formula_1102_794_1540_856": {
+  "text": "\\[q\\xrightarrow{\\quad}Obr.\\,1.1.4.1\\]",
+  "secs": 2.92,
+  "task": "formula"
+ },
+ "p010_formula_842_1243_1231_1272": {
+  "text": "\\[a=p+q=a_{\\mathrm{p}}e_{1}+a_{\\mathrm{q}}e_{2}.\\]",
+  "secs": 2.17,
+  "task": "formula"
+ },
+ "p010_formula_884_1683_1186_1720": {
+  "text": "\\[f=f_{x}i+f_{\\mathrm{y}}j+f_{z}k.\\]",
+  "secs": 2.32,
+  "task": "formula"
+ },
+ "p011_formula_393_296_967_505": {
+  "text": "\\[\\begin{array}{l}y\\\\f_y\\\\j\\end{array}\\begin{array}{l}\\beta\\\\\\alpha\\end{array}\\begin{array}{l}f\\\\\\alpha\\end{array}\\begin{array}{r}g\\\\\\end{array}\\]",
+  "secs": 5.55,
+  "task": "formula"
+ },
+ "p011_formula_745_765_1032_813": {
+  "text": "\\[f=\\sqrt{f_{x}^{2}+f_{y}^{2}+f_{z}^{2}}.\\]",
+  "secs": 2.16,
+  "task": "formula"
+ },
+ "p011_ocr_614_953_1162_1040": {
+  "text": "$$\\cos\\alpha=\\frac{f_{x}}{f},\\quad\\cos\\beta=\\frac{f_{y}}{f},\\quad\\cos\\gamma=\\frac{f_{z}}{f}\\quad,$$",
+  "secs": 3.62,
+  "task": "ocr"
+ },
+ "p011_formula_647_1292_1076_1333": {
+  "text": "\\[\\cos^{2}\\alpha+\\cos^{2}\\beta+\\cos^{2}\\gamma=1.\\]",
+  "secs": 2.29,
+  "task": "formula"
+ },
+ "p011_ocr_272_1504_1504_1540": {
+  "text": "+ $b_y j + b_z k$  potom môžeme ich súčet uskutočnit’ po zložkách, na základě platnosti",
+  "secs": 3.33,
+  "task": "ocr"
+ },
+ "p011_formula_561_1626_1211_1661": {
+  "text": "\\[\\boldsymbol{a}+\\boldsymbol{b}=(a_{x}+b_{x})\\boldsymbol{i}+(a_{y}+b_{y})\\boldsymbol{j}+(a_{z}+b_{z})\\boldsymbol{k},\\]",
+  "secs": 4.1,
+  "task": "formula"
+ },
+ "p011_formula_553_1789_1220_1825": {
+  "text": "\\[c_{x}=\\quad a_{x}+\\quad b_{x}\\quad,\\quad c_{y}=\\quad a_{y}+\\quad b_{y}\\quad,\\quad c_{z}=\\quad a_{z}+\\quad b_{z}\\quad.\\]",
+  "secs": 4.29,
+  "task": "formula"
+ },
+ "p011_formula_509_1952_1262_1987": {
+  "text": "\\[d=s a=s(a_{x}i+a_{y}j+a_{z}k)=s a_{x}i+s a_{y}j+s a_{z}k,\\]",
+  "secs": 3.51,
+  "task": "formula"
+ },
+ "p012_ocr_594_231_1772_265": {
+  "text": "Príklad 1.1.4.1 Vypočítajte súčet vektorov \\(a = 3i + 2j - 1k\\) a \\(b = -i + 2j - 2k\\)",
+  "secs": 4.29,
+  "task": "ocr"
+ },
+ "p012_ocr_595_269_1827_349": {
+  "text": "Riešenie: \\(c = a + b = (3 - 1)i + (2 + 2)j + (-1 - 2)k = 2i + 4j - 3k\\), takže súradnice vektora c sú: \\(c_x = 2, c_y = 4, c_z = -3\\).",
+  "secs": 7.37,
+  "task": "ocr"
+ },
+ "p012_ocr_594_516_1829_550": {
+  "text": "Rießenie: \\(d = (-3)a = (-3)(3i + 2j - k) = -9i - 6j + 3k\\). Presvedöite sa, že veľkosť",
+  "secs": 4.88,
+  "task": "ocr"
+ },
+ "p013_formula_756_868_1019_895": {
+  "text": "\\[a\\cdot b=a b\\cos\\alpha.\\]",
+  "secs": 1.37,
+  "task": "formula"
+ },
+ "p013_ocr_275_1546_1507_1586": {
+  "text": "• Skalárny súčin vektora so sebou samým: \\(a \\cdot a = aa \\cos 0 = a^{2}\\). V tomto prípade",
+  "secs": 3.18,
+  "task": "ocr"
+ },
+ "p013_formula_389_1771_1352_1805": {
+  "text": "\\[i\\cdot i=1,j\\cdot j=1,k\\cdot k=1,i\\cdot j=0,i\\cdot k=0,j\\cdot k=0.\\]",
+  "secs": 3.2,
+  "task": "formula"
+ },
+ "p013_formula_717_1983_1099_2014": {
+  "text": "\\[a\\cdot(b+c)=a\\cdot b+a\\cdot c,\\]",
+  "secs": 1.84,
+  "task": "formula"
+ },
+ "p013_formula_301_2110_1495_2147": {
+  "text": "\\[\\begin{array}{r}{(a_{1}+a_{2}+\\ldots+a_{p})\\cdot(b_{1}+b_{2}+\\ldots+b_{q})=a_{1}\\cdot b_{1}+a_{1}\\cdot b_{2}+\\ldots+a_{1}\\cdot b_{q}+\\ldots+a_{p}\\cdot b_{q}}\\end{array}\\]",
+  "secs": 7.28,
+  "task": "formula"
+ },
+ "p014_formula_527_341_1502_377": {
+  "text": "\\[\\boldsymbol{a}\\cdot\\boldsymbol{b}=(a_{x}\\boldsymbol{i}+a_{y}\\boldsymbol{j}+a_{z}\\boldsymbol{k})\\cdot(b_{x}\\boldsymbol{i}+b_{y}\\boldsymbol{j}+b_{z}\\boldsymbol{k})=a_{x}b_{x}+a_{y}b_{y}+a_{z}b_{z},\\]",
+  "secs": 7.57,
+  "task": "formula"
+ },
+ "p014_ocr_446_428_1317_461": {
+  "text": "napríklad (3i + 2j - k) · (-i + 2j - 2k) = -3 + 4 + 2 = 3.",
+  "secs": 3.45,
+  "task": "ocr"
+ },
+ "p014_ocr_631_555_1399_609": {
+  "text": "$$a\\cdot b = ab\\cos\\alpha = \\sqrt{(a_{x}^{2} + a_{y}^{2} + a_{z}^{2})(b_{x}^{2} + b_{y}^{2} + b_{z}^{2})}\\cos\\alpha\\,,$$",
+  "secs": 4.76,
+  "task": "ocr"
+ },
+ "p014_ocr_814_786_1236_825": {
+  "text": "\\(\\underline{a\\cdot b}=\\underline{\\quad a_{x}b_{x}+a_{y}b_{y}+a_{z}b_{z}}\\)",
+  "secs": 2.99,
+  "task": "ocr"
+ },
+ "p014_ocr_698_820_1633_937": {
+  "text": "$$\\cos\\alpha=\\frac{a\\,b}{ab}=\\frac{\\sqrt{(a_{x}^{2}+a_{y}^{2}+a_{z}^{2})(b_{x}^{2}+b_{y}^{2}+b_{z}^{2})}}{(1.2.1.7)}.$$",
+  "secs": 5.86,
+  "task": "ocr"
+ },
+ "p014_ocr_440_1036_1632_1071": {
+  "text": "zákona (1.2.1.4) a vzťahov (1.2.1.3) dostaneme napr.: \\(\\mathbf{j} \\cdot (a_x \\mathbf{i} + a_y \\mathbf{j} + a_z \\mathbf{k}) = a_y\\).",
+  "secs": 6.98,
+  "task": "ocr"
+ },
+ "p014_formula_751_1161_1321_1197": {
+  "text": "\\[a_{x}=a\\cdot i~,\\quad a_{y}=a\\cdot j~,\\quad a_{z}=a\\cdot k.\\]",
+  "secs": 3.32,
+  "task": "formula"
+ },
+ "p014_formula_521_1454_1567_1491": {
+  "text": "\\[s~=~a_{x}i~=~(a\\cdot i)i~,~~~t~=~a_{y}j~=~(a\\cdot j)j~,~~~u~=~a_{z}k=(a\\cdot k)k~.\\]",
+  "secs": 4.95,
+  "task": "formula"
+ },
+ "p014_formula_455_1782_1316_1840": {
+  "text": "\\[b_{\\tau}\\rightarrow b_{t}\\quad b_{\\tau}=(b\\cdot\\tau)\\tau.\\]",
+  "secs": 2.34,
+  "task": "formula"
+ },
+ "p015_ocr_274_245_1377_279": {
+  "text": "\\(a = 5i\\), \\(b = 4i + 3j\\). Vypočítajte uhly medzi stranami a, b a stranami a, c.",
+  "secs": 3.71,
+  "task": "ocr"
+ },
+ "p015_formula_280_372_1431_488": {
+  "text": "\\[\\cos\\gamma=\\frac{a_{x}b_{x}+a_{y}b_{y}}{\\sqrt{a_{x}^{2}+a_{y}^{2}}\\sqrt{b_{x}^{2}+b_{y}^{2}}}=\\frac{20}{\\sqrt{25}\\sqrt{16+9}}=\\frac{20}{5\\cdot5}=\\frac{4}{5},\\quad\\begin{vmatrix}y\\\\ j\\end{vmatrix}_{c}\\]",
+  "secs": 13.03,
+  "task": "formula"
+ },
+ "p015_ocr_276_501_1399_589": {
+  "text": "čiže \\(\\gamma = 36,9^{\\circ}\\). Na výpočet uhla \\(\\beta\\) potrebujeme vviadril' vektor. \\(c = b - a = -i + 3i\\) a onát' použit' \\(\\uparrow\\) \\(\\gamma\\) \\(\\beta\\)",
+  "secs": 6.89,
+  "task": "ocr"
+ },
+ "p015_ocr_278_576_1512_610": {
+  "text": "vyjadrit' vektor \\(c = b - a = -i + 3j\\) a opät' použit'",
+  "secs": 3.05,
+  "task": "ocr"
+ },
+ "p015_ocr_277_596_1512_653": {
+  "text": "vyjadnt vektor \\(c = b - a = -t + 5j\\) a opat pouzit vzt'ah (1.2.1.7). Musíme si však uvedomít, že",
+  "secs": 4.52,
+  "task": "ocr"
+ },
+ "p015_ocr_276_696_777_737": {
+  "text": "Tak dostaneme: \\(\\cos\\varphi = -1/(10)^{1/2}\\)",
+  "secs": 2.35,
+  "task": "ocr"
+ },
+ "p015_formula_275_1034_298_1228": {
+  "text": "\\[\\begin{array}{c}2.\\\\3.\\\\4.\\\\5.\\\\6.\\end{array}\\]",
+  "secs": 2.44,
+  "task": "formula"
+ },
+ "p015_formula_276_1285_298_1432": {
+  "text": "\\[\\begin{array}{l}7\\\\8\\\\9\\\\10\\end{array}\\]",
+  "secs": 2.05,
+  "task": "formula"
+ },
+ "p015_formula_807_1900_975_1926": {
+  "text": "\\[c=a\\times b.\\]",
+  "secs": 1.08,
+  "task": "formula"
+ },
+ "p016_formula_700_751_1040_818": {
+  "text": "\\[y \\rightarrow a\\]",
+  "secs": 1.29,
+  "task": "formula"
+ },
+ "p016_formula_435_1749_1614_1825": {
+  "text": "\\[\\begin{array}{r l r l r l r l r}&{}&{i\\times i=0}&&{j\\times j=0}&&{k\\times k=0}\\\\ &{}&{i\\times j=k}&&{j\\times k=i}&&{k\\times i=j}&&{j\\times i=-k}&&{k\\times j=-i}&&{i\\times k=-j.}\\end{array}\\]",
+  "secs": 9.1,
+  "task": "formula"
+ },
+ "p016_ocr_547_1960_1520_1992": {
+  "text": "\\(a \\times (b + c) = a \\times b + a \\times c\\), \\((b + c) \\times a = b \\times a + c \\times a\\)",
+  "secs": 3.36,
+  "task": "ocr"
+ },
+ "p017_formula_303_284_1101_490": {
+  "text": "\\[\\begin{align*}a\\times b&=\\quad(a_{x}i+a_{y}j+a_{z}k)\\times(b_{x}i+b_{y}j+b_{z}k)\\\\&=\\quad a_{x}b_{x}(i\\times i)+a_{x}b_{y}(i\\times j)+a_{x}b_{z}(i\\times k)\\\\&\\quad+a_{y}b_{x}(j\\times i)+a_{y}b_{y}(j\\times j)+a_{y}b_{z}(j\\times k)\\\\&\\quad+a_{z}b_{x}(k\\times i)+a_{z}b_{y}(k\\times j)+a_{z}b_{z}(k\\times k)\\\\&=\\quad=0.\\end{align*}\\]",
+  "secs": 22.87,
+  "task": "formula"
+ },
+ "p017_ocr_395_538_1029_574": {
+  "text": "$$= \\begin{array}{r} 0 \\\\ + a_x b_y k \\\\ - a_x b_z j \\end{array} +$$",
+  "secs": 2.98,
+  "task": "ocr"
+ },
+ "p017_formula_400_581_1217_751": {
+  "text": "\\[\\begin{align*}&-a_{y}b_{x}k\\quad+\\quad0\\quad+\\quad a_{y}b_{z}i\\quad+\\\\&\\quad+a_{z}b_{x}j\\quad-\\quad a_{z}b_{y}i\\quad+\\quad0\\quad=\\\\&\\quad\\quad\\quad\\quad\\quad\\quad\\quad\\quad\\quad\\quad i\\left(a_{y}b_{z}-a_{z}b_{y}\\right)+j\\left(a_{z}b_{x}-a_{x}b_{z}\\right)+k\\left(a_{x}b_{y}-a_{y}b_{x}\\right).\\end{align*}\\]",
+  "secs": 16.45,
+  "task": "formula"
+ },
+ "p017_formula_743_880_1511_1072": {
+  "text": "\\[a\\times b=\\begin{vmatrix}i&j&k\\\\ a_{x}&a_{y}&a_{z}\\\\ b_{x}&b_{y}&b_{z}\\end{vmatrix}.\\]",
+  "secs": 5.19,
+  "task": "formula"
+ },
+ "p017_formula_473_1668_1283_1701": {
+  "text": "\\[u=(5\\dot{i})\\times(4\\dot{i}+3\\dot{j})=(5\\cdot4)(\\dot{i}\\times\\dot{i})+(5\\cdot3)(\\dot{i}\\times\\dot{j})=15k,\\]",
+  "secs": 4.93,
+  "task": "formula"
+ },
+ "p017_ocr_276_1912_1199_1989": {
+  "text": "$a = 5i$, $b = 4i + 3j$ z prikladu (1.2.2.1) skalárom $p = 2$.\nRiešenie: $pc = p(a \\times b) = p[(5i) \\times (4i + 3j)] = p(15k) = 30k$.",
+  "secs": 6.4,
+  "task": "ocr"
+ },
+ "p018_ocr_408_328_1223_362": {
+  "text": "b) \\(pc = p(a \\times b) = (a \\times pb) = (5i) \\times (8i + 6j) = 30k\\)",
+  "secs": 3.48,
+  "task": "ocr"
+ },
+ "p018_ocr_407_575_1638_609": {
+  "text": "Príklad 1.2.2.3 V pravouhlej súradnicovej sústave sú dané tri body A(2,0,0),",
+  "secs": 3.17,
+  "task": "ocr"
+ },
+ "p018_ocr_409_985_1639_1019": {
+  "text": "Potom vypočítame vektorový súčin \\(h = u \\times w = (j - 2i) \\times (3k - 2i) = 3i + 2k +\\)",
+  "secs": 3.93,
+  "task": "ocr"
+ },
+ "p018_ocr_417_1141_1450_1182": {
+  "text": "\\(h = (3^2 + 2^2 + 6^2)^{1/2} = (49)^{1/2} = 7\\). Pre jednotkový vektor tak dostaneme:",
+  "secs": 3.51,
+  "task": "ocr"
+ },
+ "p018_formula_711_1188_1267_1221": {
+  "text": "\\[h_{0}=h/7=(3/7)i+(2/7)j+(6/7)k.\\]",
+  "secs": 2.22,
+  "task": "formula"
+ },
+ "p018_formula_457_1393_480_1622": {
+  "text": "\\[\\begin{array}{c}2.\\\\3.\\\\4.\\\\5.\\\\6.\\\\7.\\end{array}\\]",
+  "secs": 2.49,
+  "task": "formula"
+ },
+ "p019_formula_597_413_1194_453": {
+  "text": "\\[a\\cdot(b\\times c),\\quad(a\\times b)\\cdot c,\\quad(b\\times c)\\cdot a.\\]",
+  "secs": 2.46,
+  "task": "formula"
+ },
+ "p019_ocr_1251_1114_1471_1139": {
+  "text": "Obr. 1.2.3.1",
+  "secs": 1.18,
+  "task": "ocr"
+ },
+ "p019_ocr_282_1527_1515_1560": {
+  "text": "• Rovnaký výsledok dostaneme aj pomocou súčinov (b × c) · a a (c × a) · b, teda",
+  "secs": 2.97,
+  "task": "ocr"
+ },
+ "p019_ocr_627_1693_1164_1724": {
+  "text": "\\((a \\times b) \\cdot c = (b \\times c) \\cdot a = (c \\times a) \\cdot b\\)",
+  "secs": 2.7,
+  "task": "ocr"
+ },
+ "p019_ocr_710_1820_1081_1851": {
+  "text": "\\((a \\times b) \\cdot c = c \\cdot (a \\times b)\\).",
+  "secs": 1.78,
+  "task": "ocr"
+ },
+ "p019_ocr_733_1985_1096_2016": {
+  "text": "\\((c \\times a) \\cdot b = c \\cdot (a \\times b)\\),",
+  "secs": 1.77,
+  "task": "ocr"
+ },
+ "p020_ocr_440_493_1567_529": {
+  "text": "výraz (1.2.2.5) skalárne vynásobíme vektorom \\(c = c_x i + c_y j + c_z j\\), dostaneme",
+  "secs": 3.76,
+  "task": "ocr"
+ },
+ "p020_formula_499_573_1595_697": {
+  "text": "\\[\\begin{array}{r l r}{\\left(c_{x}\\boldsymbol{i}+c_{y}\\boldsymbol{j}+c_{z}\\boldsymbol{j}\\right)\\cdot\\left[\\boldsymbol{i}\\left(a_{y}b_{z}-a_{z}b_{y}\\right)+\\boldsymbol{j}\\left(a_{z}b_{x}-a_{x}b_{z}\\right)+\\boldsymbol{k}\\left(a_{x}b_{y}-a_{y}b_{x}\\right)\\right]=}&{}&\\\\ &{=}&{c_{x}(a_{y}b_{z}-a_{z}b_{y})+c_{y}(a_{z}b_{x}-a_{x}b_{z})+c_{z}(a_{x}b_{y}-a_{y}b_{x}),}\\end{array}\\]",
+  "secs": 20.69,
+  "task": "formula"
+ },
+ "p020_formula_840_799_1632_982": {
+  "text": "\\[(a\\times b)\\cdot c=\\begin{vmatrix}a_{x}&a_{y}&a_{z}\\\\ b_{x}&b_{y}&b_{z}\\\\ c_{x}&c_{y}&c_{z}\\end{vmatrix}.\\]",
+  "secs": 5.71,
+  "task": "formula"
+ },
+ "p020_ocr_402_1280_1632_1312": {
+  "text": "v zložkovom tvare: \\(a = 5i\\), \\(b = 4i + 3j\\), \\(c = 2i - j + k\\). Overte si, že rovnaký",
+  "secs": 4.36,
+  "task": "ocr"
+ },
+ "p020_ocr_402_1407_1464_1441": {
+  "text": "Výsledok vynásobíme skalárne vektorom \\(c: (15k) \\cdot (2i - j + k) = 15\\).",
+  "secs": 3.36,
+  "task": "ocr"
+ },
+ "p020_ocr_402_1449_1592_1484": {
+  "text": "Pre zmiešaný súčin (c × a) ·b dostaneme rovnaký výsledok: (2i - j + k) × (5i) =",
+  "secs": 3.19,
+  "task": "ocr"
+ },
+ "p020_formula_402_1494_1034_1527": {
+  "text": "\\[5k+5j\\mathrm{a d y a l e j}(5k+5j)\\cdot(4i+3j)=15.\\]",
+  "secs": 2.64,
+  "task": "formula"
+ },
+ "p020_formula_1562_2013_1772_2110": {
+  "text": "\\[\\mathrm{SKA~TECH~N~I~C~K~A~}\\]",
+  "secs": 2.02,
+  "task": "formula"
+ },
+ "p021_formula_675_378_1109_410": {
+  "text": "\\[a\\times(b\\times c)\\quad a\\quad(a\\times b)\\times c.\\]",
+  "secs": 2.87,
+  "task": "formula"
+ },
+ "p021_ocr_607_1367_1178_1399": {
+  "text": "\\(u_1 = a \\times (b \\times c) = b (a \\cdot c) - c (a \\cdot b)\\),",
+  "secs": 3.13,
+  "task": "ocr"
+ },
+ "p021_formula_607_1451_1178_1483": {
+  "text": "\\[\\boldsymbol{u}_{2}=(a\\times b)\\times c=\\boldsymbol{b}(a\\cdot c)-a(b\\cdot c).\\]",
+  "secs": 3.09,
+  "task": "formula"
+ },
+ "p021_formula_748_1982_1035_2098": {
+  "text": "\\[\\begin{array}{c}a=a_{x}i,\\\\b=b_{x}i+b_{y}j,\\\\c=c_{x}i+c_{y}j+c_{z}k.\\end{array}\\]",
+  "secs": 4.37,
+  "task": "formula"
+ },
+ "p022_ocr_403_169_1281_203": {
+  "text": "Potom dvojnásobný vektorový súčin (a × b) × c  vypočítame:",
+  "secs": 2.48,
+  "task": "ocr"
+ },
+ "p022_formula_442_253_1463_373": {
+  "text": "\\[\\begin{array}{l}{{[~a_{x}i\\times(b_{x}i+b_{y}j)~]\\times(c_{x}i+c_{y}j+c_{z}k)~=~[a_{x}b_{y}k]\\times(c_{x}i+c_{y}j+c_{z}k)~=}}\\\\ {{{}}}\\\\ {{a_{x}b_{y}c_{x}j-a_{x}b_{y}c_{y}i.}}\\end{array}\\]",
+  "secs": 11.77,
+  "task": "formula"
+ },
+ "p022_formula_573_545_1461_582": {
+  "text": "\\[\\left(\\boldsymbol{a}\\times\\boldsymbol{b}\\right)\\times\\boldsymbol{c}=a_{x}b_{y}c_{x}\\boldsymbol{j}-a_{x}b_{y}c_{y}\\boldsymbol{i}+\\left(a_{x}b_{x}c_{x}\\boldsymbol{i}-a_{x}b_{x}c_{x}\\boldsymbol{i}\\right).\\]",
+  "secs": 7.36,
+  "task": "formula"
+ },
+ "p022_formula_635_711_1399_747": {
+  "text": "\\[\\left(\\boldsymbol{a}\\times\\boldsymbol{b}\\right)\\times\\boldsymbol{c}=\\left(a_{x}c_{x}\\right)\\left(b_{x}\\boldsymbol{i}+b_{y}\\boldsymbol{j}\\right)-\\left(b_{x}c_{x}+b_{y}c_{y}\\right)\\left(a_{x}\\boldsymbol{i}\\right).\\]",
+  "secs": 6.7,
+  "task": "formula"
+ },
+ "p022_formula_758_1007_1276_1039": {
+  "text": "\\[\\begin{array}{l l l}{(a\\times b)\\times c}&{=}&{b(a\\cdot c)-a(b\\cdot c).}\\end{array}\\]",
+  "secs": 3.59,
+  "task": "formula"
+ },
+ "p022_ocr_402_1375_1632_1410": {
+  "text": "Príklad 1.2.4.1 Vypočítajte dvojásobný vektorový súčin (a × b) × c vektorov,",
+  "secs": 3.06,
+  "task": "ocr"
+ },
+ "p022_ocr_403_1416_1632_1450": {
+  "text": "pričom a = 5i, b = 4i + 3j, c = 2i - j + k a overte si, že výsledný vektor leži v",
+  "secs": 3.41,
+  "task": "ocr"
+ },
+ "p022_ocr_402_1541_1556_1615": {
+  "text": "Riešenie : $(a \\times b) \\times c = [5i \\times (4i + 3j)] \\times (2i - j + k) = [15k] \\times (2i - j + k)$\n= $30j + 15i$.",
+  "secs": 4.97,
+  "task": "ocr"
+ },
+ "p023_formula_511_1280_1512_1352": {
+  "text": "\\[\\begin{array}{r}{f\\left(x,y,z,t\\right)=f_{x}\\left(x,y,z,t\\right)\\textit{i}+f_{y}\\left(x,y,z,t\\right)\\textit{j}+f_{z}\\left(x,y,z,t\\right)\\textit{k}.}\\\\ {\\quad(1.3.1.1)}\\end{array}\\]",
+  "secs": 6.91,
+  "task": "formula"
+ },
+ "p023_ocr_604_1404_1469_1449": {
+  "text": "\\(f(t_{3})\\) \\(\\frac{z}{t_{2}}\\) \\(E(x_{2}, y_{2}, z_{2})\\)",
+  "secs": 2.67,
+  "task": "ocr"
+ },
+ "p023_formula_468_1428_1469_1656": {
+  "text": "\\[\\begin{align*}f(t_1)&\\quad f(t_2)&\\quad f(t_3)\\\\&y&\\quad E(x_1,y_1,z_1)\\\\\\end{align*}\\begin{align*}E(x_3,y_3,z_3)&\\\\y&\\end{align*}\\]",
+  "secs": 10.42,
+  "task": "formula"
+ },
+ "p024_formula_802_208_1236_241": {
+  "text": "\\[\\begin{array}{r}{\\boldsymbol{r}\\left(t\\right)=x(t)\\boldsymbol{i}+y\\left(t\\right)\\boldsymbol{j}+z(t)\\boldsymbol{k}.}\\end{array}\\]",
+  "secs": 4.12,
+  "task": "formula"
+ },
+ "p024_formula_594_412_694_442": {
+  "text": "\\[i,j,k\\]",
+  "secs": 0.89,
+  "task": "formula"
+ },
+ "p024_formula_811_1729_1218_1813": {
+  "text": "\\[\\frac{\\mathrm{d}\\boldsymbol{r}}{\\mathrm{d}t}=\\lim_{\\Delta t\\to0}\\frac{\\Delta\\boldsymbol{r}}{\\Delta t}=\\lim_{t_2\\to t_1}\\frac{\\boldsymbol{r}_2-\\boldsymbol{r}_1}{t_2-t_1}\\]",
+  "secs": 4.95,
+  "task": "formula"
+ },
+ "p024_ocr_407_1867_1637_1900": {
+  "text": "kde \\(r_1\\) a \\(r_2\\) sú polohové vektory (napr. pohybujúcej sa častice) v okamihoch \\(t_1\\) a \\(t_2\\).",
+  "secs": 3.9,
+  "task": "ocr"
+ },
+ "p025_formula_644_448_943_480": {
+  "text": "\\[y\\mid\\quad r(t_{1})\\]",
+  "secs": 1.24,
+  "task": "formula"
+ },
+ "p025_formula_673_894_1109_927": {
+  "text": "\\[\\begin{array}{r}{\\boldsymbol{\\boldsymbol{r}}\\left(t\\right)\\;=\\;x(t)\\dot{\\boldsymbol{i}}+y\\left(t\\right)\\boldsymbol{j}+z(t)\\boldsymbol{k}.}\\end{array}\\]",
+  "secs": 4.48,
+  "task": "formula"
+ },
+ "p025_formula_718_1038_1066_1113": {
+  "text": "\\[\\frac{\\mathrm{d}r}{\\mathrm{d}t}=\\frac{\\mathrm{d}x}{\\mathrm{d}t}i+\\frac{\\mathrm{d}y}{\\mathrm{d}t}j+\\frac{\\mathrm{d}z}{\\mathrm{d}t}k\\]",
+  "secs": 4.81,
+  "task": "formula"
+ },
+ "p025_formula_753_1388_852_1414": {
+  "text": "\\[\\mathrm{d}x-t\\]",
+  "secs": 1.08,
+  "task": "formula"
+ },
+ "p025_formula_757_1395_977_1471": {
+  "text": "\\[\\frac{\\mathrm{d}x}{\\mathrm{d}t}=\\lim_{t_{2}\\to t_{1}}\\frac{x_{2}-x_{1}}{t_{2}-t_{1}}\\]",
+  "secs": 3.2,
+  "task": "formula"
+ },
+ "p025_ocr_682_1410_881_1444": {
+  "text": "\\(v_{x} = \\frac{d x}{d t} = \\lim_{t \\to 0} f(t)\\)",
+  "secs": 2.22,
+  "task": "ocr"
+ },
+ "p026_ocr_408_208_1636_248": {
+  "text": "súradnice jej polohového vektora sú vyjadrené takto: \\(x = p t\\), \\(y = q + st + 0.5 \\, \\text{ut}^2\\),",
+  "secs": 3.63,
+  "task": "ocr"
+ },
+ "p026_formula_407_290_811_326": {
+  "text": "\\[s=2\\,\\mathrm{m/s},u=-9,81\\,\\mathrm{m\\cdot s^{-2}}.\\]",
+  "secs": 2.17,
+  "task": "formula"
+ },
+ "p026_ocr_407_454_1635_494": {
+  "text": "polohový vektor v zložkovom tvare: \\(\\boldsymbol{r}(t) = pt\\,i + (q + st + 0,5\\,ut^2)\\,j + 0\\,k\\).",
+  "secs": 4.0,
+  "task": "ocr"
+ },
+ "p026_formula_870_582_1209_616": {
+  "text": "\\[v=p\\dot{t}+(s+u t)j,\\]",
+  "secs": 2.17,
+  "task": "formula"
+ },
+ "p026_ocr_408_663_1637_700": {
+  "text": "vektora v pritom platí: \\(\\nu_x = p = -3 \\, \\text{m/s}\\), \\(\\nu_y = s + ut = (2 - 9,81 \\, \\text{t}) \\, \\text{m/s}\\). To",
+  "secs": 4.94,
+  "task": "ocr"
+ },
+ "p026_ocr_408_780_1329_821": {
+  "text": "ziskame, ak použijeme vzt'ah (1.1.4.3): \\(v = [p^2 + (s + ut)^2]^{1/2}\\).",
+  "secs": 3.31,
+  "task": "ocr"
+ },
+ "p026_formula_812_1641_1637_1768": {
+  "text": "\\[\\frac{\\mathrm{d}\\boldsymbol{b}}{\\mathrm{d}t}=\\frac{\\mathrm{d}(s\\boldsymbol{a})}{\\mathrm{d}t}=\\frac{\\mathrm{d}s}{\\mathrm{d}t}\\boldsymbol{a}+s\\frac{\\mathrm{d}\\boldsymbol{a}}{\\mathrm{d}t}\\ .\\]",
+  "secs": 5.3,
+  "task": "formula"
+ },
+ "p026_formula_825_1899_1224_1986": {
+  "text": "\\[\\frac{\\mathrm{d}(\\boldsymbol{a}\\cdot\\boldsymbol{b})}{\\mathrm{d}t}=\\left(\\frac{\\mathrm{d}\\boldsymbol{a}}{\\mathrm{d}t}\\cdot\\boldsymbol{b}\\right)+\\left(\\frac{\\mathrm{d}\\boldsymbol{b}}{\\mathrm{d}t}\\cdot\\boldsymbol{a}\\right)\\]",
+  "secs": 5.81,
+  "task": "formula"
+ },
+ "p027_formula_674_172_1514_307": {
+  "text": "\\[\\frac{\\mathrm{d}(a\\times b)}{\\mathrm{d}t}=\\left(\\frac{\\mathrm{d}a}{\\mathrm{d}t}\\times b\\right)+\\left(a\\times\\frac{\\mathrm{d}b}{\\mathrm{d}t}\\right).\\]",
+  "secs": 5.27,
+  "task": "formula"
+ },
+ "p027_ocr_281_589_1514_622": {
+  "text": "Príklad 1.3.3.1 Derivujte podľa času vektorový funkciju \\(F(t)\\), ktorá je výsledkom",
+  "secs": 2.96,
+  "task": "ocr"
+ },
+ "p027_ocr_282_622_1513_663": {
+  "text": "násobenia vektorovej funkcie skalárnou funkc�і: \\(F(t) = (3t^2)(p\\,i + qt\\,j + rt^2\\,k)\\),",
+  "secs": 3.46,
+  "task": "ocr"
+ },
+ "p027_ocr_282_785_1514_867": {
+  "text": "$$\\mathrm{d}F/\\mathrm{d}t = (6t)(p\\,i + qt\\,j + rt^2\\,k) + (3t^2)(q\\,j + 2rt\\,k) = 6pt\\,i + (6qt^2 + 3qt^2)\\,j + (6rt^3 + 6rt^3)\\,k\\text{ . } \\mathrm{V e l}^{\\prime}k\\mathrm{o s t}^{\\prime} \\mathrm{ v y s l e d n e h o } \\mathrm{ v e k t o r a} \\quad G(t) = 6pt\\,i + 9qt^2\\,j + 12rt^3k$$",
+  "secs": 13.84,
+  "task": "ocr"
+ },
+ "p027_formula_581_950_1154_991": {
+  "text": "\\[G(t)=[\\;(6p t_{1})^{2}\\;+\\;(9q t_{1}{}^{2})^{2}+(12r t_{1}{}^{3})^{2}\\;]^{1/2}.\\]",
+  "secs": 3.61,
+  "task": "formula"
+ },
+ "p027_formula_544_1877_1248_1963": {
+  "text": "\\[S_{x}=\\lim_{\\Delta x\\to0}\\frac{\\Delta P}{\\Delta x},\\quad S_{y}=\\lim_{\\Delta y\\to0}\\frac{\\Delta P}{\\Delta y},\\quad S_{z}=\\lim_{\\Delta z\\to0}\\frac{\\Delta P}{\\Delta z}.\\]",
+  "secs": 4.77,
+  "task": "formula"
+ },
+ "p028_formula_765_316_1276_401": {
+  "text": "\\[S_{x}=\\frac{\\partial P}{\\partial x},\\quad S_{y}=\\frac{\\partial P}{\\partial y},\\quad S_{z}=\\frac{\\partial P}{\\partial z}.\\]",
+  "secs": 3.06,
+  "task": "formula"
+ },
+ "p028_formula_831_579_1211_663": {
+  "text": "\\[(\\Delta P)_{y}=S_{y}\\Delta y=\\frac{\\partial P}{\\partial y}\\Delta y.\\]",
+  "secs": 2.24,
+  "task": "formula"
+ },
+ "p028_formula_582_838_1459_923": {
+  "text": "\\[\\Delta P=(\\Delta P)_{x}+(\\Delta P)_{y}+(\\Delta P)_{z}=\\frac{\\partial P}{\\partial x}\\Delta x+\\frac{\\partial P}{\\partial y}\\Delta y+\\frac{\\partial P}{\\partial z}\\Delta z,\\]",
+  "secs": 4.7,
+  "task": "formula"
+ },
+ "p028_formula_782_1058_1259_1147": {
+  "text": "\\[\\mathrm{d}P=\\frac{\\partial P}{\\partial x}\\mathrm{d}x+\\frac{\\partial P}{\\partial y}\\mathrm{d}y+\\frac{\\partial P}{\\partial z}\\mathrm{d}z.\\]",
+  "secs": 4.08,
+  "task": "formula"
+ },
+ "p028_ocr_405_1196_1635_1229": {
+  "text": "Takýmto vzt'ahom je vyjadrený úplný (totálny) diferenciál funkcie troch",
+  "secs": 2.54,
+  "task": "ocr"
+ },
+ "p028_ocr_745_1517_1256_1606": {
+  "text": "$$\\mathrm{grad}P(x,y,z)=\\frac{\\partial P}{\\partial x}i+\\frac{\\partial P}{\\partial y}j+\\frac{\\partial P}{\\partial z}k$$",
+  "secs": 3.67,
+  "task": "ocr"
+ },
+ "p028_ocr_719_1983_1257_2078": {
+  "text": "$$\\mathrm{grad}P(x,y,z)=\\left(i\\frac{\\partial}{\\partial x}+j\\frac{\\partial}{\\partial y}+k\\frac{\\partial}{\\partial z}\\right)$$",
+  "secs": 3.88,
+  "task": "ocr"
+ },
+ "p029_ocr_276_910_1293_951": {
+  "text": "vyjadrený vzťahom \\(\\varphi(x,y,z) = K (x^2 + y^2 + z^2)^{-1/2}\\), kde \\(K = (Q / 4\\pi\\varepsilon_0)\\).",
+  "secs": 4.05,
+  "task": "ocr"
+ },
+ "p029_ocr_373_1034_1508_1075": {
+  "text": "$$\\partial\\varphi/\\partial x = K(-1/2)(x^{2} + y^{2} + z^{2})^{-3/2}(2x) = -Kx(x^{2} + y^{2} + z^{2})^{-3/2}.$$ Výsledky",
+  "secs": 5.04,
+  "task": "ocr"
+ },
+ "p029_ocr_283_1177_1482_1246": {
+  "text": "$$\\mathrm{grad}\\,\\varphi = -K\\frac{x\\boldsymbol{i}+\\mathrm{y}\\,\\boldsymbol{j}+z\\,\\boldsymbol{k}}{(\\mathrm{r}^{2}+\\mathrm{v}^{2}+\\mathrm{r}^{2})^{3/2}}=-K\\frac{\\boldsymbol{r}}{r^{3}}$$\n(1.3.4.10)",
+  "secs": 7.07,
+  "task": "ocr"
+ },
+ "p029_ocr_275_1581_1508_1662": {
+  "text": "funkciu. Napríklad grad \\(B(x,y,z) = (i \\partial/\\partial x + j \\partial/\\partial y + k \\partial/\\partial z) B = i \\partial B/\\partial x + j \\partial B/\\partial y + k \\partial B/\\partial z\\), pričom len výraz j \\(\\partial B/\\partial y = j (\\partial B_x/\\partial y i + \\partial B_y/\\partial y j + \\partial B_z/\\partial y k)\\)",
+  "secs": 9.98,
+  "task": "ocr"
+ },
+ "p030_formula_470_678_1663_814": {
+  "text": "\\[\\mathrm{l i v}F(x,y,z)=\\nabla\\cdot\\boldsymbol{F}=\\left(\\boldsymbol{i}\\frac{\\partial}{\\partial x}+\\boldsymbol{j}\\frac{\\partial}{\\partial y}+\\boldsymbol{k}\\frac{\\partial}{\\partial z}\\right)\\cdot(F_{x}\\boldsymbol{i}+F_{y}\\boldsymbol{j}+F_{z}\\boldsymbol{k})=\\frac{\\partial F_{x}}{\\partial x}+\\frac{\\partial F_{y}}{\\partial y}+\\frac{\\partial F_{z}}{\\partial z}.\\]",
+  "secs": 12.56,
+  "task": "formula"
+ },
+ "p030_ocr_492_1116_1542_1406": {
+  "text": "$$\\mathrm{rot}F(x,y,z)=\\nabla\\times F=\\left(i\\frac{\\partial}{\\partial x}+j\\frac{\\partial}{\\partial y}+k\\frac{\\partial}{\\partial z}\\right)\\times(F_{x}i+F_{y}j+F_{z}k)=$$\n$$=\\left|\\begin{matrix}i&j&k\\\\\\frac{\\partial}{\\partial x}&\\frac{\\partial}{\\partial y}&\\frac{\\partial}{\\partial z}\\\\F_{x}&F_{y}&F_{z}\\end{matrix}\\right|=i\\left(\\frac{\\partial F_{z}}{\\partial y}-\\frac{\\partial F_{y}}{\\partial z}\\right)+j\\left(\\frac{\\partial F_{x}}{\\partial z}-\\frac{\\partial F_{z}}{\\partial x}\\right)+k\\left(\\frac{\\partial F_{y}}{\\partial x}-\\frac{\\partial F_{x}}{\\partial y}\\right).$$",
+  "secs": 40.71,
+  "task": "ocr"
+ },
+ "p030_formula_500_1918_1601_2081": {
+  "text": "\\[\\mathrm{div}\\boldsymbol{r}=\\frac{\\partial x}{\\partial x}+\\frac{\\partial y}{\\partial y}+\\frac{\\partial z}{\\partial z}=3\\quad\\mathrm{rot}\\boldsymbol{r}=\\left|\\begin{matrix}i&j&k\\\\\\lambda&\\lambda&\\lambda\\\\\\lambda x&\\lambda y&\\lambda z\\\\x&y&z\\end{matrix}\\right|=i(\\partial z/\\partial y-\\partial y/\\partial z)+\\ldots=0.\\]",
+  "secs": 10.83,
+  "task": "formula"
+ },
+ "p031_ocr_297_505_1489_584": {
+  "text": "$$\\mathrm{div}f = \\nabla \\cdot f = \\nabla \\cdot (\\boldsymbol{\\omega} \\times \\mathbf{r}) = (i \\, \\partial/\\partial x + j \\, \\partial/\\partial y + k \\, \\partial/\\partial z) \\cdot (x \\omega \\, j - y \\, \\omega i) = 0,$$\n$$\\mathrm{rot}f = \\nabla \\times f = \\nabla \\times (\\boldsymbol{\\omega} \\times \\mathbf{r}) = (i \\, \\partial/\\partial x + j \\, \\partial/\\partial y + k \\, \\partial/\\partial z) \\times (x \\omega \\, j - y \\, \\omega i) = 2\\omega k\\,.$$",
+  "secs": 11.4,
+  "task": "ocr"
+ },
+ "p031_formula_287_685_1389_1021": {
+  "text": "\\[\\begin{align*}f(r)&=r\\end{align*}\\begin{array}{c} / / \\uparrow \\downarrow \\rightarrow \\downarrow \\uparrow \\downarrow \\downarrow f(r)=\\omega \\times r\\end{array}\\]",
+  "secs": 9.75,
+  "task": "formula"
+ },
+ "p032_formula_442_569_1539_812": {
+  "text": "\\[\\begin{align*}\\mathbf{a})\\\\ \\nabla\\cdot\\left(\\nabla S\\right)&=\\operatorname{divgrad}S(x,y,z)=\\left(i\\frac{\\partial}{\\partial x}+j\\frac{\\partial}{\\partial y}+k\\frac{\\partial}{\\partial z}\\right)\\cdot\\left(i\\frac{\\partial S}{\\partial x}+j\\frac{\\partial S}{\\partial y}+k\\frac{\\partial S}{\\partial z}\\right)\\\\&=\\left(\\frac{\\partial^{2}S}{\\partial x^{2}}+\\frac{\\partial^{2}S}{\\partial y^{2}}+\\frac{\\partial^{2}S}{\\partial z^{2}}\\right)=\\Delta S\\end{align*}\\]",
+  "secs": 20.12,
+  "task": "formula"
+ },
+ "p032_formula_792_910_1318_995": {
+  "text": "\\[\\Delta=\\nabla\\cdot\\nabla=\\nabla^{2}=\\left(\\frac{\\partial^{2}}{\\partial x^{2}}+\\frac{\\partial^{2}}{\\partial y^{2}}+\\frac{\\partial^{2}}{\\partial z^{2}}\\right)~,\\]",
+  "secs": 4.01,
+  "task": "formula"
+ },
+ "p032_formula_442_1341_1599_1563": {
+  "text": "\\[\\begin{aligned}\\mathbf{b})\\quad&\\nabla\\times(\\nabla S)=\\operatorname{rot}\\operatorname{grad}S(x,y,z)=\\left(i\\frac{\\partial}{\\partial x}+j\\frac{\\partial}{\\partial y}+k\\frac{\\partial}{\\partial z}\\right)\\times\\left(i\\frac{\\partial S}{\\partial x}+j\\frac{\\partial S}{\\partial y}+k\\frac{\\partial S}{\\partial z}\\right)=\\\\&=i\\left(\\frac{\\partial^{2}S}{\\partial x\\partial y}-\\frac{\\partial^{2}S}{\\partial y\\partial z}\\right)+j\\left(\\frac{\\partial^{2}S}{\\partial x\\partial x}-\\frac{\\partial^{2}S}{\\partial y\\partial z}\\right)+k\\left(\\frac{\\partial^{2}S}{\\partial x\\partial y}-\\frac{\\partial^{2}S}{\\partial y\\partial x}\\right)=0\\end{aligned}\\]",
+  "secs": 27.58,
+  "task": "formula"
+ },
+ "p032_formula_924_1739_1128_1771": {
+  "text": "\\[\\nabla\\times(\\nabla\\boldsymbol{S})=0.\\]",
+  "secs": 1.86,
+  "task": "formula"
+ },
+ "p033_ocr_260_220_1472_455": {
+  "text": "d)\n\\(\\nabla(\\nabla\\cdot A)=\\mathrm{grad}\\operatorname{div}A(x,y,z)=\\left(i\\frac{\\partial}{\\partial x}+j\\frac{\\partial}{\\partial y}+k\\frac{\\partial}{\\partial z}\\right)\\left(\\frac{\\partial A_{x}}{\\partial x}+\\frac{\\partial A_{y}}{\\partial y}+\\frac{\\partial A_{z}}{\\partial z}\\right)=\\)\n\\(=i\\left(\\frac{\\partial^{2}A_{x}}{\\partial x^{2}}+\\frac{\\partial^{2}A_{y}}{\\partial y\\partial x}+\\frac{\\partial^{2}A_{z}}{\\partial z\\partial x}\\right)+j\\left(\\frac{\\partial^{2}A_{x}}{\\partial x\\partial y}+\\frac{\\partial^{2}A_{y}}{\\partial y^{2}}+\\frac{\\partial^{2}A_{z}}{\\partial z\\partial y}\\right)+k\\left(\\frac{\\partial^{2}A_{x}}{\\partial x\\partial z}+\\frac{\\partial^{2}A_{y}}{\\partial y\\partial z}+\\frac{\\partial^{2}A_{z}}{\\partial z^{2}}\\right)\\)",
+  "secs": 36.82,
+  "task": "ocr"
+ },
+ "p033_ocr_261_708_1492_742": {
+  "text": "Druhú deriváciu \\(\\nabla \\cdot (\\nabla \\times A) = \\text{div} \\text{rot} A(x,y,z)\\) možno vyjadrit podobne ako",
+  "secs": 3.62,
+  "task": "ocr"
+ },
+ "p033_formula_741_955_964_986": {
+  "text": "\\[\\nabla\\cdot(\\nabla\\times A)=0\\]",
+  "secs": 1.17,
+  "task": "formula"
+ },
+ "p033_ocr_261_1196_1369_1237": {
+  "text": "$$\\nabla\\times(\\nabla\\times A)=\\nabla(\\nabla\\cdot A)\\cdot(\\nabla\\cdot\\nabla)A=\\mathrm{grad}\\mathrm{div}A\\cdot\\nabla^{2}A=\\mathrm{grad}\\mathrm{div}A\\cdot\\Delta A$$",
+  "secs": 3.93,
+  "task": "ocr"
+ },
+ "p033_ocr_646_1329_1095_1362": {
+  "text": "\\(\\nabla \\times (\\nabla \\times A) = \\text{grad } \\text{div} A - \\Delta A\\)",
+  "secs": 2.18,
+  "task": "ocr"
+ },
+ "p034_formula_1010_770_1108_867": {
+  "text": "\\[\\int\\limits_{t_{1}}^{t_{2}}A\\,\\mathrm{d}t\\,,\\]",
+  "secs": 1.92,
+  "task": "formula"
+ },
+ "p034_formula_782_1081_1313_1185": {
+  "text": "\\[\\int_{t_{1}}^{t_{2}}A\\,\\mathrm{d}t=i\\int_{t_{1}}^{t_{2}}A_{x}\\,\\mathrm{d}t+j\\int_{t_{1}}^{t_{2}}A_{y}\\,\\mathrm{d}t+k\\int_{t_{1}}^{t_{2}}A_{z}\\,\\mathrm{d}t\\,.\\]",
+  "secs": 5.39,
+  "task": "formula"
+ },
+ "p034_formula_975_1324_1146_1419": {
+  "text": "\\[I=\\int\\limits_{t_{1}}^{t_{2}}F\\mathrm{d}t.\\]",
+  "secs": 1.75,
+  "task": "formula"
+ },
+ "p034_ocr_445_1587_1674_1628": {
+  "text": "\\(q = 4\\ \\text{m/s}^3\\), \\(s = 3\\ \\text{m/s}\\). Vypočítajte rýchlost’ \\(\\nu_2\\) častice v čase \\(t_2 > t_1\\) keď’ vieme, že",
+  "secs": 4.69,
+  "task": "ocr"
+ },
+ "p034_formula_450_1790_1668_1996": {
+  "text": "\\[\\begin{align*}\\nu_{2}-\\nu_{1}&=\\int\\limits_{t_{1}}^{t_{2}}a\\,\\mathrm{d}t=\\int\\limits_{t_{1}}^{t_{2}}i\\,p t^{2}\\,\\mathrm{d}t-\\int\\limits_{t_{1}}^{t_{2}}j\\,q t\\,\\mathrm{d}t=i\\,p\\left[\\frac{t^{3}}{3}\\right]_{t_{1}}^{t_{2}}-j\\,q\\left[\\frac{t^{2}}{2}\\right]_{t_{1}}^{t_{2}}=i\\,\\frac{p}{3}\\,(t_{2}^{3}-t_{1}^{3})-j\\frac{q}{2}(t_{2}^{2}-t_{1}^{2})\\\\\\nu_{2}&=s\\,j+i\\,\\frac{p}{3}\\,(t_{2}^{3}-t_{1}^{3})-j\\,\\frac{q}{2}\\,(t_{2}^{2}-t_{1}^{2})=i\\,\\frac{p}{3}\\,(t_{2}^{3}-t_{1}^{3})+j\\left[s-\\frac{q}{2}\\,(t_{2}^{2}-t_{1}^{2})\\right].\\end{align*}\\]",
+  "secs": 36.82,
+  "task": "formula"
+ },
+ "p035_formula_823_822_931_872": {
+  "text": "\\[\\dot{\\int}A\\cdot\\mathrm{d}\\boldsymbol{r}.\\]",
+  "secs": 2.04,
+  "task": "formula"
+ },
+ "p035_formula_782_1799_972_1861": {
+  "text": "\\[W=\\int\\limits_{r_{2}}^{r_{2}}F\\cdot d r\\]",
+  "secs": 2.03,
+  "task": "formula"
+ },
+ "p035_ocr_454_2022_1249_2057": {
+  "text": "\\(F = F_x\\, i + F_y\\, j + F_z\\, k\\), \\quad \\mathrm{d}r = i\\,\\mathrm{d}x + j\\,\\mathrm{d}y + k\\,\\mathrm{d}z\\)",
+  "secs": 3.94,
+  "task": "ocr"
+ },
+ "p036_formula_771_197_1314_305": {
+  "text": "\\[\\int\\limits_{r_{1}}^{r_{2}}F\\cdot\\mathrm{d}\\boldsymbol{r}=\\int\\limits_{r_{1}}^{r_{2}}(F_{x}\\,\\mathrm{d}x+F_{y}\\,\\mathrm{d}y+F_{z}\\,\\mathrm{d}z)\\ ,\\]",
+  "secs": 4.8,
+  "task": "formula"
+ },
+ "p036_formula_886_691_1201_754": {
+  "text": "\\[\\int_{0}^{\\frac{r}{2}}A\\cdot d\\mathbf{r}=S(r_{2})-S(r_{1}).\\]",
+  "secs": 2.77,
+  "task": "formula"
+ },
+ "p036_formula_735_953_1350_1037": {
+  "text": "\\[A_{x}i+A_{y}j+A_{z}k=\\frac{\\partial S}{\\partial x}i+\\frac{\\partial S}{\\partial y}j+\\frac{\\partial S}{\\partial z}k.\\]",
+  "secs": 3.11,
+  "task": "formula"
+ },
+ "p036_formula_434_1179_1620_1273": {
+  "text": "\\[\\int\\limits_{\\mathbf{r}_{1}}^{\\mathbf{r}_{2}}A\\cdot\\mathrm{d}\\mathbf{r}=\\int\\limits_{\\mathbf{r}_{1}}^{{\\mathbf{r}_{2}}}(A_{x}\\mathrm{d}x+A_{y}\\mathrm{d}y+A_{z}\\mathrm{d}z)=\\int\\limits_{\\mathbf{r}_{1}}^{{\\mathbf{r}_{2}}}(\\frac{\\partial S}{\\partial x}\\mathrm{d}x+\\frac{\\partial S}{\\partial y}\\mathrm{d}y+\\frac{\\partial S}{\\partial z}\\mathrm{d}z)=\\int\\limits_{\\mathbf{r}_{1}}^{{\\mathbf{r}_{2}}}\\mathrm{d}S=S(\\mathbf{r}_{2})\\cdot S(\\mathbf{r}_{1}).\\]",
+  "secs": 15.02,
+  "task": "formula"
+ },
+ "p036_ocr_430_1612_1657_1647": {
+  "text": "Integrovat’ budeme od bodu A(x₁, y₁, z₁) po bod B(x₂, y₂, z₂) po krivke, ktorá spája tieto",
+  "secs": 4.12,
+  "task": "ocr"
+ },
+ "p036_formula_433_1738_1554_1836": {
+  "text": "\\[\\int\\limits_{r_{1}}^{r_{2}}F\\cdot\\mathrm{d}r=\\int\\limits_{r_{1}}^{r_{2}}(F_{x}\\mathrm{d}x+F_{y}\\mathrm{d}y+F_{z}\\mathrm{d}z)=\\int\\limits_{z_{1}}^{z_{2}}F_{z}\\mathrm{d}z=\\int\\limits_{z_{1}}^{z_{2}}\\left(-mg\\right)\\mathrm{d}z=\\left(-mg z_{2}\\right)-\\left(-mg z_{1}\\right).\\]",
+  "secs": 8.78,
+  "task": "formula"
+ },
+ "p037_formula_268_477_1386_572": {
+  "text": "\\[\\int\\limits_{r_{1}}^{r_{2}}F\\cdot\\mathrm{d}r=\\int\\limits_{r_{1}}^{r_{2}}(F_{x}\\mathrm{d}x+F_{y}\\mathrm{d}y)=-K\\int\\limits_{x_{1}}^{x_{2}}x\\mathrm{d}x-K\\int\\limits_{y_{1}}^{y_{2}}y\\mathrm{d}y=-\\frac{K}{2}\\left[(x_{2}^{2}-x_{1}^{2})+(y_{2}^{2}-y_{1}^{2})\\right],\\]",
+  "secs": 9.4,
+  "task": "formula"
+ },
+ "p037_ocr_264_629_1241_750": {
+  "text": "$$-\\frac{K}{2}\\left[(x_{2}^{2}+y_{2}^{2})-(x_{1}^{2}+y_{1}^{2})\\right]=(-\\frac{K}{2}r_{2}^{2})-(-\\frac{K}{2}r_{1}^{2}),$$\nkde $(r_{1})^{2}=(x_{1})^{2}+(y_{1})^{2}$, $(r_{2})^{2}=(x_{2})^{2}+(y_{2})^{2}$.",
+  "secs": 7.7,
+  "task": "ocr"
+ },
+ "p037_ocr_261_1643_1494_1676": {
+  "text": "po $\\mathbf{r}_{1}$, dostali by sme výsledok $S\\left(\\mathbf{r}_{1}\\right)-S\\left(\\mathbf{r}_{2}\\right)$, teda výsledok s opačným znamienkom.",
+  "secs": 4.0,
+  "task": "ocr"
+ },
+ "p038_formula_875_355_1185_431": {
+  "text": "\\[\\oint_{K}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{r}=\\iint_{S}\\mathrm{r o t}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S}.\\]",
+  "secs": 2.98,
+  "task": "formula"
+ },
+ "p039_formula_819_347_925_419": {
+  "text": "\\[\\iint_{S}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S}\\]",
+  "secs": 1.81,
+  "task": "formula"
+ },
+ "p039_ocr_258_806_1490_839": {
+  "text": "ktorej integrujeme. Vel'kost', ani smer vektora \\(A(x, y, z)\\) nemusia byt' konštantné, od",
+  "secs": 2.75,
+  "task": "ocr"
+ },
+ "p039_formula_544_1414_1131_1450": {
+  "text": "\\[A\\cdot\\mathrm{d}\\boldsymbol{S}=A_{x}\\mathrm{d}y\\mathrm{d}z+A_{y}\\mathrm{d}z\\mathrm{d}x+A_{z}\\mathrm{d}x\\mathrm{d}y,\\]",
+  "secs": 3.92,
+  "task": "formula"
+ },
+ "p039_formula_785_1658_962_1708": {
+  "text": "\\[I=\\iint J\\cdot\\mathrm{d}\\boldsymbol{S}.\\]",
+  "secs": 1.51,
+  "task": "formula"
+ },
+ "p039_formula_814_1841_933_1910": {
+  "text": "\\[\\iint\\limits_{S}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S},\\]",
+  "secs": 1.69,
+  "task": "formula"
+ },
+ "p039_formula_747_2080_1490_2153": {
+  "text": "\\[\\oint_{S}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S}=\\iiint_{V}\\mathrm{div}\\boldsymbol{A}\\,\\mathrm{d}\\tau\\,,\\qquad\\quad(1.4.3.4)\\]",
+  "secs": 4.03,
+  "task": "formula"
+ },
+ "p040_ocr_906_724_1175_806": {
+  "text": "$$\\mathrm{div}A = \\frac{1}{V} \\iint_{S} A \\cdot \\mathrm{d}S \\quad .$$",
+  "secs": 2.57,
+  "task": "ocr"
+ },
+ "p040_ocr_427_1577_1655_1619": {
+  "text": "každom bode povrchu gule rovnobežné, preto skalárny súčin A ·dS = K (r /r³) ·dS =",
+  "secs": 2.76,
+  "task": "ocr"
+ },
+ "p040_ocr_427_1617_1584_1723": {
+  "text": "\\(K(1/r^3) \\boldsymbol{r} \\cdot \\mathrm{d}\\boldsymbol{S} = K(1/r^3) \\, \\mathrm{d}S = K(1/r^2) \\, \\mathrm{d}S\\), pričom na povrchu gule \\(r = R\\). Preto \\(\\iint A \\cdot \\mathrm{d}S = \\iint (K/R^2) \\, \\mathrm{d}S = (K/R^2) \\iint \\mathrm{d}S = (K/R^2) \\, 4\\pi R^2 = 4\\pi K\\),",
+  "secs": 10.46,
+  "task": "ocr"
+ },
+ "p041_formula_733_488_1492_604": {
+  "text": "\\[\\oint_{K}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{r}=\\iint_{S}\\mathrm{rot}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S}\\tag{1}\\]",
+  "secs": 3.83,
+  "task": "formula"
+ },
+ "p041_formula_378_859_1312_1153": {
+  "text": "\\[\\begin{array}{c}y\\\\\\downarrow\\\\\\rightarrow\\\\\\rightarrow i\\\\\\quad X\\\\\\end{array}\\quad\\begin{array}{c}y\\\\K\\\\j\\\\\\downarrow\\\\\\uparrow j\\\\B\\\\\\downarrow\\\\\\rightarrow i\\\\\\quad X\\\\\\end{array}\\quad\\begin{array}{c}E\\\\T\\\\P\\\\R\\\\\\quad\\Delta x\\\\\\quad D\\\\\\quad\\Delta y\\\\Q\\\\\\quad C\\\\\\quad D\\\\\\end{array}\\]",
+  "secs": 12.08,
+  "task": "formula"
+ },
+ "p041_ocr_260_1353_1487_1394": {
+  "text": "tieto vrcholy majú súradnice B(x, y, z), C(x+Δx, y, z), D(x+Δx, y+Δy, z), E(x, y+Δy, z).",
+  "secs": 3.99,
+  "task": "ocr"
+ },
+ "p041_formula_651_1603_1102_1695": {
+  "text": "\\[\\int\\limits_{\\mathrm{B}}^{\\mathrm{C}}A\\cdot\\mathrm{d}\\boldsymbol{r}=A_{\\mathrm{R}}\\cdot(\\Delta x\\boldsymbol{i})=A_{\\mathrm{x R}}\\Delta x,\\]",
+  "secs": 3.19,
+  "task": "formula"
+ },
+ "p041_ocr_367_1912_1353_1998": {
+  "text": "$$\\int\\limits_{C}^{D}A\\cdot\\mathrm{d}\\boldsymbol{r}=A_{Q}\\cdot(\\Delta y\\,\\boldsymbol{j})=A_{y Q}\\,\\Delta y\\,,\\qquad\\int\\limits_{D}^{E}A\\cdot\\mathrm{d}\\boldsymbol{r}=A_{T}\\cdot(-\\Delta x\\,\\boldsymbol{i})=-A_{x T}\\,\\Delta x\\,,$$",
+  "secs": 5.38,
+  "task": "ocr"
+ },
+ "p041_formula_616_2051_1102_2136": {
+  "text": "\\[\\int\\limits_{E}^{B}\\boldsymbol{A}\\cdot d\\boldsymbol{r}=A_{P}\\cdot(-\\Delta y\\,\\boldsymbol{j})=-A_{y P}\\,\\Delta x~.\\]",
+  "secs": 2.97,
+  "task": "formula"
+ },
+ "p042_formula_750_308_1657_399": {
+  "text": "\\[\\oint A\\cdot\\mathrm{d}\\boldsymbol{r}=(A_{\\mathrm{xR}}-A_{\\mathrm{xT}})\\Delta x+(A_{\\mathrm{yQ}}-A_{\\mathrm{yP}})\\Delta y\\ .\\]",
+  "secs": 3.41,
+  "task": "formula"
+ },
+ "p042_formula_652_614_1435_700": {
+  "text": "\\[A_{x T}=A_{x R}+\\frac{\\partial A_{x}}{\\partial y}\\Delta y\\quad\\Rightarrow\\quad A_{x R}-A_{x T}=-\\frac{\\partial A_{x}}{\\partial y}\\Delta y.\\]",
+  "secs": 3.68,
+  "task": "formula"
+ },
+ "p042_ocr_672_835_1415_922": {
+  "text": "$$A_{yQ}=A_{yP}+\\frac{\\partial A_{y}}{\\partial x}\\Delta x\\quad\\Rightarrow\\quad A_{yQ}-A_{yP}=\\frac{\\partial A_{y}}{\\partial x}\\Delta x\\,.$$",
+  "secs": 3.37,
+  "task": "ocr"
+ },
+ "p042_formula_590_1051_1657_1197": {
+  "text": "\\[\\oint_{BCDE}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{r}=\\frac{\\partial A_{y}}{\\partial x}\\Delta x\\Delta y-\\frac{\\partial A_{x}}{\\partial y}\\Delta y\\Delta x=\\left(\\frac{\\partial A_{y}}{\\partial x}-\\frac{\\partial A_{x}}{\\partial y}\\right)\\Delta x\\Delta y\\,.\\]",
+  "secs": 7.01,
+  "task": "formula"
+ },
+ "p042_formula_450_1495_1656_1636": {
+  "text": "\\[\\mathbf{C}=\\left(\\frac{\\partial A_{y}}{\\partial x}-\\frac{\\partial A_{x}}{\\partial y}\\right)\\Delta S_{xy}+\\left(\\frac{\\partial A_{z}}{\\partial y}-\\frac{\\partial A_{y}}{\\partial z}\\right)\\Delta S_{yz}+\\left(\\frac{\\partial A_{x}}{\\partial z}-\\frac{\\partial A_{z}}{\\partial x}\\right)\\Delta S_{zx}=\\left(\\operatorname{rot}A\\right)\\cdot\\Delta S~.\\]",
+  "secs": 10.04,
+  "task": "formula"
+ },
+ "p042_formula_428_1734_1656_1851": {
+  "text": "\\[\\begin{array}{c}\\Delta S_{xy}k):\\\\\\quad C=(\\operatorname{rot}A)\\cdot\\Delta S\\,.\\end{array}\\tag{5}\\]",
+  "secs": 3.53,
+  "task": "formula"
+ },
+ "p043_formula_702_212_984_407": {
+  "text": "\\[\\begin{array}{l} A(x, y) \\\\\\downarrow \\quad \\uparrow \\quad \\uparrow \\\\ \\rightarrow \\quad \\rightarrow \\quad \\Delta x \\end{array}\\]",
+  "secs": 2.85,
+  "task": "formula"
+ },
+ "p043_formula_738_936_1007_1012": {
+  "text": "\\[\\int_{K}A\\cdot d\\boldsymbol{r}=\\iint_{S} \\mathrm{rot} A\\cdot d\\boldsymbol{S}\\]",
+  "secs": 2.41,
+  "task": "formula"
+ },
+ "p043_formula_793_1361_1491_1476": {
+  "text": "\\[T=\\iint\\limits_{S}\\boldsymbol{v}\\cdot\\mathrm{d}\\boldsymbol{S}\\tag{1}\\]",
+  "secs": 2.01,
+  "task": "formula"
+ },
+ "p043_formula_672_1648_1077_1699": {
+  "text": "\\[T=\\iint_{S}\\boldsymbol{v}\\cdot\\mathrm{d}\\boldsymbol{S}=v\\iint_{S}\\mathrm{d}S=v\\boldsymbol{S}.\\]",
+  "secs": 2.6,
+  "task": "formula"
+ },
+ "p043_formula_752_1858_998_1940": {
+  "text": "\\[[T]=\\frac{\\mathrm{m}}{\\mathrm{s}}\\mathrm{m}^{2}=\\frac{\\mathrm{m}^{3}}{\\mathrm{s}},\\]",
+  "secs": 2.26,
+  "task": "formula"
+ },
+ "p044_ocr_417_159_1646_193": {
+  "text": "o \\( \\ell = \\nu \\Delta t \\). Prierezom S tak za časový interval \\(\\Delta t\\) preteče objem kvapaliny \\(\\Delta V = S \\ell\\)",
+  "secs": 3.01,
+  "task": "ocr"
+ },
+ "p044_formula_929_309_1135_362": {
+  "text": "\\[q_{v}=\\frac{\\Delta v}{\\Delta t}=Sv.\\]",
+  "secs": 1.4,
+  "task": "formula"
+ },
+ "p044_formula_942_457_1124_529": {
+  "text": "\\[q_{V}=\\underset{s}{\\iint}v\\mathrm{d}S.\\]",
+  "secs": 1.54,
+  "task": "formula"
+ },
+ "p044_formula_940_701_1127_776": {
+  "text": "\\[q_{V}=\\iint\\limits_{S}\\boldsymbol{v}\\cdot\\mathrm{d}\\boldsymbol{S}.\\]",
+  "secs": 1.9,
+  "task": "formula"
+ },
+ "p044_formula_705_1284_1647_1360": {
+  "text": "\\[\\begin{array}{r l r}&{}&{A(x,y,z)=i~A_{x}(x,y,z)+j~A_{y}(x,y,z)+k~A_{z}(x,y,z)\\;.}\\end{array}\\]",
+  "secs": 4.1,
+  "task": "formula"
+ },
+ "p044_formula_726_1565_1394_1643": {
+  "text": "\\[\\begin{array}{l}z: \\quad A(P) \\\\ D: \\quad H\\end{array}\\quad\\begin{array}{l}A(Q)\\\\  C(x,y,z) \\end{array}\\quad\\begin{array}{l}B(x+\\Delta x,y,z)\\\\ C(x,y,z) \\end{array}\\]",
+  "secs": 5.32,
+  "task": "formula"
+ },
+ "p044_ocr_634_1662_1396_1703": {
+  "text": "E \\(\\quad\\) J \\(\\quad\\) | \\(\\quad\\) D(x, y, z+\\Delta z)",
+  "secs": 1.81,
+  "task": "ocr"
+ },
+ "p044_formula_556_1703_1577_2018": {
+  "text": "\\[\\begin{align*}\\Delta S_{1}&\\quad P\\\\\\quad C&\\quad F\\\\\\quad B&\\quad\\quad\\quad Q\\\\\\quad\\Delta S_{2}&\\quad E(x+\\Delta x,~y,~z+\\Delta z)\\\\&\\quad F(x+\\Delta x,~y+\\Delta y,~z)\\\\&\\quad G(x,~y+\\Delta y,~z)\\\\&\\quad H(x,~y+\\Delta y,~z+\\Delta z)\\\\&\\quad J(x+\\Delta x,~y+\\Delta y,~z+\\Delta z)\\\\P(...,~y,...)&\\quad Q(...,~y+\\Delta y,...)\\\\\\end{align*}\\]",
+  "secs": 21.98,
+  "task": "formula"
+ },
+ "p045_formula_266_639_1481_677": {
+  "text": "\\[T_{1}+T_{2}=A_{\\mathrm{P}}\\cdot\\Delta S_{1}+A_{\\mathrm{Q}}\\cdot\\Delta S_{2}=A_{\\mathrm{P}}\\cdot\\Delta x\\Delta z(-j)+A_{\\mathrm{Q}}\\cdot\\Delta x\\Delta z j=(\\Delta x\\Delta z)j\\cdot(A_{\\mathrm{Q}}-A_{\\mathrm{P}}).\\]",
+  "secs": 6.33,
+  "task": "formula"
+ },
+ "p045_formula_664_855_1490_936": {
+  "text": "\\[T_{1}+T_{2}=(\\Delta x\\Delta z)(A_{y Q}-A_{y P}).\\]",
+  "secs": 2.0,
+  "task": "formula"
+ },
+ "p045_formula_914_1069_971_1110": {
+  "text": "\\[\\underline{\\partial A_{y}}\\]",
+  "secs": 0.94,
+  "task": "formula"
+ },
+ "p045_formula_460_1290_1290_1385": {
+  "text": "\\[T_{1}+T_{2}=(\\Delta x\\Delta z)(A_{y Q}-A_{y P})=\\frac{\\partial A_{y}}{\\partial y}\\Delta y\\Delta x\\Delta z=\\frac{\\partial A_{y}}{\\partial y}\\Delta\\tau,\\]",
+  "secs": 3.87,
+  "task": "formula"
+ },
+ "p045_formula_841_1564_1434_1644": {
+  "text": "\\[T_{5}+T_{6}=\\frac{\\partial A_{z}}{\\partial z}\\Delta y\\Delta x\\Delta z=\\frac{\\partial A_{z}}{\\partial z}\\Delta\\tau.\\]",
+  "secs": 2.67,
+  "task": "formula"
+ },
+ "p045_ocr_488_1779_1491_1920": {
+  "text": "$$\\sum_{1}^{6}T_{k}=\\left(\\frac{\\partial A_{x}}{\\partial x}+\\frac{\\partial A_{y}}{\\partial y}+\\frac{\\partial A_{z}}{\\partial z}\\right)\\Delta\\tau=\\mathrm{div}\\boldsymbol{A}\\,\\Delta\\tau\\,,\\eqno{(3)}$$",
+  "secs": 6.67,
+  "task": "ocr"
+ },
+ "p046_formula_937_841_1644_961": {
+  "text": "\\[T=\\iint_{S}\\boldsymbol{A}\\cdot\\mathrm{d}\\boldsymbol{S}.\\]",
+  "secs": 2.2,
+  "task": "formula"
+ },
+ "p046_formula_941_1096_1644_1211": {
+  "text": "\\[\\begin{array}{c}\\iiint\\limits_{V}\\mathrm{div}\\boldsymbol{A}\\mathrm{d}\\boldsymbol{\\tau}.\\\\(5)\\end{array}\\]",
+  "secs": 2.72,
+  "task": "formula"
+ },
+ "p046_formula_866_1302_1203_1353": {
+  "text": "\\[\\iint_{A}\\cdot\\mathrm{d}S=\\iiint_{D}\\mathrm{div}\\boldsymbol{A}\\,\\mathrm{d}\\tau.\\]",
+  "secs": 2.33,
+  "task": "formula"
+ },
+ "p047_formula_1012_811_1153_838": {
+  "text": "\\[t_{2}\\rightarrow t_{1}\\quad t_{2}-t_{1}\\]",
+  "secs": 1.49,
+  "task": "formula"
+ },
+ "p047_ocr_261_1057_1494_1090": {
+  "text": "definovaná vzt'ahom $S(x,y,z)$ = div $A(x,y,z) = \\nabla \\cdot A (x,y,z)$. Je to aplikácia nabla",
+  "secs": 3.45,
+  "task": "ocr"
+ },
+ "p047_formula_260_1309_1199_1341": {
+  "text": "\\[a\\times(b\\times c)=b(a\\cdot c)-c(a\\cdot b),\\quad(a\\times b)\\times c=b(a\\cdot c)-a(b\\cdot c).\\]",
+  "secs": 3.47,
+  "task": "formula"
+ },
+ "p047_ocr_262_1703_1496_1775": {
+  "text": "definovaná vzt'ahom \\(A(x,y,z)=\\frac{\\partial S}{\\partial x}i+\\frac{\\partial S}{\\partial y}j+\\frac{\\partial S}{\\partial z}k=\\nabla S\\), kde \\(S(x,y,z)\\) je skalerna",
+  "secs": 4.37,
+  "task": "ocr"
+ },
+ "p047_formula_775_1760_983_1781": {
+  "text": "\\[x~\\partial y^{\\prime}~\\partial z\\]",
+  "secs": 1.09,
+  "task": "formula"
+ },
+ "p048_ocr_420_650_1647_683": {
+  "text": "počtu vektorov: \\(v = pa + qb + rc + sd + ....\\), kde p, q, r, s sú skaláry. V",
+  "secs": 2.5,
+  "task": "ocr"
+ },
+ "p048_ocr_1202_813_1643_890": {
+  "text": "$$\\frac{\\partial}{\\partial x}i+\\frac{\\partial}{\\partial y}j+\\frac{\\partial}{\\partial z}k\\quad\\text{Používá sa}$$",
+  "secs": 2.55,
+  "task": "ocr"
+ },
+ "p048_ocr_420_1229_1447_1264": {
+  "text": "a skalárny súčin A · dS v tvare: \\(A \\cdot dS = A_x \\, dydz + A_y \\, dzdx + A_z \\, dxdy\\).",
+  "secs": 2.76,
+  "task": "ocr"
+ },
+ "p048_ocr_420_1680_1647_1714": {
+  "text": "definovaná vzt'ahom \\(B(x,y,z) = \\text{rot} A(x,y,z) = \\nabla \\times A (x,y,z)\\). Je to aplikácia nabla",
+  "secs": 3.41,
+  "task": "ocr"
+ },
+ "p048_ocr_420_2128_1377_2162": {
+  "text": "hodnoty môžu závisíť aj od štvrtej premennej - času t: S (x,y,z,t).",
+  "secs": 2.21,
+  "task": "ocr"
+ },
+ "p050_ocr_407_345_1637_382": {
+  "text": "\\(A(x, y, z) = i A_x(x, y, z) + j A_y(x, y, z) + k A_z(x, y, z)\\), kde \\(A_x\\), \\(A_y\\), \\(A_z\\) sú skalárne",
+  "secs": 4.49,
+  "task": "ocr"
+ },
+ "p050_ocr_410_1244_1636_1277": {
+  "text": "zmiešaný súčin vektorov - súčin troch vektorov typu \\((a \\times b) \\cdot c\\), alebo \\(a \\cdot (b \\times c)\\),",
+  "secs": 2.89,
+  "task": "ocr"
+ },
+ "p050_formula_408_1407_520_1438": {
+  "text": "\\[a,b,c.\\]",
+  "secs": 0.89,
+  "task": "formula"
+ },
+ "p051_ocr_326_461_1404_551": {
+  "text": "Výsledok: \\(b = -9i + 6j - 3k\\)\nAkú veľkosť má vektor \\(a = 3i - 2i + k\\) ? Výsledok: \\(a = (14)^{1/2}\\)",
+  "secs": 3.63,
+  "task": "ocr"
+ },
+ "p051_ocr_323_538_1411_578": {
+  "text": "Aku vel'kost' má vektor \\(a = 3i - 2j + k\\) ? Výsledok: \\(a = (14)^{1/2}\\).",
+  "secs": 2.56,
+  "task": "ocr"
+ },
+ "p051_ocr_322_785_1428_819": {
+  "text": "strany rovnobeżnika a a b. Výsledok: \\(a = (1/2)(u + v)\\), \\(b = (1/2)(u - v)\\).",
+  "secs": 2.75,
+  "task": "ocr"
+ },
+ "p051_ocr_325_906_1032_947": {
+  "text": "Výsledok: \\(\\eta = -a / (45)^{1/2} = (-5i + 2j - 4k) / (45)^{1/2}\\).",
+  "secs": 2.67,
+  "task": "ocr"
+ },
+ "p051_ocr_324_1158_1156_1190": {
+  "text": "Výsledok: a) \\((1/2)(b + c)\\), b) \\(c/2 - b\\), c) \\((1/3)(b + c)\\).",
+  "secs": 2.58,
+  "task": "ocr"
+ },
+ "p051_ocr_320_1361_1432_1433": {
+  "text": "Výsledok: a) \\(u_1 = a + b + c\\), \\(u_2 = c - (a + b)\\), \\(u_3 = b - (a + c)\\), \\(u_4 = a - (b + c)\\)\nb) \\(u_1 = (34)^{1/2}\\), \\(u_2 = (14)^{1/2}\\), \\(u_3 = (14)^{1/2}\\), \\(u_4 = (18)^{1/2}\\).",
+  "secs": 7.47,
+  "task": "ocr"
+ },
+ "p051_ocr_325_1565_693_1597": {
+  "text": "Výsledok: \\(c = 2a + (3/2)b\\).",
+  "secs": 1.66,
+  "task": "ocr"
+ },
+ "p051_ocr_333_1809_1371_1842": {
+  "text": "\\(\\vec{b} = i - 3j.\\) Výsledok: \\(c = 2a + 2\\vec{b}\\).",
+  "secs": 2.22,
+  "task": "ocr"
+ },
+ "p051_ocr_325_1972_1405_2005": {
+  "text": "Výsledok: \\( \\mathbf{r} = a + s(b - a) \\), s je volitelný skalárny parameter (reálne číslo).",
+  "secs": 2.48,
+  "task": "ocr"
+ },
+ "p052_ocr_414_334_1406_368": {
+  "text": "14. Zadané sú dva vektory \\(a = 2i + 3j\\), \\(b = -3i + 2j + 4k\\). Vypočítajte",
+  "secs": 2.7,
+  "task": "ocr"
+ },
+ "p052_ocr_460_779_1554_823": {
+  "text": "sústavy? Výsledok: \\(\\alpha=36,7^{\\circ}\\), \\(\\beta=122,3^{\\circ}\\), \\(\\gamma=74,5^{\\circ}\\).",
+  "secs": 2.99,
+  "task": "ocr"
+ },
+ "p052_ocr_459_1435_1598_1475": {
+  "text": "vektorov \\(i, j\\). Výsledok: \\(f = \\pm(i - 3j)/(10)^{1/2}\\).",
+  "secs": 2.33,
+  "task": "ocr"
+ },
+ "p052_formula_462_1605_1240_1639": {
+  "text": "\\[\\overset{\\cdot}{\\mathrm{~V y s l e d o k}}\\colon\\alpha=54,74^{\\circ},\\quad\\beta=54,73^{\\circ},\\quad\\gamma=70,53^{\\circ}.\\]",
+  "secs": 3.34,
+  "task": "formula"
+ },
+ "p052_ocr_462_1803_740_1842": {
+  "text": "Výsledok: S = 6 m\\(^{2}\\).",
+  "secs": 1.19,
+  "task": "ocr"
+ },
+ "p053_ocr_261_1249_1415_1358": {
+  "text": "povrchu S.\nVýsledok: \\(V = 12 \\, m^3\\), \\(S = 35,82 \\, m^2\\).\n31. Čomu sa rovná dvojásobný vektorový súčin jednotkových vektorov kartezián",
+  "secs": 5.37,
+  "task": "ocr"
+ },
+ "p053_ocr_317_1829_920_1861": {
+  "text": "Výsledok: a) \\([(b - a) \\times (c - a)] \\cdot (r - a) = 0\\).",
+  "secs": 2.37,
+  "task": "ocr"
+ },
+ "p053_ocr_310_1951_1482_1982": {
+  "text": "rovina bodmi A(2,0,0), B(0,0,1), C(0,2,1), druhá rovina bodmi D(2,0,0), E(0,2,0),",
+  "secs": 3.27,
+  "task": "ocr"
+ },
+ "p053_ocr_310_1991_1452_2033": {
+  "text": "F(0,0,2). Výsledok: \\(\\varphi = 39,23^{\\circ}\\)",
+  "secs": 1.89,
+  "task": "ocr"
+ },
+ "p054_ocr_446_447_1188_488": {
+  "text": "36. Vypočítajte grad(r), kde \\( r = (x^{2} + y^{2} + z^{2})^{1/2} \\).",
+  "secs": 2.4,
+  "task": "ocr"
+ },
+ "p054_ocr_502_495_1191_528": {
+  "text": "Výsledok: \\(\\text{grad}(r) = r / r\\), \\(\\text{kde } r = (xi + yj + zk)\\).",
+  "secs": 2.37,
+  "task": "ocr"
+ },
+ "p054_ocr_446_569_1258_770": {
+  "text": "37. Vypočítajte grad(1/r), kde \\(r = (x^2 + y^2 + z^2)^{1/2}\\).\nVýsledok: \\(\\text{grad}(1/r) = -r / r^3\\), \\(\\text{kde } r = (xi + yj + zk)\\).\n38. Vypočítajte \\(\\text{grad}(r^n)\\), \\(\\text{kde } r = (x^2 + y^2 + z^2)^{1/2}\\).\nVýsledok: \\(\\text{grad}(r^n) = n r^{n-2} r\\).",
+  "secs": 13.08,
+  "task": "ocr"
+ },
+ "p054_formula_600_911_880_940": {
+  "text": "\\[x\\qquad\\partial x\\qquad\\partial x\\]",
+  "secs": 1.4,
+  "task": "formula"
+ },
+ "p054_formula_502_1107_616_1139": {
+  "text": "\\[P(x,y,z).\\]",
+  "secs": 0.98,
+  "task": "formula"
+ },
+ "p054_ocr_506_1148_1134_1180": {
+  "text": "Výsledok: \\(\\text{grad}(PS) = P\\,\\text{grad}S + S\\,\\text{grad}P\\)",
+  "secs": 1.98,
+  "task": "ocr"
+ },
+ "p054_formula_502_1587_778_1632": {
+  "text": "\\[z^{2})^{1/2}.\\]",
+  "secs": 0.93,
+  "task": "formula"
+ },
+ "p054_ocr_506_1634_861_1668": {
+  "text": "Výsledok: \\(\\operatorname{div}(r/r^3) = 0\\).",
+  "secs": 1.82,
+  "task": "ocr"
+ },
+ "p054_ocr_444_1716_1642_1750": {
+  "text": "44. Vypočítajte, čomu sa rovná rotácia vektorovej funkcie (aS), kde a je konštantný",
+  "secs": 2.32,
+  "task": "ocr"
+ },
+ "p054_ocr_505_1801_950_1833": {
+  "text": "Výsledok: rot (aS) = a × gradS.",
+  "secs": 1.31,
+  "task": "ocr"
+ },
+ "p054_ocr_514_1964_847_1995": {
+  "text": "Výsledok: rot (Sr) = 0 .",
+  "secs": 1.21,
+  "task": "ocr"
+ },
+ "p056_formula_920_144_1258_184": {
+  "text": "\\[\\begin{array}{r} 1 \\quad 2 \\quad 3 \\quad 4 \\quad 5 \\quad 6 \\quad 7 \\quad 8 \\quad 9 \\quad 10 \\end{array}\\]",
+  "secs": 3.53,
+  "task": "formula"
+ },
+ "p004_ocr_584_497_748_533": {
+  "text": "Na úvod",
+  "secs": 1.42,
+  "task": "ocr"
+ },
+ "p015_ocr_807_1900_975_1926": {
+  "text": "\\(c = a \\times b\\).",
+  "secs": 1.1,
+  "task": "ocr"
+ },
+ "p017_ocr_303_284_1101_490": {
+  "text": "$$\n\\begin{aligned}\na \\times b &= (a_x\\,i + a_y\\,j + a_z\\,k) \\times (b_x\\,i + b_y\\,j + b_z\\,k) \\\\\n&= \\underline{\\phantom{a_xb_x(i \\times i) + a_xb_y(i \\times j) + a_xb_z(i \\times k) + a_yb_x(j \\times i) + a_yb_y(j \\times j) + a_yb_z(j \\times k) + a_zb_x(k \\times i) + a_zb_y(k \\times j) + a_zb_z(k \\times k)}}\n\\end{aligned}\n$$",
+  "secs": 19.92,
+  "task": "ocr"
+ },
+ "p017_ocr_743_880_1511_1072": {
+  "text": "$$a\\times b=\\begin{vmatrix}i&j&k\\\\a_{x}&a_{y}&a_{z}\\\\b_{x}&b_{y}&b_{z}\\end{vmatrix}.$$ (1.2.2.7)",
+  "secs": 5.1,
+  "task": "ocr"
+ },
+ "p020_ocr_499_573_1595_697": {
+  "text": "$$(c_{x}i+c_{y}j+c_{z}j)\\cdot[i(a_{y}b_{z}-a_{z}b_{y})+j(a_{z}b_{x}-a_{x}b_{z})+k(a_{x}b_{y}-a_{y}b_{x})]=$$\n$$=c_{x}(a_{y}b_{z}-a_{z}b_{y})+c_{y}(a_{z}b_{x}-a_{x}b_{z})+c_{z}(a_{x}b_{y}-a_{y}b_{x}),$$",
+  "secs": 13.38,
+  "task": "ocr"
+ },
+ "p022_ocr_442_253_1463_373": {
+  "text": "$$[a_{x}i\\times(b_{x}i+b_{y}j)]\\times(c_{x}i+c_{y}j+c_{z}k)=[a_{x}b_{y}k]\\times(c_{x}i+c_{y}j+c_{z}k)=a_{x}b_{y}c_{x}j-a_{x}b_{y}c_{y}i.$$",
+  "secs": 7.78,
+  "task": "ocr"
+ },
+ "p022_ocr_573_545_1461_582": {
+  "text": "\\((a \\times b) \\times c = a_x b_y c_x j - a_x b_y c_y i + (a_x b_x c_x i - a_x b_x c_x i)\\).",
+  "secs": 4.58,
+  "task": "ocr"
+ },
+ "p024_ocr_811_1729_1218_1813": {
+  "text": "\\(\\frac{d\\boldsymbol{r}}{dt} = \\lim_{\\Delta t \\to 0} \\frac{\\Delta\\boldsymbol{r}}{\\Delta t} = \\lim_{t_2 \\to t_1} \\frac{\\boldsymbol{r}_2 - \\boldsymbol{r}_1}{t_2 - t_1}\\)",
+  "secs": 4.83,
+  "task": "ocr"
+ },
+ "p025_ocr_757_1395_977_1471": {
+  "text": "$$\\frac{\\mathrm{d}x}{\\mathrm{d}t}=\\lim_{t_{2}\\to t_{1}}\\frac{x_{2}-x_{1}}{t_{2}-t_{1}}$$",
+  "secs": 2.88,
+  "task": "ocr"
+ },
+ "p041_ocr_651_1603_1102_1695": {
+  "text": "$$\\int_{\\mathrm{B}}^{\\mathrm{C}}A\\cdot\\mathrm{d}r=A_{\\mathrm{R}}\\cdot(\\Delta x i)=A_{\\mathrm{xR}}\\Delta x\\,,$$",
+  "secs": 2.8,
+  "task": "ocr"
+ },
+ "p044_ocr_942_457_1124_529": {
+  "text": "\\(q_V = \\iint\\limits_S v \\, dS\\).",
+  "secs": 1.54,
+  "task": "ocr"
+ },
+ "p052_ocr_462_1605_1240_1639": {
+  "text": "Výsledok: \\(\\alpha = 54,74^{\\circ}\\), \\(\\beta = 54,73^{\\circ}\\), \\(\\gamma = 70,53^{\\circ}\\).",
+  "secs": 2.93,
+  "task": "ocr"
+ },
+ "p014_ocr_402_1245_1633_1279": {
+  "text": "• Pomocou týchto vzt'ahov možno vytvorit zložky vektora a v smere súradnicových",
+  "secs": 3.78,
+  "task": "ocr"
+ },
+ "p019_ocr_282_709_1514_742": {
+  "text": "• Zmiešaný súčin má význam objemu rovnobežnostena vytvoreného z vektorov",
+  "secs": 2.26,
+  "task": "ocr"
+ },
+ "p019_ocr_320_1271_1513_1305": {
+  "text": "kolmý na ich rovinu, teda vektor, ktorý má veľkosť ab siną a je rovnobežný s",
+  "secs": 2.73,
+  "task": "ocr"
+ },
+ "p019_ocr_320_1399_1523_1432": {
+  "text": "zmiešaného súčinu tak dostaneme $S = (ab \\sin\\alpha)c \\cos\\gamma$. Výraz $c \\cos\\gamma$",
+  "secs": 3.1,
+  "task": "ocr"
+ },
+ "p029_ocr_276_1334_1507_1368": {
+  "text": "menovateli je tretia mocnina vel'kosti polohového vektora. Vektor grad φ μά οραζή",
+  "secs": 2.73,
+  "task": "ocr"
+ },
+ "p029_ocr_275_1419_1428_1452": {
+  "text": "od náboja klesá, také smer vzrastu potenciálu, a teda vektora grad φ je opačný.",
+  "secs": 2.72,
+  "task": "ocr"
+ },
+ "p031_ocr_270_169_1503_203": {
+  "text": "Príklad 1.3.5.2 Vypočítajte divergenciu a rotáciu vektorovej funkcie \\(f(x,y,z) = \\omega \\times r\\)",
+  "secs": 3.92,
+  "task": "ocr"
+ },
+ "p031_ocr_271_213_1501_246": {
+  "text": "ktorá je vektorovým súčinom konštantného vektora \\(\\omega\\) s polohvým vektorom \\(r\\).",
+  "secs": 3.03,
+  "task": "ocr"
+ },
+ "p031_ocr_270_256_1501_289": {
+  "text": "Nech \\( \\mathbf{r} = x\\mathbf{i} + y\\mathbf{j} \\) a \\( \\boldsymbol{\\omega} = \\boldsymbol{\\omega}\\mathbf{k} \\). Vektorová funkcia \\( \\mathbf{f} \\) zobrazuje pole vektora rýchlosti",
+  "secs": 5.84,
+  "task": "ocr"
+ },
+ "p031_ocr_271_300_1502_332": {
+  "text": "pri otáčaní roviny uhlovou rýchlostou ∅. Je to príklad axiálneho (vírového)",
+  "secs": 2.88,
+  "task": "ocr"
+ },
+ "p031_ocr_269_424_1503_457": {
+  "text": "Riešenie: Najprv wypóźniane vektorový súčin ω×r = (ωk)×(xᵢ + yʳ) = xω j − y ωi",
+  "secs": 3.76,
+  "task": "ocr"
+ },
+ "p053_ocr_308_396_1203_429": {
+  "text": "Výsledok: So všetkými tromi stenami rovnaký uhol \\(\\varphi = 54,73^{\\circ}\\).",
+  "secs": 2.86,
+  "task": "ocr"
+ }
+}

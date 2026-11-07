@@ -21,9 +21,15 @@ use_directory_urls = true
 
 nav = [
   { "Home" = "index.md" },
+  { "Restoration Studio" = [
+    "studio.md",
+    "web_ui.md",
+    "design/studio-spec.md",
+  ] },
   { "Architecture" = "architecture.md" },
   { "Pipeline" = [
     "digitalization_pipeline_report.md",
+    "reflow_edition.md",
     "metadata_and_covers.md",
     "catalog_import.md",
   ] },

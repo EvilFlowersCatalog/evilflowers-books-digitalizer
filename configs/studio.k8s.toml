@@ -1,0 +1,89 @@
+# Restoration studio — k8s config (namespace digitalizer; deploy/k8s).
+#
+# Shipped as the ConfigMap `studio-config`, mounted at /etc/studio/studio.toml
+# ($STUDIO_CONFIG). Every path is ABSOLUTE: relative ones would resolve against
+# /etc/studio, a read-only ConfigMap mount.
+#
+# Pod mounts (deploy/k8s/base):
+#   /data/raw-scans   NFS gateway:/mnt/digital-library/raw-scans   read-only (export ro)
+#   /data/digitized   NFS gateway:/mnt/digital-library/digitized   rw
+#   /scratch          local-path PVC on the workload node          rw (cleaned TIFFs, tiles cache)
+#
+# Secrets come from the environment, never from this file:
+#   STUDIO_DATABASE_URL  postgresql+psycopg://digitalizer:…@postgres.shared.svc.cluster.local:5432/digitalizer
+#   STUDIO_REDIS_URL     redis://redis.shared.svc.cluster.local:6379/8   (Celery db 8)
+#   EVILFLOWERS_API_KEY  catalog token ([projects.stu.publish].api_key_env)
+
+[studio]
+# Only used when the env vars above are missing (e.g. a local `kubectl run` debug pod).
+database_url = "postgresql+psycopg://digitalizer@postgres.shared.svc.cluster.local:5432/digitalizer"
+redis_url = "redis://redis.shared.svc.cluster.local:6379/8"
+# IA item layout: /data/digitized/studio/<project>/<item_id>/<item_id>.pdf …
+# Its own subtree, so it never mixes with the legacy batch's digitized/{dev,prod}.
+artifacts_root = "/data/digitized/studio"
+cache_dir = "/scratch/cache"
+
+[projects.stu]
+name = "STU — Slovak University of Technology"
+scans_root = "/data/raw-scans"
+# Real tree (Cookbooks/Digitalizer): raw-scans/<faculty>/<FACULTY>-skeny/<book>/stream_pages_tif/*.tif
+book_pattern = "{collection}/*-skeny/{book}"
+frames_glob = "stream_pages_tif/*.tif"
+item_id = "stu-{collection}-{book}"
+language = "slk"                       # MARC code (IA `language`)
+ocr_language = "slk+eng"
+layout_detectors = ["heuristic", "doclayout"]   # doclayout: ONNX model baked into the image
+# The vlm Deployment (deploy/k8s/base/vlm.yaml) is replicas 0 by default: scale it to 1
+# before a formula pass, or the run fails at studio.formulas with "vlm service
+# unavailable" (re-run it once vlm is up). Set "none" to keep formulas as image crops.
+formula_recognizer = "paddleocr-vl-http"
+outputs = ["pdf", "pdfa", "epub"]
+auto_publish = "review"                # real corpus: a human approves before anything goes public
+
+[projects.stu.collections]
+fad = "Fakulta architektúry a dizajnu STU"
+fei = "Fakulta elektrotechniky a informatiky STU"
+mtf = "Materiálovotechnologická fakulta STU"
+sjf = "Strojnícka fakulta STU"
+svf = "Stavebná fakulta STU"
+
+[projects.stu.metadata]
+# Excel (catalog.xlsx) needs an extra mount; OPAC lookup works from the pod as is.
+providers = ["opac"]
+
+[projects.stu.publish]
+target = "evilflowers"
+# Dev catalog (Cookbooks/Digitalizer §2). Switch to the prod API once its host and
+# a prod API key exist; the knowledge base names no prod API URL yet.
+base_url = "https://dev.evilflowers.elvira.stuba.sk/api/v1"
+api_key_env = "EVILFLOWERS_API_KEY"
+catalog = "{collection}"               # one catalog per faculty: fad fei mtf sjf svf
+# Publishing UPLOADS copies to the catalog. No files_base_url: the catalog API cannot
+# create external_url acquisitions yet, and a project that sets it fails fast
+# (docs/design/catalog-protocol-requests.md). In-place publishing waits for that change.
+
+[projects.stu.quality]
+min_ocr_conf = 80.0
+
+[projects.stu.pipeline.scantailor]
+color_mode = "mixed"
+margins_mm = 8.0
+dpi = 300
+output_dpi = 600
+
+[projects.stu.pipeline.layout]
+# DocLayout-YOLO DocStructBench ONNX, downloaded and sha256-checked at image build (Dockerfile)
+model = "/opt/evilflowers-tools/models/doclayout-yolo/doclayout_yolo_docstructbench_imgsz1024.onnx"
+# onnxruntime threads; 0 would use every HOST core and ignore the pod's cgroup limit.
+# 2 = worker-ai's cpu limit (and OMP_NUM_THREADS) in deploy/k8s/base/workers.yaml.
+threads = 2
+
+[projects.stu.pipeline.vlm]
+# HttpFormulaRecognizer -> deploy/k8s/base/vlm.yaml (Service vlm :8000)
+url = "http://vlm.digitalizer.svc.cluster.local:8000"
+# One batch request: batch_size crops, each ~5-30 s on 4 CPU cores (up to ~2 min for a
+# page-wide line), plus time queued behind other requests.
+batch_size = 4
+timeout_s = 900
+# 503 (busy / still loading the model) and connection errors: retried with backoff
+attempts = 6

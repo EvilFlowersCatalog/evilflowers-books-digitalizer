@@ -11,6 +11,8 @@ from evilflowers_books_digitalizer.pipeline.steps.finalize import FinalizePdf
 from evilflowers_books_digitalizer.pipeline.steps.manifest import WriteCatalogManifest
 from evilflowers_books_digitalizer.pipeline.steps.ocr import OcrPages
 from evilflowers_books_digitalizer.pipeline.steps.pdfa import EnsurePdfA
+from evilflowers_books_digitalizer.pipeline.steps.previews import PagePreviews
+from evilflowers_books_digitalizer.pipeline.steps.reflow import ReflowEdition
 from evilflowers_books_digitalizer.pipeline.steps.render import RenderPdf
 from evilflowers_books_digitalizer.pipeline.steps.scantailor import ScanTailorScans
 
@@ -25,6 +27,8 @@ __all__ = [
     "FinalizePdf",
     "GenerateCover",
     "OcrPages",
+    "PagePreviews",
+    "ReflowEdition",
     "RenderPdf",
     "ScanTailorScans",
     "WriteCatalogManifest",

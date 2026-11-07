@@ -195,6 +195,34 @@ pdfa = "2b"
 [ocr]
 language = "auto"
 
+[database]
+# Processing state for the web UI (status, step progress, every path, page -> original
+# TIFF map). Default: sqlite at <output_dir>/digitizer.db. Any SQLAlchemy URL works,
+# e.g. "postgresql+psycopg://user@host/digitizer". Fail-safe: a broken DB never fails a book.
+# Migrations: `evilflowers-digitalizer db upgrade`; backfill: `db import`.
+enabled = true
+# url = "sqlite:////var/lib/evilflowers/digitizer.db"
+
+[viewer]
+# Keep a small WebP of every cleaned page (<slug>.pages/NNNN.webp + pages.json) so the
+# web viewer can compare it with the original TIFF after the work dir is deleted.
+# ~30-80 KiB per text page at 1600 px.
+previews = true
+preview_px = 1600
+
+[reflow]
+# Born-digital reading edition: <slug>.epub (EPUB 3, MathML) rebuilt from the scan
+# (docs/reflow_edition.md). Needs `pandoc`; `potrace` (vector figures) and `hunspell`
+# with a Slovak dictionary (anchoring arbitration) are optional. Never fails a book.
+enabled = false
+# vlm = "none": formulas stay image crops. "paddleocr-vl": formulas -> MathML via
+# PaddleOCR-VL-1.6 running in its own venv (torch + transformers>=5).
+vlm = "none"
+# vlm_python = "~/.local/share/evilflowers-tools/venv-docres/bin/python"   # or $EVILFLOWERS_VLM_PYTHON
+# vlm_model = "~/.local/share/evilflowers-tools/models/PaddleOCR-VL-1.6"   # or $EVILFLOWERS_VLM_MODEL
+# vlm_device = "auto"            # auto | cuda | mps | cpu
+# hunspell_dict = "/usr/share/hunspell/sk_SK"
+
 [finalize]
 # Reading-experience polish (notebook 09): outline bookmarks from hOCR
 # headings, /PageLabels from printed page numbers, web-optimized (linearized)

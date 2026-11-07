@@ -1,0 +1,6 @@
+# The studio gets its own namespace: heavy batch work, its own quotas and its own
+# CI redeploy permission (github_runner_deploy_namespaces), apart from the catalog's.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: digitalizer

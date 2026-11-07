@@ -1,0 +1,129 @@
+@startuml component-restoration-studio
+!include ../../../tools/diagrams/elvira.iuml
+' =============================================================================
+' What: the digitalizer reframed as a reusable restoration studio. Clean
+'       architecture: a domain model in the middle, use cases around it, ports
+'       (interfaces) the use cases depend on, adapters that implement them. Three
+'       runtime shells host the same core: the API (REST + SSE + images for the
+'       SPA), Celery worker pools (the page pipeline) and the CLI.
+' Kind: UML component diagram, design level (no deployment detail; see
+'       deployment-restoration-studio). Scope: every component and port of the
+'       proposal. Omitted: telemetry wiring, configuration loading, DB migrations.
+' Source: design session 2026-11-07 (operator decisions: NFS-exported scan disk,
+'         CPU-only AI with on-demand VLM, review only when flagged, React SPA,
+'         Celery + shared Redis, shared postgresql18, VPN-only without login,
+'         projects + adapters, outputs = distribution PDF + PDF/A-2b + EPUB,
+'         prod publish in place via external_url); evilflowers-books-digitalizer
+'         docs/reflow_edition.md, docs/web_ui.md, deploy/k8s (vlm Deployment
+'         and the ONNX layout model: in progress, to be confirmed), 2026-11-07.
+' Render: python3 tools/diagrams/render.py vault/evilflowers-knowledge/Diagrams/component-restoration-studio.puml
+' =============================================================================
+
+title Restoration studio: one core, three shells, ports and adapters (proposal, 2026-11-07)
+
+package "**SPA** · React + TS + Vite" as spa {
+  component "**Queue board**\nprojects · books · runs\nlive progress (SSE)" as board <<proposed>>
+  component "**Page studio**\nOpenSeadragon · Annotorious\nOpenCV.js (WASM) previews" as studio <<proposed>> <<focus>>
+  component "**Review & publish**\ndisputes · notes · approve" as reviewui <<proposed>>
+}
+
+package "**Shells** (same core)" as shells {
+  component "**API** · FastAPI\nREST /api/v1 · SSE /events\nIIIF image + tiles" as api <<proposed>>
+  component "**Workers** · Celery\npools: cpu · ai · io\nqueues by priority" as workers <<proposed>>
+  component "**CLI**\nimport · run · publish\nexport-training" as cli <<proposed>>
+}
+
+package "**Application** (use cases)" as app {
+  component "**Ingest**\ndiscover · map · enqueue" as ucIngest <<proposed>>
+  component "**Process**\npage pipeline\nquality gate" as ucProcess <<proposed>>
+  component "**Review**\nregions · notes · overrides\nre-run pages" as ucReview <<proposed>>
+  component "**Publish**\nentry mapping · republish" as ucPublish <<proposed>>
+  component "**Export**\nlabelled regions" as ucExport <<proposed>>
+}
+
+package "**Domain**" as domain {
+  component "**Project · Book · Page**\n**Region · Override · Note**\n**Review · Run · Publication**\npure Python, no I/O" as domainCore <<proposed>>
+}
+
+package "**Ports**" as ports {
+  rectangle "«interface»\n**ScanStore**" as pScan
+  rectangle "«interface»\n**Metadata**\n**Provider**" as pMeta
+  rectangle "«interface»\n**Layout**\n**Detector**" as pLayout
+  rectangle "«interface»\n**OcrEngine**" as pOcr
+  rectangle "«interface»\n**Formula**\n**Recognizer**" as pVlm
+  rectangle "«interface»\n**ImageOps**" as pImg
+  rectangle "«interface»\n**Renderer**" as pRender
+  rectangle "«interface»\n**Artifact**\n**Store**" as pArt
+  rectangle "«interface»\n**Catalog**\n**Publisher**" as pPub
+  rectangle "«interface»\n**TaskQueue**\n**EventBus**" as pBus
+  rectangle "«interface»\n**Repository**" as pRepo
+}
+
+package "**Adapters** (chosen per project)" as adapters {
+  component "**TIFF tree**\npath patterns" as aScan <<proposed>>
+  component "**Excel · ARL OPAC**\nOpen Library" as aMeta
+  component "**DocLayout-YOLO**\nONNX Runtime, CPU\nmodel in image (TBC)\n+ heuristics" as aLayout <<proposed>>
+  component "**Tesseract**\nslk" as aOcr
+  component "**PaddleOCR-VL**\nvlm service HTTP :8000\non demand (TBC)" as aVlm <<proposed>>
+  component "**ScanTailor**\nOpenCV ops" as aImg
+  component "**recode_pdf**\npandoc" as aRender
+  component "**Output tree**\ndigitized/" as aArt <<proposed>>
+  component "**EvilFlowers**\nREST · external_url" as aPub <<proposed>>
+  component "**Celery**\nRedis pub/sub" as aBus <<proposed>>
+  component "**SQLAlchemy**\nAlembic" as aRepo
+}
+
+' ---- layout only ------------------------------------------------------------------
+board -[hidden]right- studio
+studio -[hidden]right- reviewui
+ucIngest -[hidden]right- ucProcess
+ucProcess -[hidden]right- ucReview
+ucReview -[hidden]right- ucPublish
+ucPublish -[hidden]right- ucExport
+pScan -[hidden]right- pMeta
+pMeta -[hidden]right- pLayout
+pLayout -[hidden]right- pOcr
+pOcr -[hidden]right- pVlm
+pVlm -[hidden]right- pImg
+pImg -[hidden]right- pRender
+pRender -[hidden]right- pArt
+pArt -[hidden]right- pPub
+pPub -[hidden]right- pBus
+pBus -[hidden]right- pRepo
+domainCore -[hidden]down- pScan
+
+' ---- SPA to the API ---------------------------------------------------------------
+board --> api : REST + SSE
+studio -[$accent()]-> api : <b>REST · SSE · IIIF</b>
+reviewui --> api : REST
+
+' ---- shells call use cases --------------------------------------------------------
+api --> ucIngest : call
+api --> ucReview : call
+api --> ucPublish : call
+workers -[$accent()]-> ucProcess : <b>task</b>
+workers --> ucPublish : task
+cli --> ucExport : call
+
+' ---- use cases own the domain and see only ports (dependency rule) ----------------
+app --> domainCore : uses
+app ..> ports : depends on ports only
+
+' ---- each adapter implements the port above it ----------------------------------------
+pScan <|.. aScan : impl
+pMeta <|.. aMeta : impl
+pLayout <|.. aLayout : impl
+pOcr <|.. aOcr : impl
+pVlm <|.. aVlm : impl
+pImg <|.. aImg : impl
+pRender <|.. aRender : impl
+pArt <|.. aArt : impl
+pPub <|.. aPub : impl
+pBus <|.. aBus : impl
+pRepo <|.. aRepo : impl
+
+$legend_live_proposed()
+
+caption Dependencies point inward: shells → use cases → domain; use cases see only ports, adapters plug in by\nconfiguration per project (a KU or another library swaps the TIFF layout, metadata and catalog adapters, not code).\nThe same core runs in the API (interactive), the Celery pools (bulk + priority re-runs) and the CLI.
+footer ELVIRA · FIIT STU · evilflowers-knowledge · Diagrams/component-restoration-studio.puml
+@enduml

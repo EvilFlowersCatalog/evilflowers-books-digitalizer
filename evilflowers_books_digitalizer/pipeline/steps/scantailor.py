@@ -83,11 +83,16 @@ class ScanTailorScans(PipelineStep):
         Unreadable frames (truncated/corrupt scans — there are some in the
         corpus) are skipped with a warning rather than aborting the whole book;
         the dropped frame names are recorded in ``metadata['skipped_frames']``.
+
+        Also records ``metadata['page_map']``: for every output page (in page
+        order) the original frame it came from and the x-range of the spread
+        half — the web viewer uses it to show "original TIFF vs result".
         """
         halves_dir = ctx.work_dir / "halves"
         halves_dir.mkdir(parents=True, exist_ok=True)
         outputs, n_spreads = [], 0
         skipped: list[str] = []
+        page_map: list[dict[str, object]] = []
         for frame_path in sorted(ctx.tiffs):
             try:
                 frame = load_bgr(frame_path)
@@ -95,22 +100,27 @@ class ScanTailorScans(PipelineStep):
                 logger.warning("%s: skipping unreadable frame %s", ctx.slug, frame_path.name)
                 skipped.append(frame_path.name)
                 continue
+            width = frame.shape[1]
+            cuts = [(0, width)]
             if self.split:
                 layout = analyze_spread(frame)
-                if layout.is_spread:
-                    gx = layout.gutter_x
-                    halves = [frame[:, :gx], frame[:, gx:]]
+                if layout.is_spread and layout.gutter_x is not None:
+                    gx = int(layout.gutter_x)
+                    cuts = [(0, gx), (gx, width)]
                     n_spreads += 1
-                else:
-                    halves = [frame]
-            else:
-                halves = [frame]
-            for side, half in enumerate(halves):
+            for side, (x0, x1) in enumerate(cuts):
                 out = halves_dir / f"{frame_path.stem}_{side}.tif"
-                cv2.imwrite(str(out), half)
+                cv2.imwrite(str(out), frame[:, x0:x1])
                 outputs.append(out)
+                page_map.append({
+                    "half": out.stem,
+                    # resolve(): staged frames are symlinks to the (persistent) source
+                    "frame": str(frame_path.resolve()),
+                    "side": side, "n_sides": len(cuts), "x0": x0, "x1": x1,
+                })
         if skipped:
             ctx.metadata["skipped_frames"] = skipped
+        ctx.metadata["page_map"] = page_map
         if not outputs:
             raise ValueError(
                 f"no readable frames for {ctx.slug} — all {len(ctx.tiffs)} were unreadable"
@@ -173,5 +183,9 @@ class ScanTailorScans(PipelineStep):
         )
         ctx.metadata["n_frames"] = len(ctx.tiffs)
         ctx.metadata["n_pages"] = len(pages)
+        # ScanTailor keeps input names; re-key the map onto the actual page order
+        # (frame sort "p1" < "p10" differs from half sort "p10_0" < "p1_0")
+        by_half = {m["half"]: m for m in ctx.metadata.get("page_map", [])}
+        ctx.metadata["page_map"] = [by_half.get(p.stem, {"half": p.stem}) for p in pages]
         ctx.tiffs = pages
         return ctx

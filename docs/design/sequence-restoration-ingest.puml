@@ -1,0 +1,77 @@
+@startuml sequence-restoration-ingest
+!include ../../../tools/diagrams/elvira.iuml
+' =============================================================================
+' What: the automatic path of one book. The operator (or the nightly beat)
+'       imports a source; worker-io maps the TIFF tree to books; each book runs
+'       as a Celery chain (stage → clean pages → layout → OCR → math → render),
+'       fanned out per page where it pays. Every finished page is an event on
+'       Redis pub/sub that the API streams to the SPA (SSE), so progress bars
+'       move live. A quality gate ends the chain: clean books publish on their
+'       own, flagged books land in the review queue (sequence-restoration-review).
+' Kind: UML sequence diagram, one book of an import, proposal. Scope: the job
+'       and event flow. Omitted: retries/back-off details, telemetry spans,
+'       metadata lookup (OPAC), cover generation, archival PDF/A validation.
+' Source: design session 2026-11-07 (Celery + shared redis, CPU-only AI with
+'         on-demand VLM, review only when flagged); evilflowers-books-digitalizer
+'         pipeline (steps scantailor, ocr, render, reflow) and docs/reflow_edition.md
+'         (VLM guards, worker recycling), 2026-11-07.
+' Render: python3 tools/diagrams/render.py vault/evilflowers-knowledge/Diagrams/sequence-restoration-ingest.puml
+' =============================================================================
+
+title One book, imported and processed automatically, progress streamed (proposal, 2026-11-07)
+
+actor "**Operator**\nSPA (VPN)" as op
+participant "**studio-api**\nFastAPI" as api <<focus>>
+database "**postgresql18**\ndb digitalizer" as pg
+queue "**redis**\nCelery db 8 · pub/sub" as redis
+participant "**worker-io**" as wio
+participant "**worker-cpu**" as wcpu
+participant "**worker-ai**" as wai
+participant "**NFS** · gateway\nraw-scans ro · digitized rw" as nfs
+participant "**vlm** :8000\nPaddleOCR-VL (TBC)" as vlm
+
+op -> api : POST /projects/stu/imports\n{source: fei}
+api -> pg : insert import (pending)
+api -> redis : enqueue discover (queue io)
+api --> op : 202 + import id
+op -> api : GET /events?import=… (SSE, stays open)
+
+redis -> wio : discover
+wio -> nfs : list fei/FEI-skeny/*/stream_pages_tif
+wio -> pg : upsert books + frames (queued)
+wio -> redis : publish book.queued ×N
+redis --> api : event
+api --> op : SSE book.queued (board fills)
+
+loop each book (queue io → cpu → ai, chained)
+  redis -> wcpu : stage + clean (per frame group)
+  wcpu -> nfs : read TIFF frames
+  wcpu -> nfs : write cleaned pages + tiles
+  wcpu -> redis : publish page.cleaned
+  redis --> api : event
+  api -[$accent_msg()]-> op : <b>SSE progress (page k / n)</b>
+  redis -> wai : layout (per page, ONNX model in the image)
+  wai -> pg : regions: kind · bbox · confidence\n(text, table, figure, formula, stamp…)
+  redis -> wcpu : OCR + reflow analysis
+  wcpu -> pg : words, disputes (low confidence,\nYOLO vs heuristics disagree)
+  opt formulas within the CPU budget
+    wai -> vlm : formula crops (HTTP)
+    vlm --> wai : LaTeX (guards: hallucination,\nanchoring, MathML validation)
+  end
+  redis -> wcpu : render: distribution PDF · PDF/A-2b · EPUB
+  wcpu -> nfs : write digitized/studio/<project>/<item_id>/…
+  wcpu -> pg : quality report (scores, flags)
+  alt all quality signals pass
+    wcpu -> redis : enqueue publish (queue io)
+    wcpu -> redis : publish book.ready
+  else any flag (disputed regions, low OCR, rejected VLM)
+    wcpu -> pg : book.status = review
+    wcpu -> redis : publish book.review_needed
+  end
+  redis --> api : event
+  api --> op : SSE book.ready / book.review_needed
+end
+
+caption Every arrow from redis is a Celery task delivery; every publish is a pub/sub event the API turns into a Server-Sent Event,\nso the board updates without polling. Per-page fan-out keeps one slow page from blocking a book; the VLM only sees formula\ncrops within the CPU budget. A clean book publishes on its own; a flagged book waits for an operator.
+footer ELVIRA · FIIT STU · evilflowers-knowledge · Diagrams/sequence-restoration-ingest.puml
+@enduml

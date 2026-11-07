@@ -18,8 +18,13 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from evilflowers_books_digitalizer.logs import log_context, setup_logging
+
+if TYPE_CHECKING:
+    from evilflowers_books_digitalizer.db import Recorder
+    from evilflowers_books_digitalizer.runtime import RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +91,34 @@ def _process_book(
     keep_cache: bool,
     config_path: str | None,
 ) -> dict:
+    from evilflowers_books_digitalizer.db import Recorder
+    from evilflowers_books_digitalizer.runtime import load_runtime
+
+    rt = load_runtime(config_path)
+    db = Recorder(rt)  # fail-safe: a database problem never fails the book
+    row = _run_pipeline(rt, db, source_key, book_id, jobs=jobs, min_free_gb=min_free_gb,
+                        disk_wait_minutes=disk_wait_minutes, keep_cache=keep_cache)
+    db.finished(row)
+    return row
+
+
+def _run_pipeline(
+    rt: RuntimeConfig,
+    db: Recorder,
+    source_key: str,
+    book_id: str,
+    *,
+    jobs: int | None,
+    min_free_gb: float | None,
+    disk_wait_minutes: float,
+    keep_cache: bool,
+) -> dict:
     # heavy imports stay inside the worker so the parent stays light
     from evilflowers_books_digitalizer import BookContext, LocalCache, build_source
     from evilflowers_books_digitalizer.pipeline.factory import build_pipeline
     from evilflowers_books_digitalizer.progress import BookProgress
-    from evilflowers_books_digitalizer.runtime import build_catalog, load_runtime
+    from evilflowers_books_digitalizer.runtime import build_catalog
 
-    rt = load_runtime(config_path)
     if jobs is None:
         jobs = rt.orchestration.get("ocr_jobs")
     if min_free_gb is None:
@@ -129,14 +155,29 @@ def _process_book(
         work_dir=cache.book_dir(source_key, book_id),
         output_dir=_book_dir(rt.output_dir, source_key, layout),
     )
+    db.started(source_key, book_id, work_dir=ctx.work_dir, output_dir=ctx.output_dir)
+
+    def on_step(index: int, total: int, name: str) -> None:
+        progress.update(index, total, name)
+        db.step(source_key, book_id, index, total, name)
+
     try:
         source = build_source(rt.source, source_key)
         catalog = build_catalog(rt.metadata, base_dir=rt.config_dir)
         pipeline = build_pipeline(source, cache, jobs=jobs, config=rt.config, catalog=catalog)
         progress.start(len(pipeline.steps))
-        ctx = pipeline.run(ctx, on_step=progress.update)
+        ctx = pipeline.run(ctx, on_step=on_step)
         cover = ctx.artifacts.get("cover")
         manifest = ctx.artifacts.get("manifest")
+        frames = [m.get("frame") for m in ctx.metadata.get("page_map", []) if m.get("frame")]
+        row.update(
+            text=_str(ctx.artifacts.get("text")),
+            epub=_str(ctx.artifacts.get("epub")),
+            previews=_str(ctx.artifacts.get("previews")),
+            reflow=ctx.metadata.get("reflow"),
+            source_dir=str(Path(frames[0]).parent) if frames else None,
+            work_dir=str(ctx.work_dir) if keep_cache else None,
+        )
         row.update(
             pdf=str(ctx.artifacts["pdf"]),  # default open target (distribution)
             pdf_mb=ctx.artifacts["pdf"].stat().st_size / 1e6,
@@ -163,3 +204,7 @@ def _process_book(
 
     row["minutes"] = round((time.perf_counter() - started) / 60, 2)
     return row
+
+
+def _str(value: object) -> str | None:
+    return str(value) if value else None

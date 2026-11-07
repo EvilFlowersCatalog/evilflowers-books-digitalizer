@@ -1,0 +1,12 @@
+{
+ "title": "Fyzika po kapitolách 1: Vektory",
+ "author": ["Ivan Červeň"],
+ "publisher": "Slovenská technická univerzita v Bratislave",
+ "date": "2007",
+ "lang": "sk",
+ "identifier": [{"scheme": "ISBN-13", "text": "978-80-227-2663-4"}],
+ "rights": "© Ivan Červeň, 2007",
+ "description": "Reflowable edition reconstructed from a scan (EvilFlowers experiment).",
+ "cover_page": 1,
+ "skip_pages": [1, 2, 3, 55, 58]
+}

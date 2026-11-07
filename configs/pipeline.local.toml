@@ -78,6 +78,13 @@ validate_pdfa = false
 [ocr]
 language = "auto"
 
+[viewer]
+previews = true
+
+[reflow]
+enabled = true
+vlm = "none"                    # "paddleocr-vl" if the VLM venv + weights are installed
+
 [finalize]
 enabled = true
 bookmarks = true

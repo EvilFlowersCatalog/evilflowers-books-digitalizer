@@ -1,0 +1,115 @@
+/*
+ * Design tokens. Light = archival paper and ink; dark = a graphite light table.
+ * The accent is a conservator's vermilion; status and region colours are fixed
+ * hues so an operator learns them once and reads them in both themes.
+ */
+:root {
+  --font-sans: "Inter", "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 19px;
+  --fs-xxl: 26px;
+
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --nav-width: 208px;
+  --topbar-height: 40px;
+
+  /* surfaces */
+  --bg: #f4f1ea;
+  --bg-sunken: #ebe6db;
+  --surface: #fbfaf6;
+  --surface-raised: #ffffff;
+  --border: #ddd6c8;
+  --border-strong: #c7bead;
+  --text: #24211c;
+  /* WCAG AA: faint text is still information (statuses, counts, flag reasons) at
+     11-12px, so it keeps >= 4.5:1 on --bg and --surface; muted stays a step darker */
+  --text-muted: #5f584c;
+  --text-faint: #736c5f;
+  --nav-bg: #1f1d1a;
+  --nav-text: #d8d2c4;
+  --nav-text-muted: #8f887a;
+  --nav-active: #2e2b26;
+
+  --accent: #b5452c;
+  --accent-strong: #973620;
+  --accent-soft: #f5dfd6;
+  --accent-text: #ffffff;
+  --focus: #2f6fd6;
+
+  /* status */
+  --st-discovered: #8a8f98;
+  --st-queued: #6f7fb8;
+  --st-running: #2f7fd6;
+  --st-review: #d9902a;
+  --st-approved: #3f9a63;
+  --st-published: #1f7a4a;
+  --st-error: #c73b3b;
+
+  --ok: #2f8a57;
+  --warn: #94590a;          /* text colour: 5:1 on --bg (--st-review keeps the bright hue for dots/bars) */
+  --danger: #c23a3a;
+
+  --shadow-sm: 0 1px 2px rgb(40 30 10 / 8%);
+  --shadow-md: 0 4px 16px rgb(40 30 10 / 10%);
+  --viewer-bg: #2b2925;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514;
+    --bg-sunken: #11100f;
+    --surface: #1d1c1a;
+    --surface-raised: #24231f;
+    --border: #33312d;
+    --border-strong: #46433d;
+    --text: #ebe7df;
+    --text-muted: #a29c90;
+    --text-faint: #8f897e;
+    --nav-bg: #0f0e0d;
+    --nav-text: #d8d2c4;
+    --nav-text-muted: #7b7569;
+    --nav-active: #23211e;
+
+    --accent: #e0694c;
+    --accent-strong: #f08466;
+    --accent-soft: #3a2119;
+    --accent-text: #1a0d08;
+    --focus: #6aa0ff;
+
+    --st-discovered: #8d929b;
+    --st-queued: #8796d0;
+    --st-running: #4e9af0;
+    --st-review: #eba745;
+    --st-approved: #58b87d;
+    --st-published: #3fa36c;
+    --st-error: #e25b5b;
+
+    --ok: #58b87d;
+    --warn: #eba745;
+    --danger: #e25b5b;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 6px 20px rgb(0 0 0 / 45%);
+    --viewer-bg: #0c0c0b;
+
+    color-scheme: dark;
+  }
+}

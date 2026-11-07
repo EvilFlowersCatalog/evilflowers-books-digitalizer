@@ -26,8 +26,36 @@ def _names(pipeline):
 def test_pipeline_without_metadata_or_cover(tmp_path):
     pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=BASE_CONFIG)
     assert _names(pipe) == [
-        "download", "scantailor", "language", "ocr", "render", "enrich", "finalize", "pdfa",
+        "download", "scantailor", "language", "ocr", "previews", "render", "enrich", "finalize",
+        "pdfa",
     ]
+
+
+def test_previews_can_be_disabled(tmp_path):
+    config = {**BASE_CONFIG, "viewer": {"previews": False}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    assert "previews" not in _names(pipe)
+
+
+def test_reflow_is_opt_in_and_runs_after_pdfa(tmp_path):
+    assert "reflow" not in _names(build_pipeline(_source(tmp_path), LocalCache(tmp_path),
+                                                  config=BASE_CONFIG))
+    config = {**BASE_CONFIG, "reflow": {"enabled": True},
+              "catalog": {"enabled": True, "catalog": "stu-books"}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    names = _names(pipe)
+    assert names.index("reflow") == names.index("pdfa") + 1
+    assert names[-1] == "manifest"
+    assert pipe.steps[names.index("reflow")].settings.vlm is None   # vlm defaults to "none"
+
+
+def test_reflow_vlm_settings(tmp_path):
+    config = {**BASE_CONFIG, "reflow": {"enabled": True, "vlm": "paddleocr-vl",
+                                        "vlm_python": "/opt/vlm/bin/python",
+                                        "vlm_model": "/opt/models/pocr"}}
+    pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
+    vlm = next(s for s in pipe.steps if s.name == "reflow").settings.vlm
+    assert str(vlm.python) == "/opt/vlm/bin/python" and str(vlm.model) == "/opt/models/pocr"
 
 
 def test_metadata_and_cover_inserted_in_order(tmp_path):
@@ -36,7 +64,7 @@ def test_metadata_and_cover_inserted_in_order(tmp_path):
     pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config, catalog=catalog)
     # metadata is attached early (before render bakes it into XMP); cover after enrich
     assert _names(pipe) == [
-        "download", "metadata", "scantailor", "language", "ocr", "render",
+        "download", "metadata", "scantailor", "language", "ocr", "previews", "render",
         "enrich", "cover", "finalize", "pdfa",
     ]
 
@@ -103,7 +131,7 @@ def test_extract_metadata_sits_between_ocr_and_render(tmp_path):
     pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config)
     names = _names(pipe)
     assert names.index("extract_metadata") == names.index("ocr") + 1
-    assert names.index("render") == names.index("extract_metadata") + 1
+    assert names.index("render") == names.index("extract_metadata") + 2  # previews between
     step = pipe.steps[names.index("extract_metadata")]
     assert (step.head_pages, step.tail_pages, step.lookup, step.override) == (5, 2, False, True)
     assert step.cache_dir == tmp_path / "isbn_lookup"
@@ -122,7 +150,7 @@ def test_k8s_config_builds_the_expected_pipeline(tmp_path):
     config = tomllib.loads(K8S_CONFIG)
     pipe = build_pipeline(_source(tmp_path), LocalCache(tmp_path), config=config, catalog=None)
     assert _names(pipe) == [
-        "download", "scantailor", "language", "ocr", "extract_metadata", "render",
+        "download", "scantailor", "language", "ocr", "extract_metadata", "previews", "render",
         "enrich", "cover", "finalize", "pdfa", "manifest",
     ]
     assert next(s for s in pipe.steps if s.name == "render").layout == "split"

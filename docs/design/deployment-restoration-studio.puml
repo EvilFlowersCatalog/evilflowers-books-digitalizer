@@ -1,0 +1,173 @@
+@startuml deployment-restoration-studio
+!include ../../../tools/diagrams/elvira.iuml
+' =============================================================================
+' What: where the restoration studio runs. The 10 TB scan disk (vdc) stays on
+'       gateway; gateway's kernel nfsd exports two subtrees of it on the private
+'       libvirt network to the k3s workload nodes only (raw-scans read-only,
+'       digitized read-write, all_squash to the scans owner), so the studio runs
+'       in its own namespace on the workload node(s) (control today, app VMs
+'       later) and never competes with production on gateway. Operators reach
+'       the SPA over the VPN only (no login). State: a new database on the shared
+'       postgresql18 and Celery queues in a new db of the shared redis, both
+'       through the k8s-bridge. Publishing: the catalog (dev now, prod later)
+'       creates external_url acquisitions that host nginx serves in place from
+'       digitized/studio.
+' Kind: UML deployment diagram, instance level, proposal. Scope: data, job,
+'       operator, publish and telemetry paths. Omitted: catalog internals, DNS,
+'       Loki/Mimir internals, image build/delivery (same as the intranet).
+' Source: design session 2026-11-07 (operator decisions, see
+'         component-restoration-studio); Cookbooks/Digitalizer.md §8 (prod reads
+'         the PDFs in place, external_url); Infrastructure/Storage.md (vdc 10T
+'         /mnt/digital-library on gateway, owner elvira 1001:1001 per
+'         host_vars/gateway.yml); Proposals/Dev-Environment-K8s.md and
+'         group_vars/all/k8s_bridge.yml (k8s-bridge :5432/:6379, Services in
+'         namespace shared, workload label); Cookbooks/Deploy-a-Service.md
+'         (OTLP to the node's alloy-node :4318); evilflowers-books-digitalizer
+'         deploy/k8s (vlm replicas 0, ONNX layout model in the worker image:
+'         both to be confirmed), 2026-11-07.
+' Render: python3 tools/diagrams/render.py vault/evilflowers-knowledge/Diagrams/deployment-restoration-studio.puml
+' =============================================================================
+
+title Restoration studio in k8s: NFS scans, shared Postgres/Redis, VPN-only SPA (proposal, 2026-11-07)
+
+node admin <<device>> [
+**Operator laptop** · tailnet
+----
+studio.digitalizer.stu.k8s.internal
+browser: SPA (React)
+]
+
+node "**STU hypervisor** · libvirt 192.168.122.0/24" <<device>> as hv {
+
+  node "**gateway** · 192.168.122.227" <<virtualMachine>> as gw {
+
+    node nfs <<executionEnvironment>> <<proposed>> [
+**NFS server** (kernel nfsd, NFSv4.2)
+----
+/mnt/digital-library/raw-scans → ro
+/mnt/digital-library/digitized → rw
+clients: k3s workload nodes only
+all_squash → elvira 1001:1001
+]
+
+    node nginx <<webServer>> [
+**nginx** (host, TLS edge)
+----
+location /digitized/ «proposed»
+alias …/digitized/studio/
+]
+
+    node bridge <<container>> [
+**k8s-bridge** · nginx stream
+:5432 · :6379
+]
+
+    node router <<container>> [
+**k8s-stu** · Tailscale router pod
+]
+
+    node "**Docker Engine** · network elvira" <<executionEnvironment>> as docker {
+      node pg <<container>> [
+**postgresql18**
+db digitalizer «proposed»
+]
+      node redis <<container>> [
+**redis**
+dev: db 1 · Celery db 7
+studio: Celery db 8 «proposed»
+]
+    }
+  }
+
+  node "**control** · 192.168.122.60 · workload=apps" <<virtualMachine>> as ct {
+
+    frame "namespace digitalizer (proposed)" as nsd {
+      node api <<container>> <<proposed>> <<focus>> [
+**studio-api** · FastAPI
+REST · SSE /events · IIIF tiles
+serves the SPA bundle
+]
+      node wcpu <<container>> <<proposed>> [
+**worker-cpu** · Celery
+queues interactive, cpu
+ScanTailor · OCR · render
+]
+      node wai <<container>> <<proposed>> [
+**worker-ai** · Celery
+queue ai: layout detection
+ONNX model in the image (TBC)
+]
+      node wio <<container>> <<proposed>> [
+**worker-io** · Celery + beat
+queue io: discover · tiles
+publish · export
+]
+      node vlm <<container>> <<proposed>> [
+**vlm** · PaddleOCR-VL (TBC)
+CPU · HTTP :8000
+replicas 0, scaled on demand
+]
+      artifact pv <<proposed>> [
+**PV raw-scans** (NFS, ROX)
+**PV digitized** (NFS, RWX)
+**PVC scratch** (local-path 80Gi)
+]
+    }
+
+    frame "namespace evilflowers-dev" as nsdev {
+      node catdev <<container>> [
+**evilflowers** (dev catalog)
+REST /api/v1
+]
+    }
+
+    frame "namespace observability" as nsobs {
+      node alloy <<container>> [
+**alloy-node** (control)
+OTLP :4318
+]
+    }
+  }
+}
+
+' ---- layout only ------------------------------------------------------------------
+pg -[hidden]right- redis
+wcpu -[hidden]right- wai
+wai -[hidden]right- wio
+
+' ---- operator (VPN only, no login) ----------------------------------------------------
+admin --> router : WireGuard\n(headscale)
+router -[$accent()]-> api : <b>HTTP :80 · ClusterIP</b>\n<b>REST + SSE</b>
+
+' ---- jobs and state, through the bridge -----------------------------------------------
+api -[$accent()]-> bridge : <b>SQL :5432</b>\n<b>Redis :6379</b>
+wcpu --> bridge : SQL · Redis
+wai --> bridge : SQL · Redis
+wio --> bridge : SQL · Redis
+bridge --> pg : TCP :5432
+bridge --> redis : TCP :6379
+
+' ---- scans and outputs over NFS (mounted by control's kubelet) --------------------------
+pv -[$accent()]-> nfs : <b>NFSv4.2 :2049</b>\n<b>from 192.168.122.60</b>
+wcpu --> pv : read TIFF · write outputs
+wai --> pv : read pages
+wio --> pv : tiles · exports
+api --> pv : read tiles · images
+
+' ---- AI on demand -------------------------------------------------------------------------
+wai --> vlm : HTTP :8000\nformula crops
+
+' ---- publish in place ----------------------------------------------------------------------
+wio --> nginx : HTTPS :443 REST\nentry + external_url
+nginx --> catdev : HTTP\nedge Gateway :8082
+nginx --> nfs : read digitized/studio\n(local disk)
+
+' ---- telemetry --------------------------------------------------------------------------
+api --> alloy : OTLP/HTTP :4318
+wcpu --> alloy : OTLP/HTTP :4318
+
+$legend_live_proposed()
+
+caption The scan disk stays on gateway; nfsd exports two subtrees on the private network to the workload nodes only, so heavy work\nruns on control (and later app VMs) instead of competing with production. The SPA is VPN-only like flower and Grafana. Postgres\nand Redis are the shared servers behind the k8s-bridge; the catalog links published files in place (external_url), no copy.
+footer ELVIRA · FIIT STU · evilflowers-knowledge · Diagrams/deployment-restoration-studio.puml
+@enduml
