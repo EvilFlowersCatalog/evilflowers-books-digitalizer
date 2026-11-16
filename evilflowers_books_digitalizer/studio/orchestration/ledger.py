@@ -219,7 +219,8 @@ def _kwargs(ctx: WorkerContext, job: Job, run: Run, token: str) -> dict[str, Any
     pages = [p for p in run.book.pages if p.index in wanted]
     match contract.kind(job):
         case "clean":
-            inputs = contract.clean_inputs(pages, storage)
+            inputs = contract.clean_inputs(
+                pages, storage, ctx.project(project).pipeline.get("scantailor") or {})
         case "analyze.hocr":
             inputs = contract.hocr_inputs(
                 pages, storage, language=lambda p: analyze.ocr_language(ctx, project, p),
@@ -606,6 +607,10 @@ def reconcile(ctx: WorkerContext, transport: Transport, now: datetime | None = N
             if job.backend == "service" and (rel := (job.params or {}).get("output_dir")):
                 dead.discard.append(rel)  # this attempt can never count any more
             if job.budget > 0:
+                # the lost attempt's message may still be queued (a render waits for a free
+                # worker): revoked, so no worker spends hours on an outcome that is refused
+                if job.task_id:
+                    revoke.append(job.task_id)
                 job.budget -= 1
                 job.status, job.token = str(JobStatus.PLANNED), None
                 job.error = f"lost in attempt {job.attempt} (no result by {moment:%H:%M:%S})"

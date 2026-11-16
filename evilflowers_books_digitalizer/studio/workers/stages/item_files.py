@@ -12,6 +12,7 @@ a file and a crashed render leaves the previous version intact.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,10 +52,15 @@ def _atomic_write(path: Path, data: str) -> Path:
     return path
 
 
+#: an ocr_page with its size (``bbox`` in its title); an empty page from ocr-service has none
+_SIZED_PAGE = re.compile(r"""class=['"]ocr_page['"][^>]*?title=(['"])(?:(?!\1).)*\bbbox\b""")
+
+
 def leaf_hocr(leaf: LeafFiles) -> str:
     page = leaf.hocr.read_text(encoding="utf-8") if leaf.hocr and leaf.hocr.exists() else ""
-    return relabel_page(page, leaf.leaf) if page.strip() else \
-        empty_page(leaf.leaf, leaf.width, leaf.height)
+    if not page.strip() or ("ocr_page" in page and not _SIZED_PAGE.search(page)):
+        return empty_page(leaf.leaf, leaf.width, leaf.height)    # blank, or a page with no size
+    return relabel_page(page, leaf.leaf)
 
 
 def write_hocr(leaves: Sequence[LeafFiles], path: Path, *, access_only: bool, title: str) -> Path:

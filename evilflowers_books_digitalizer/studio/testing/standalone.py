@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -101,9 +102,13 @@ def write_outcome(path: Path, outcome: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-def scan_clean(storage_root: Path, cleaner: PageCleaner, image_ops: ImageOps,
+def scan_clean(storage_root: Path, cleaner: PageCleaner, image_ops: ImageOps, *,
+               marks_of: Callable[[int], list[dict[str, Any]]] | None = None,
                **message: Any) -> dict[str, Any]:
-    """One ``evilflowers_scan.clean`` job: the leaves of ``message`` -> cleaned pages + outcome."""
+    """One ``evilflowers_scan.clean`` job: the leaves of ``message`` -> cleaned pages + outcome.
+
+    ``marks_of(leaf)`` stands in for the service's artefact check (``leaves[].marks``,
+    evilflowers-scan-service#2): stamp / sticker candidates in cleaned-page pixels."""
     root = storage_root.resolve()
     accept(root, message)
     out = root / message["output_dir"]
@@ -126,7 +131,8 @@ def scan_clean(storage_root: Path, cleaner: PageCleaner, image_ops: ImageOps,
             webp = out / "leaves" / f"{page.image.stem}.webp"
             leaves.append({"leaf": page.leaf_num, "image": rel(page.image), "width": page.width,
                            "height": page.height, "dpi": page.dpi, "skew_deg": page.skew_deg,
-                           "preview": rel(webp) if webp.exists() else None, "dzi": rel(dzi)})
+                           "preview": rel(webp) if webp.exists() else None, "dzi": rel(dzi),
+                           "marks": marks_of(page.leaf_num) if marks_of else []})
     except Exception as exc:
         write_outcome(root / message["outcome"], {"run_id": message["run_id"],
                                                   "token": message["token"], "status": "failed",

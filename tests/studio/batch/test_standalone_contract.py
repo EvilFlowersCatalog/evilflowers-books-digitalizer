@@ -55,6 +55,37 @@ def test_accept_refuses_what_a_service_would_refuse(tmp_path: Path, inputs: list
         standalone.accept(tmp_path, _message(tmp_path, inputs))
 
 
+@pytest.mark.parametrize(("hocr", "sized"), [
+    ("<div class='ocr_page' id='page_000001' title='ppageno 0'></div>", False),  # ocr-service, empty
+    ("<div class='ocr_page' id='page_1' title='image \"a.tif\"; bbox 0 0 640 480; ppageno 0'>"
+     "<span class='ocrx_word'>x</span></div>", True),
+    ("", False),
+])
+def test_a_page_without_a_size_becomes_the_empty_page(tmp_path: Path, hocr: str,
+                                                      sized: bool) -> None:
+    from evilflowers_books_digitalizer.studio.workers.stages.item_files import (
+        LeafFiles,
+        leaf_hocr,
+    )
+
+    path = tmp_path / "0001_hocr.html"
+    path.write_text(hocr, encoding="utf-8")
+    out = leaf_hocr(LeafFiles(1, True, None, path, 640, 480, ""))
+    assert "bbox 0 0 640 480" in out
+    assert ("ocrx_word" in out) is sized
+
+
+def test_the_kit_contract_carries_the_project_scantailor_settings(tmp_path: Path) -> None:
+    from evilflowers_books_digitalizer.db.models import Page
+
+    page = Page(index=0, book_pk=1, source_path=str(tmp_path / "f.tif"), side=None,
+                crop_box=[0, 0, 10, 10], rotate_degree=0, override={})
+    storage = contract.Storage(tmp_path)
+    assert "scantailor" not in contract.clean_inputs([page], storage)
+    fields = contract.clean_inputs([page], storage, {"color_mode": "mixed", "output_dpi": 600})
+    assert fields["scantailor"] == {"color_mode": "mixed", "output_dpi": 600}
+
+
 def test_a_message_without_inputs_is_never_built() -> None:
     from evilflowers_books_digitalizer.db.models import Job, Run
 

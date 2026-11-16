@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 DOCLING_KINDS: dict[str, RegionKind] = {
     "figure": RegionKind.PICTURE, "chart": RegionKind.PICTURE, "picture": RegionKind.PICTURE,
     "equation": RegionKind.FORMULA, "paragraph": RegionKind.TEXT,
+    "handwritten_text": RegionKind.HANDWRITING,
 }
-
 
 # ---------------------------------------------------------------- helpers
 def _pages(job: Job, run: Run, leaves: list[int]) -> dict[int, Page]:
@@ -76,6 +76,11 @@ def apply_clean(uow: Uow, ctx: WorkerContext, run: Run, job: Job,
                               leaf.dpi, leaf.skew_deg)
         webp = storage.abs(leaf.preview) if leaf.preview else storage.abs(leaf.image)
         apply_cleaned(uow, page, cleaned, storage.abs(leaf.dzi), webp)
+        if leaf.crop_box is not None:    # what was cut (clamped, split_x, override crop)
+            page.crop_box = list(leaf.crop_box)
+        page.marks = [m.model_dump(mode="json") for m in leaf.marks]
+        for warning in leaf.warnings:
+            runs.log(uow, run, f"leaf {leaf.leaf}: {warning}", "warning")
     runs.advance(uow, run, len(outcome.leaves))
     return sorted(previous)
 
@@ -158,6 +163,7 @@ def fuse_batch(uow: Uow, ctx: WorkerContext, run: Run, hocr_job: Job,
         page = pages[leaf.leaf]
         previous |= _previous(page, mine, page.hocr_path)
         proposals = [p for r in by_leaf.get(leaf.leaf, []) if (p := _proposal(r, page))]
+        proposals += analyze.mark_proposals(page)        # scan-service's stamps, stickers
         analyze.store(uow, run, page, text=leaf.text, mean_conf=leaf.mean_conf,
                       hocr_path=storage.abs(leaf.hocr),
                       fused=analyze.fuse_with(analyze.decided_of(page), proposals))

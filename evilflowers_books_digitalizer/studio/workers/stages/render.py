@@ -8,6 +8,7 @@ the lookup (``ItemMetadata.merge`` fills gaps only).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -178,6 +179,8 @@ def render(ctx: WorkerContext, run_id: int) -> None:
 # ---------------------------------------------------------------- render on a service
 #: the media a render service produces (artifact kinds); the text documents stay here
 SERVICE_MEDIA = ("pdf", "pdfa", "epub", "images")
+#: the item ids evilflowers-render-service accepts (its ``RenderRequest.item_id``)
+ITEM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def request_path(item_dir: Path, run_id: int) -> Path:
@@ -210,9 +213,16 @@ def prepare(ctx: WorkerContext, run_id: int) -> None:
     project = ctx.project(job.project)
     images = [lf.image for lf in sorted(job.leaves, key=lambda lf: lf.leaf)]
     whole = project.pipeline.get("jp2_images", True) and all(i and i.exists() for i in images)
+    # render-service refuses an empty or repeated format list and an id outside IA's pattern
+    formats = list(dict.fromkeys(f for f in project.outputs if f in FORMATS))
+    if not formats:
+        raise PortError(f"project {job.project}: outputs {list(project.outputs)} name no "
+                        f"format render-service makes ({', '.join(FORMATS)})")
+    if not ITEM_ID.fullmatch(job.item_id):
+        raise PortError(f"item id {job.item_id!r} is not an IA identifier ({ITEM_ID.pattern})")
     request = {
         "item_id": job.item_id,
-        "formats": [f for f in project.outputs if f in FORMATS],
+        "formats": formats,
         "leaves": [lf.leaf for lf in access],
         "n_leaves": len(job.leaves),
         "pages": [storage.rel(lf.image) for lf in access if lf.image],

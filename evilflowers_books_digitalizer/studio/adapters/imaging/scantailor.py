@@ -167,10 +167,24 @@ class ScanTailorCleaner:
         return CleanedPage(plan.leaf_num, dst, width, height, self.output_dpi, skew)
 
 
+def leaf_crop(plan: LeafPlan, override: PageOverride | None) -> BBox:
+    """The leaf's box in rotated-frame pixels: the override ``crop`` wins; otherwise the
+    planned crop, with its gutter edge moved to the override ``split_x`` when the leaf is a
+    half of a spread (side 0: ``x1``, side 1: ``x0``). evilflowers-scan-service does the same."""
+    if override and override.crop:
+        return override.crop
+    crop = plan.crop
+    if override and override.split_x is not None and plan.side in (0, 1):
+        x = override.split_x
+        crop = (BBox(crop.x0, crop.y0, x, crop.y1) if plan.side == 0
+                else BBox(x, crop.y0, crop.x1, crop.y1))
+    return crop
+
+
 def cut_leaf(frame: np.ndarray, plan: LeafPlan, override: PageOverride | None) -> np.ndarray:
-    """Rotation, then the crop (override wins), then the operator's deskew."""
+    """Rotation, then the crop (:func:`leaf_crop`), then the operator's deskew."""
     img = rotate(frame, plan.rotate_degree)
-    crop = override.crop if override and override.crop else plan.crop
+    crop = leaf_crop(plan, override)
     h, w = img.shape[:2]
     leaf = img[max(0, crop.y0):min(h, crop.y1), max(0, crop.x0):min(w, crop.x1)]
     if leaf.size == 0:

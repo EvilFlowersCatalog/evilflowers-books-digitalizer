@@ -50,6 +50,7 @@ stale_after_seconds = 600              # a local job silent this long: its worke
 # the default of the optional [….analyze.erase]). Docling only: no stamp/sticker proposals.
 # [orchestration.stages.analyze]
 # backend = "service"
+# deadline_seconds = 3600              # also erase's: scan-service's hard limit is 3300 s
 # [orchestration.stages.analyze.hocr]
 # task = "evilflowers_ocr_worker.standalone.hocr"
 # queue = "evilflowers_ocr_worker.standalone"
@@ -88,6 +89,9 @@ interactive_inflight = 4
 off_peak_stages = ["render"]
 [scheduling.queue_inflight]
 "digitalizer.ai" = 1                   # = worker-ai's KEDA maximum (one model in memory)
+# = render-service's replica maximum (one book per pod). A render job's deadline runs from
+# dispatch, so a book left waiting in the queue would use up its 8 h before a worker starts it.
+"evilflowers_render.standalone" = 1
 [[scheduling.backpressure]]
 # The catalog's extraction and OCR workers on Redis db 7 (knowledge Extraction-Pipeline):
 # a backlog there means the catalog needs the cluster more than a book's digitalization.

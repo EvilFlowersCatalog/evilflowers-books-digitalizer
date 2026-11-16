@@ -143,15 +143,28 @@ ARG SCANTAILOR_DEPS
 
 # jpegoptim: required by recode_pdf for the distribution (JPEG MRC) output.
 # qpdf: linearizes the access copy. ghostscript: PDF/A fallback.
-# pandoc (+ potrace, hunspell-sk): the [reflow] EPUB edition.
+# potrace, hunspell-sk (+ pandoc below): the [reflow] EPUB edition.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip python3-dev build-essential git ca-certificates \
+    python3 python3-venv python3-pip python3-dev build-essential git ca-certificates curl \
     tesseract-ocr tesseract-ocr-slk tesseract-ocr-ces tesseract-ocr-eng \
     tesseract-ocr-deu tesseract-ocr-rus \
     $SCANTAILOR_DEPS \
     jpegoptim qpdf ghostscript \
-    pandoc potrace hunspell hunspell-sk \
+    potrace hunspell hunspell-sk \
     && rm -rf /var/lib/apt/lists/*
+
+# pandoc from upstream, not Debian (#11): the reflow edition passes --math-method, which
+# trixie's pandoc 3.1 rejects ("Unknown option --math-method", exit 6), and the EPUB was then
+# silently skipped. The same pinned release as evilflowers-render-service. amd64 only, as the
+# cluster.
+ARG PANDOC_VERSION=3.13
+ARG PANDOC_SHA256=7e3736f255090296ca5d1a14291a76b9b3c43cd385011b1621a4d0c16091a70f
+RUN curl -fsSL -o /tmp/pandoc.deb \
+      "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb" \
+ && echo "${PANDOC_SHA256}  /tmp/pandoc.deb" | sha256sum -c - \
+ && dpkg -i /tmp/pandoc.deb && rm /tmp/pandoc.deb \
+ && pandoc --version | head -1 | grep -qx "pandoc ${PANDOC_VERSION}" \
+ && echo '$x^2$' | pandoc --math-method=mathml -f markdown -t html >/dev/null
 
 COPY --from=build /usr/local/bin/scantailor-deviant-cli /usr/local/bin/
 COPY --from=build /usr/local/bin/jbig2 /usr/local/bin/

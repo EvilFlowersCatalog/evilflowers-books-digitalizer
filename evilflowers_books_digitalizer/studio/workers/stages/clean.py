@@ -96,6 +96,7 @@ def apply_cleaned(uow: Uow, page: Page, cleaned: CleanedPage, dzi: Path, webp: P
     page.width, page.height, page.dpi = cleaned.width, cleaned.height, cleaned.dpi
     page.skew_angle = cleaned.skew_deg
     page.status = PageStatus.CLEANED
+    page.marks = None       # a new cleaned image: the service path sets its own marks after
     replace_image(uow, page, cleaned.image, dzi, webp)
 
 

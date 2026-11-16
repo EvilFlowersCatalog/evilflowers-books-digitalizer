@@ -75,6 +75,7 @@ class RegionSource(StrEnum):
     YOLO = "yolo"               # DocLayout-YOLO
     VLM = "vlm"                 # PaddleOCR-VL
     DOCLING = "docling"         # evilflowers-analyzer-service (standalone layout task)
+    SCAN = "scan"               # evilflowers-scan-service artefact check (clean outcome marks)
     OPERATOR = "operator"       # drawn or relabelled by a person
 
 

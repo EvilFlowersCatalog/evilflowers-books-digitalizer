@@ -62,6 +62,7 @@ class AnalyzeJob:
     language: str
     dpi: int
     decided: list[Decided]
+    marks: tuple[RegionProposal, ...] = ()    # scan-service's candidates (clean outcome)
 
     def boxes(self, action: RegionAction) -> list[BBox]:
         return [d.bbox for d in self.decided
@@ -72,6 +73,29 @@ def decided_of(page: Page) -> list[Decided]:
     """The operator's decisions on a page (they survive re-runs and win every fusion)."""
     return [Decided(common.region_kind(r), common.region_bbox(r), RegionStatus(r.status),
                     RegionAction(r.action)) for r in page.regions if r.status in DECIDED]
+
+
+#: scan-service mark categories -> region kinds. ``bleed_through`` and ``edge`` have no
+#: region kind (the cleaner's matter, not a decision on the page); ``content`` is no artefact.
+MARK_KINDS: dict[str, RegionKind] = {"stamp": RegionKind.STAMP, "sticker": RegionKind.STICKER}
+
+
+def mark_proposals(page: Page) -> list[RegionProposal]:
+    """The scan-service marks of the page's last clean (``pages.marks``,
+    ``contract.Mark`` rows) as proposals. A stamp or sticker from a detector is always
+    disputed by the fusion (``domain.fuse`` rule 4), whatever the decider's band; a mark the
+    decider judged ``keep`` (real content) is not proposed."""
+    out = []
+    for mark in page.marks or []:
+        kind = MARK_KINDS.get(mark.get("category", ""))
+        if kind is None or mark.get("band") == "keep":
+            continue
+        try:
+            out.append(RegionProposal(kind, BBox.of(mark["bbox"]), RegionSource.SCAN,
+                                      float(mark.get("p", 1.0))))
+        except (KeyError, TypeError, ValueError):
+            continue                     # a degenerate or malformed box
+    return out
 
 
 def _confirmed(page: Page, *actions: RegionAction) -> list[BBox]:
@@ -105,7 +129,8 @@ def _job(ctx: WorkerContext, run_id: int, page_index: int) -> AnalyzeJob | None:
             return None             # not cleaned, or already analyzed in this run
         project = runs.project_of(book)
         return AnalyzeJob(project, common.item_id(book), page.index, Path(page.clean_path),
-                          ocr_language(ctx, project, page), page.dpi or 300, decided_of(page))
+                          ocr_language(ctx, project, page), page.dpi or 300, decided_of(page),
+                          tuple(mark_proposals(page)))
 
 
 def _ocr_input(ctx: WorkerContext, job: AnalyzeJob) -> Path:
@@ -132,7 +157,7 @@ def detect(ctx: WorkerContext, job: AnalyzeJob) -> tuple[OcrPage, list[FusedRegi
     adapters = ctx.adapters(job.project)
     ocr = adapters.ocr.recognize(_ocr_input(ctx, job), language=job.language, dpi=job.dpi)
     proposals = [p for d in adapters.detectors for p in d.detect(job.image, ocr=ocr)]
-    return ocr, fuse_with(job.decided, proposals)
+    return ocr, fuse_with(job.decided, proposals + list(job.marks))
 
 
 def _region(f: FusedRegion) -> Region:

@@ -279,7 +279,9 @@ def test_a_dispatched_job_never_picked_up_is_resent_after_its_deadline(discovere
     before = utcnow() + timedelta(seconds=route.deadline_seconds - 60)
     assert ledger.reconcile(_ctx(), RecordingTransport(), now=before)["resent"] == 0
     after = utcnow() + timedelta(seconds=route.deadline_seconds + 60)
-    assert ledger.reconcile(_ctx(), RecordingTransport(), now=after)["resent"] == 1
+    transport = RecordingTransport()
+    assert ledger.reconcile(_ctx(), transport, now=after)["resent"] == 1
+    assert transport.revoked == [d.task_id]          # the waiting message is dropped, not run
 
 
 def test_a_long_job_with_a_fresh_heartbeat_is_left_alone(discovered: Studio) -> None:

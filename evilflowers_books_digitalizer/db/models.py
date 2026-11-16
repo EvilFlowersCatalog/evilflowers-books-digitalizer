@@ -124,6 +124,9 @@ class Page(Base):
     override: Mapped[dict[str, Any]] = mapped_column(default=dict)        # domain.PageOverride
     #: operator-only scandata fields: {"book_start": bool, "toc_title": str, "toc_level": int}
     leaf_extra: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    #: (0006) scan-service's artefact candidates from the last clean (contract.Mark rows),
+    #: fused as proposals by analyze; None when the page was cleaned in-process
+    marks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
 
     book: Mapped[Book] = relationship(back_populates="pages")
     regions: Mapped[list[Region]] = relationship(

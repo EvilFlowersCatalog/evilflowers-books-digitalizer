@@ -13,7 +13,7 @@ from evilflowers_books_digitalizer.studio import ports
 from evilflowers_books_digitalizer.studio.adapters.artifacts import IaArtifactStore
 from evilflowers_books_digitalizer.studio.adapters.formula import NoFormula, VlmSidecar
 from evilflowers_books_digitalizer.studio.adapters.imaging import PillowImageOps, ScanTailorCleaner
-from evilflowers_books_digitalizer.studio.adapters.imaging.scantailor import cut_leaf
+from evilflowers_books_digitalizer.studio.adapters.imaging.scantailor import cut_leaf, leaf_crop
 from evilflowers_books_digitalizer.studio.adapters.layout import HeuristicLayout, OnnxLayout
 from evilflowers_books_digitalizer.studio.adapters.metadata import (
     CompositeMetadata,
@@ -143,6 +143,22 @@ def test_cut_leaf_rotates_crops_and_deskews(tmp_path: Path) -> None:
     assert cut_leaf(frame, rotated, None).shape[:2] == (400, 300)      # crop after rotation
     with pytest.raises(PortError):
         cut_leaf(frame, plan, PageOverride(crop=BBox(900, 900, 950, 950)))
+
+
+def test_split_x_moves_the_gutter_edge_of_a_spread_half(tmp_path: Path) -> None:
+    """As evilflowers-scan-service applies it: side 0 ends, side 1 starts at ``split_x``;
+    an explicit ``crop`` wins, and a whole frame ignores it."""
+    frames = fakes.make_frames(tmp_path, 1)
+    frame = np.zeros((300, 400, 3), np.uint8)
+    left = LeafPlan(0, frames[0], 0, BBox(0, 0, 200, 300), 0, "LEFT")
+    right = LeafPlan(1, frames[0], 1, BBox(200, 0, 400, 300), 0, "RIGHT")
+    whole = LeafPlan(0, frames[0], None, BBox(0, 0, 400, 300), 0, "RIGHT")
+    split = PageOverride(split_x=180)
+    assert leaf_crop(left, split) == BBox(0, 0, 180, 300)
+    assert leaf_crop(right, split) == BBox(180, 0, 400, 300)
+    assert leaf_crop(whole, split) == whole.crop
+    assert leaf_crop(right, PageOverride(split_x=180, crop=BBox(1, 2, 3, 4))) == BBox(1, 2, 3, 4)
+    assert cut_leaf(frame, right, split).shape[:2] == (300, 220)
 
 
 def test_cleaner_reads_pipeline_settings() -> None:

@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from evilflowers_books_digitalizer.db.models import Job, Page, Region, Run
 from evilflowers_books_digitalizer.studio.domain import BBox
@@ -56,6 +56,20 @@ class Outcome(BaseModel):
 
 
 # ---------------------------------------------------------------- stage: clean
+class Mark(BaseModel):
+    """A scan artefact candidate from scan-service's check (``leaves[].marks``,
+    evilflowers-scan-service#2). Kept on the page until analyze fuses it as a proposal."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    bbox: tuple[int, int, int, int]   # cleaned-page pixels, x1/y1 exclusive
+    category: str                     # stamp | sticker | bleed_through | edge | content
+    p: float = Field(ge=0.0, le=1.0)
+    band: Literal["keep", "review", "hide"] = "review"
+    model: str | None = None          # "signals", or the decider's model@revision
+    reason: str | None = None
+
+
 class CleanedLeaf(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -67,6 +81,10 @@ class CleanedLeaf(BaseModel):
     skew_deg: float = 0.0
     preview: str | None = None  # WebP for the SPA
     dzi: str                    # Deep Zoom descriptor (its _files/ next to it)
+    #: the crop actually cut (IA x,y,w,h, rotated-frame px): clamped, split_x or override
+    crop_box: tuple[int, int, int, int] | None = None
+    warnings: list[str] = []
+    marks: list[Mark] = []
 
 
 class CleanOutcome(Outcome):
@@ -234,8 +252,11 @@ def message(job: Job, run: Run, token: str, storage: Storage, item_dir: Path,
             "output_dir": output_dir, "outcome": f"{output_dir}/{OUTCOME_FILE}", **inputs}
 
 
-def clean_inputs(pages: list[Page], storage: Storage) -> dict[str, Any]:
-    """What ``evilflowers_scan.clean`` needs: the persisted leaf plan of each page + overrides."""
+def clean_inputs(pages: list[Page], storage: Storage,
+                 settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What ``evilflowers_scan.clean`` needs: the persisted leaf plan of each page + overrides,
+    and the project's ScanTailor settings (``[projects.X.pipeline.scantailor]``: color_mode,
+    margins_mm, dpi, output_dpi, …), which the in-process cleaner reads from the project."""
     leaves = []
     for p in pages:
         if not p.source_path or not p.crop_box:
@@ -243,7 +264,7 @@ def clean_inputs(pages: list[Page], storage: Storage) -> dict[str, Any]:
         leaves.append({"leaf": p.index, "frame": storage.rel(p.source_path), "side": p.side,
                        "crop_box": list(p.crop_box), "rotate_degree": p.rotate_degree or 0,
                        "hand_side": p.hand_side, "override": dict(p.override or {})})
-    return {"leaves": leaves}
+    return {"leaves": leaves, **({"scantailor": dict(settings)} if settings else {})}
 
 
 def _cleaned(page: Page, storage: Storage) -> str:

@@ -27,6 +27,10 @@ from evilflowers_books_digitalizer.studio.domain import (
     BookStatus,
     JobStatus,
     PageStatus,
+    RegionAction,
+    RegionKind,
+    RegionSource,
+    RegionStatus,
     RunKind,
     RunStatus,
 )
@@ -37,6 +41,8 @@ from evilflowers_books_digitalizer.studio.workers.app import celery
 
 TASK = "evilflowers_scan.clean"
 QUEUE, INTERACTIVE = "evilflowers_scan.standalone", "evilflowers_scan.standalone.interactive"
+#: leaf -> the artefact marks the stand-in service reports for it
+MARKS: dict[int, list[dict]] = {}
 
 
 @pytest.fixture(autouse=True)
@@ -49,10 +55,12 @@ def _scan_service() -> Iterator[None]:
         adapters = ctx.adapters(PROJECT)
         assert ctx.config.storage_root is not None
         return standalone.scan_clean(ctx.config.storage_root, adapters.cleaner,
-                                     adapters.image_ops, **message)
+                                     adapters.image_ops, marks_of=lambda n: MARKS.get(n, []),
+                                     **message)
 
     yield
     celery.tasks.pop(TASK, None)
+    MARKS.clear()
 
 
 def _studio(tmp_path: Path, **route: object) -> Studio:
@@ -93,6 +101,44 @@ def test_full_run_cleans_on_the_service_and_finishes_in_process(tmp_path: Path) 
         assert page.preview_path and Path(page.preview_path).suffix == ".webp"
     stages = [j.stage for j in studio.session().query(Job).filter_by(run_pk=run.id)]
     assert set(stages) >= {"clean", "analyze", "render", "gate"}
+
+
+def _mark(category: str, band: str, bbox: list[int], p: float = 0.9) -> dict:
+    return {"bbox": bbox, "category": category, "p": p, "band": band, "model": "signals",
+            "signals": {"position": "margin"}, "reason": None}
+
+
+def test_scan_marks_become_disputed_stamp_proposals_at_analyze(tmp_path: Path) -> None:
+    """scan-service's artefact candidates (evilflowers-scan-service#2) wait on the page and
+    enter the analyze fusion: a stamp or sticker always needs the operator's consent; a mark
+    the decider kept as content, or a category with no region kind, is not proposed."""
+    MARKS[1] = [_mark("stamp", "hide", [10, 10, 60, 60]),
+                _mark("sticker", "keep", [100, 100, 150, 150]),
+                _mark("edge", "hide", [0, 0, 5, 200])]
+    studio = _studio(tmp_path)
+    run = studio.execute(RunKind.FULL)
+    assert run.status == RunStatus.SUCCEEDED, run.error
+    page = next(p for p in studio.book().pages if p.index == 1)
+    assert [m["category"] for m in page.marks or []] == ["stamp", "sticker", "edge"]
+    scan = [r for r in page.regions if r.source == RegionSource.SCAN]
+    assert [(r.kind, r.x0, r.y0, r.x1, r.y1, r.status, r.action) for r in scan] == [
+        (RegionKind.STAMP, 10, 10, 60, 60, RegionStatus.DISPUTED, RegionAction.REMOVE)]
+    assert all(not p.regions or p.index == 1 or
+               RegionSource.SCAN not in {r.source for r in p.regions}
+               for p in studio.book().pages)
+
+
+def test_an_in_process_clean_forgets_the_service_marks(tmp_path: Path) -> None:
+    MARKS[0] = [_mark("stamp", "review", [10, 10, 60, 60])]
+    studio = _studio(tmp_path)
+    studio.execute(RunKind.FULL)
+    assert next(p for p in studio.book().pages if p.index == 0).marks
+    # the operator's project goes back to in-process cleaning
+    studio.ctx.config.orchestration.routes["clean"] = OrchestrationConfig().routes["clean"]
+    assert studio.execute(RunKind.RERUN, pages=[0]).status == RunStatus.SUCCEEDED
+    page = next(p for p in studio.book().pages if p.index == 0)
+    assert page.marks is None
+    assert RegionSource.SCAN not in {r.source for r in page.regions}
 
 
 def test_operator_rerun_is_one_interactive_job_per_leaf(tmp_path: Path) -> None:
