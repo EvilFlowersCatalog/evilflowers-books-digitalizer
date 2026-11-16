@@ -81,6 +81,9 @@ function Nav() {
         <ReviewIcon /> Review queue
         {review > 0 && <span className={s.count}>{review}</span>}
       </NavLink>
+      <NavLink to="/labelling" className={link}>
+        <ReviewIcon /> Labelling
+      </NavLink>
       <div className={s.navSection}>Studio</div>
       <NavLink to="/settings" className={link}>
         <SettingsIcon /> Settings

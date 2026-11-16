@@ -470,3 +470,6 @@ export interface StudioEvent {
   /** SSE `id:` (monotonic), when known */
   id?: string;
 }
+
+// ---------------------------------------------------------------- labelling (#7)
+export * from "./labellingTypes";

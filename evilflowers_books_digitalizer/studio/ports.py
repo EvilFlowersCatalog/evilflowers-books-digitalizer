@@ -231,3 +231,43 @@ class TaskQueue(Protocol):
     def enqueue_discover(self, project: str, collection: str | None = None) -> str: ...
     def enqueue_export(self, project: str) -> str: ...
     def revoke(self, task_id: str) -> None: ...
+
+
+# ---------------------------------------------------------------- labelling (catalog, read-only)
+@dataclass(slots=True)
+class LabelCandidate:
+    """A catalog item that could be labelled (studio.labelling, evilflowers-books-digitalizer#7).
+
+    ``payload`` is what a labeller may see. ``hidden`` is the model's answer (band, p,
+    decision, relation): the sampler stratifies on it, a labeller never sees it.
+    """
+
+    kind: str                                  # studio.labelling.ItemKind
+    key: str                                   # studio.labelling.item_key(...)
+    ref: dict[str, object]                     # catalog ids: entry_id, run_id, region, region_id, ...
+    language: str | None
+    payload: dict[str, object] = field(default_factory=dict)
+    hidden: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ImageBytes:
+    content: bytes
+    media_type: str
+
+
+@runtime_checkable
+class LabelSource(Protocol):
+    """Reads labelling candidates from a catalog; never writes to it."""
+
+    def candidates(self, kind: str, *, max_entries: int) -> Iterator[LabelCandidate]:
+        """Cheap listing of items of one kind over at most ``max_entries`` catalog entries."""
+        ...
+
+    def complete(self, candidate: LabelCandidate) -> LabelCandidate:
+        """Fill what only a chosen item needs (page or section text): costs extra requests."""
+        ...
+
+    def image(self, ref: Mapping[str, object]) -> ImageBytes:
+        """The crop of a figure / table item; ``PortError`` when the catalog has none."""
+        ...

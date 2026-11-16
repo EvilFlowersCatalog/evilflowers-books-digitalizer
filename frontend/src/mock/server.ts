@@ -10,6 +10,8 @@ import type {
   BookOut,
   BookStatus,
   ItemMetadata,
+  LabelAnswer,
+  LabelTaskName,
   NoteCreate,
   PageDetail,
   PagePatch,
@@ -22,6 +24,7 @@ import type {
 } from "../api/types";
 import { defaultAction } from "../lib/regions";
 import { MockBus } from "./bus";
+import { MockLabelling } from "./labelling";
 import { FRAME_H, FRAME_W, PROJECT, createDb, type MockBook, type MockDb, type MockPage } from "./fixtures";
 
 class HttpError extends Error {
@@ -378,7 +381,17 @@ export class MockServer {
       return note;
     });
     this.on("POST", "/books/:id/reviews", ([id], body, _q, op) => this.review(this.book(n(id)), body as ReviewCreate, op));
+
+    // labelling (#7)
+    this.on("GET", "/labelling/tasks", (_p, _b, _q, op) => this.labelling.tasks(op));
+    this.on("GET", "/labelling/tasks/:t/next", ([t], _b, _q, op) => this.labelling.next(t as LabelTaskName, op));
+    this.on("GET", "/labelling/tasks/:t/summary", ([t]) => this.labelling.summary(t as LabelTaskName));
+    this.on("POST", "/labelling/tasks/:t/samples", ([t], _b, q) => ({ task: t, n: n(q.get("n") ?? 100), status: "sampling" }));
+    this.on("POST", "/labelling/items/:id/labels", ([id], body, _q, op) =>
+      this.labelling.label(n(id), (body as { labels: LabelAnswer[] }).labels, op));
   }
+
+  private readonly labelling = new MockLabelling();
 
   private review(b: MockBook, body: ReviewCreate, op: string) {
     if (body.decision === "approved" && !["review", "approved", "ok", "published"].includes(b.status))

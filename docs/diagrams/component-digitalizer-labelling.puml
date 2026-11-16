@@ -1,0 +1,47 @@
+@startuml component-digitalizer-labelling
+!include elvira.iuml
+' =============================================================================
+' What: the labelling mode is a new slice of the portal. The operator works
+'       through the SPA, the CLI or an MCP client; all three call the same
+'       use cases, and every label records which one it came through (via).
+'       The sampler reads the catalog read-only through one adapter (GET only,
+'       the manage-capable API key stays on the server). Labels live in the
+'       studio database. The export writes JSONL for knowledge#65.
+' Kind: UML component diagram, specification level, proposed
+'       (evilflowers-books-digitalizer#7).
+' Source: evilflowers-books-digitalizer#7 (2026-11-16); EvilFlowersCatalog
+'         develop 709b712 apps/api/urls.py, extraction/admin_views.py,
+'         graph/views.py (read 2026-11-16); this repo studio/api/routes.py,
+'         studio/application/*, studio/adapters/catalog/*.
+' =============================================================================
+
+title Labelling mode for decider calibration: components (proposed, 2026-11-16)
+
+actor "Operator" as op
+component "SPA\nLabelling screen" as spa <<proposed>>
+component "MCP client\n(relays the person's answer)" as client
+component "studio API\n/api/v1/labelling/*" as api <<proposed>>
+component "studio MCP\n/mcp · studio mcp (stdio)" as mcp <<proposed>>
+component "CLI\nstudio label · sample-labels\nexport-labels · labelling-status" as cli <<proposed>>
+component "application.labelling\nsample · next · label · export · κ" as app <<proposed>> <<focus>>
+interface "LabelSource" as port
+component "adapters.catalog.labelling\nCatalogLabelSource (GET only)" as adapter <<proposed>>
+database "postgresql18\ndb digitalizer\nlabel_items · labels" as pg
+component "EvilFlowers Catalog (dev)\n/api/v1 (develop)" as catalog
+
+op --> spa : browser (VPN)
+op --> cli : shell
+op --> client : chat
+spa --> api : HTTP JSON, X-Operator\n(+ crop proxy items/{id}/image)
+client --> mcp : MCP streamable HTTP /mcp\nor stdio
+cli --> app : Python call, via=cli
+api --> app : Python call, via=spa
+mcp --> app : Python call, via=mcp
+app --> pg : SQLAlchemy (unit of work)
+app ..> port : <<use>>
+adapter -( port
+adapter --> catalog : HTTPS GET, Bearer API key\nentries · extraction/regions · regions/{id}/image\nextraction/paragraphs · chapters · sections/{key}/related · categories
+
+caption The model's answer (band, p, decision, relation) is kept server-side for stratified sampling and reaches no interface.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/component-digitalizer-labelling.puml
+@enduml

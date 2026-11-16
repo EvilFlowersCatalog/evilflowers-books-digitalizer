@@ -242,6 +242,15 @@ region edits.
 | `GET /pages/{id}/dzi` (alias `dzi.xml`) / `GET /pages/{id}/dzi_files/{level}/{col}_{row}.{ext}` | `layer=clean\|original\|spread`, `v` | Deep Zoom (OpenSeadragon). Clients open `dzi.xml?v=…`: only with an extension does OSD keep the query string for tile URLs |
 | `GET /books/{id}/files/{kind}` | | the artifact (`pdf`, `pdfa`, `epub`, `meta_xml`, `scandata_xml`, …) |
 | `GET /books/{id}/export/ia` | | a zip in IA item layout (meta.xml, scandata.xml, page_numbers.json, hocr, page images) |
+| `GET /labelling/tasks` | | `[TaskOut]`: name, title, label keys + hints, target, items, labelled, skipped, double, mine (#7) |
+| `POST /labelling/tasks/{task}/samples` | `n` (1–2000) | `202`: samples up to `n` new items from the catalog in the background |
+| `GET /labelling/tasks/{task}/next` | `X-Operator` required | `LabelItemOut \| null`: payload only, never the model's answer (band, p, decision, relation) |
+| `GET /labelling/items/{id}` | | `LabelItemOut` |
+| `POST /labelling/items/{id}/labels` | `{labels: [{task, value}]}`, `X-Operator` required | `LabelItemOut`; one answer per (item, task, labeller), `skip` allowed |
+| `GET /labelling/items/{id}/image` | | the region crop, proxied from the catalog (the key stays on the server) |
+| `GET /labelling/tasks/{task}/export` | | JSONL, one line per non-skip label |
+| `GET /labelling/tasks/{task}/summary` | | counts per label / language / labeller / via, agreement, Cohen's κ, sampling note |
+| `POST /mcp` (no prefix) | MCP streamable HTTP (JSON-RPC) | labelling tools: `list_label_tasks`, `next_label_item` (text + crop image), `submit_label`, `sample_label_items`, `label_summary`, `export_labels`; also `studio mcp` over stdio |
 
 Errors are `{"detail": str}`, with status codes 400/404/409 (state transition) and 422.
 

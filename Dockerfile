@@ -72,10 +72,13 @@ RUN git clone --depth 1 https://github.com/agl/jbig2enc.git /src/jbig2enc \
 # --- SPA (frontend/) ------------------------------------------------------------
 # Built separately so node never enters the runtime image; only dist/ is copied.
 # Manifests first: the dependency layer is cached until the lockfile changes.
+# pnpm-workspace.yaml carries `allowBuilds` (esbuild's install script): without it pnpm
+# refuses the install (ERR_PNPM_IGNORED_BUILDS, #10). corepack takes the pnpm version
+# pinned in package.json's `packageManager`, not whatever is newest at build time.
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /src/frontend
 RUN corepack enable
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build

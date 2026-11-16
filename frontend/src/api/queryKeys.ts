@@ -14,6 +14,9 @@ export const qk = {
   pages: (bookId: number) => ["pages", bookId] as const,
   page: (id: number) => ["page", id] as const,
   run: (id: number) => ["run", id] as const,
+  labelTasks: () => ["labelling", "tasks"] as const,
+  labelNext: (task: string) => ["labelling", "next", task] as const,
+  labelSummary: (task: string) => ["labelling", "summary", task] as const,
 };
 
 export type QueryKey = readonly unknown[];

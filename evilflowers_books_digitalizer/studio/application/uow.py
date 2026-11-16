@@ -21,6 +21,8 @@ from sqlalchemy.sql.elements import UnaryExpression
 
 from evilflowers_books_digitalizer.db.models import (
     Book,
+    Label,
+    LabelItem,
     Note,
     Page,
     Publication,
@@ -33,7 +35,7 @@ from evilflowers_books_digitalizer.studio.events import Event
 from evilflowers_books_digitalizer.studio.ports import EventBus
 
 #: the query vocabulary use cases may use (re-exported so SQLAlchemy enters only here)
-__all__ = ["Book", "ColumnElement", "Note", "Page", "Publication", "Region", "Review", "Run",
+__all__ = ["Book", "ColumnElement", "Label", "LabelItem", "Note", "Page", "Publication", "Region", "Review", "Run",
            "Session", "SessionFactory", "UnaryExpression", "UnitOfWork", "func", "or_", "select",
            "utcnow"]
 

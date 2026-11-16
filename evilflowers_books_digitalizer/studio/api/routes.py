@@ -6,14 +6,17 @@ Thin by design: parse, call one use case, return its DTO. Endpoints are plain
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Query, Response
 
 from evilflowers_books_digitalizer.studio.api.deps import Operator, Svc
+from evilflowers_books_digitalizer.studio.application.errors import Unavailable
 from evilflowers_books_digitalizer.studio.application import (
     books,
     dto,
+    labelling,
     pages,
     regions,
     review,
@@ -138,3 +141,62 @@ def scheduler_pause(svc: Svc, who: Operator,
 @router.post("/scheduler/resume", response_model=dto.SchedulerOut)
 def scheduler_resume(svc: Svc) -> dto.SchedulerOut:
     return scheduler.resume(svc)
+
+
+# ---------------------------------------------------------------- labelling (#7)
+# The same use cases serve the SPA (here), the CLI (`studio label`, `sample-labels`,
+# `export-labels`) and MCP (studio/api/mcp.py, mounted at /mcp).
+@router.post("/labelling/tasks/{task}/samples", status_code=202)
+def labelling_sample(svc: Svc, task: str, background: BackgroundTasks,
+                     n: Annotated[int, Query(ge=1, le=2000)] = 100) -> dict[str, Any]:
+    """Add up to ``n`` items in the background (the catalog fan-out takes minutes); the task
+    list's ``items`` count grows when it is done. Re-running only adds new items."""
+    labelling.task_or_404(task)
+    if not svc.config.labelling.enabled:
+        raise Unavailable("labelling is not configured ([labelling] base_url)")
+    background.add_task(labelling.sample_quietly, svc, task, n)
+    return {"task": task, "n": n, "status": "sampling"}
+
+
+@router.get("/labelling/tasks", response_model=list[labelling.TaskOut])
+def labelling_tasks(svc: Svc, who: Operator) -> list[labelling.TaskOut]:
+    return labelling.list_tasks(svc, who)
+
+
+@router.get("/labelling/tasks/{task}/next", response_model=labelling.LabelItemOut | None)
+def labelling_next(svc: Svc, who: Operator, task: str) -> labelling.LabelItemOut | None:
+    """The next item for this labeller; ``null`` when none is left."""
+    return labelling.next_item(svc, task, who)
+
+
+@router.get("/labelling/tasks/{task}/summary", response_model=labelling.SummaryOut)
+def labelling_summary(svc: Svc, task: str) -> labelling.SummaryOut:
+    return labelling.summary(svc, task)
+
+
+@router.get("/labelling/tasks/{task}/export")
+def labelling_export(svc: Svc, task: str) -> Response:
+    """JSONL, one line per non-skip label (the calibration input of knowledge#65)."""
+    body = "".join(json.dumps(line, ensure_ascii=False) + "\n"
+                   for line in labelling.export_lines(svc, task))
+    return Response(body, media_type="application/x-ndjson",
+                    headers={"Content-Disposition": f'attachment; filename="labels-{task}.jsonl"'})
+
+
+@router.get("/labelling/items/{item_id}", response_model=labelling.LabelItemOut)
+def labelling_item(svc: Svc, who: Operator, item_id: int) -> labelling.LabelItemOut:
+    return labelling.get_item(svc, item_id, who)
+
+
+@router.post("/labelling/items/{item_id}/labels", response_model=labelling.LabelItemOut)
+def labelling_submit(svc: Svc, who: Operator, item_id: int,
+                     body: labelling.LabelsIn) -> labelling.LabelItemOut:
+    return labelling.submit(svc, item_id, body, who)
+
+
+@router.get("/labelling/items/{item_id}/image")
+def labelling_image(svc: Svc, item_id: int) -> Response:
+    """The region crop, proxied: the catalog key never reaches the browser."""
+    img = labelling.item_image(svc, item_id)
+    return Response(img.content, media_type=img.media_type,
+                    headers={"Cache-Control": "private, max-age=86400"})

@@ -39,11 +39,11 @@ def test_migrations_create_exactly_the_model_schema(tmp_path):
     url = _url(tmp_path)
     upgrade(url)
     upgrade(url)  # idempotent
-    assert current_revision(url) == "0004"
+    assert current_revision(url) == "0005"
     with get_engine(url).connect() as conn:
         assert set(inspect(conn).get_table_names()) >= {
             "books", "pages", "alembic_version", "regions", "runs", "jobs", "notes", "reviews",
-            "publications"}
+            "publications", "label_items", "labels"}
         diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
     assert diff == []
 

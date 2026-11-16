@@ -1,0 +1,46 @@
+@startuml sequence-digitalizer-labelling
+!include elvira.iuml
+' =============================================================================
+' What: sample once (CLI), then label (SPA), then export (CLI or API). The
+'       sampler stratifies by language and by the decider's band, so the
+'       unsure cases are included. Labellers never see the band. About 10 % of
+'       items are offered to a second labeller for Cohen's kappa.
+' Kind: UML sequence diagram, three scenarios, proposed
+'       (evilflowers-books-digitalizer#7).
+' Source: evilflowers-books-digitalizer#7 (2026-11-16); EvilFlowersCatalog
+'         develop 709b712 (extraction/admin_views.py regions with band,
+'         graph/views.py chapters and related; read 2026-11-16).
+' =============================================================================
+
+title Labelling for decider calibration: sample, label, export (proposed, 2026-11-16)
+
+actor "Operator" as op
+participant "SPA\nLabelling" as spa
+participant "studio API /\nCLI" as api <<focus>>
+database "studio DB" as pg
+participant "Catalog dev\n/api/v1" as cat
+
+== sample (CLI: studio sample-labels ~--task figure_kind ~--n 300) ==
+api -> cat : GET entries?extraction_status=available (paged)
+api -> cat : GET entries/{id}/extraction/regions?kind=figure
+cat --> api : regions with band, p, decision
+api -> api : strata language x band, fill quotas
+api -> pg : insert label_items (payload for the screen,\nhidden: band, p, decision)
+
+== label (SPA) ==
+op -> spa : pick task, press 1..9 or s (skip)
+spa -> api : GET labelling/tasks/{task}/next (X-Operator)
+api -> pg : an item this labeller has not answered:\na second-labeller item while below 10 %, else a fresh one
+api --> spa : item without any model answer
+spa -> api : GET labelling/items/{id}/image
+api -> cat : GET regions/{region_id}/image (Bearer)
+spa -> api : POST labelling/items/{id}/labels {task, value}
+api -> pg : upsert label (item, task, labeller)
+
+== export (CLI: studio export-labels ~--task figure_kind) ==
+api -> pg : labels of the task, skip excluded
+api --> op : JSONL, one line per label;\nsummary: counts per label and language, kappa on doubly labelled items
+
+caption Sections: chapters + related give the pairs; the text is the section's first paragraphs (no summary route yet).
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-labelling.puml
+@enduml

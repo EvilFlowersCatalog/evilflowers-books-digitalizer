@@ -1,0 +1,53 @@
+@startuml class-digitalizer-labelling
+!include elvira.iuml
+' =============================================================================
+' What: the labelling mode stores two new tables in the studio database.
+'       label_items are snapshots of catalog items, sampled once per item
+'       kind. labels hold one answer per (item, task, labeller): a second
+'       labeller adds a row, a re-click replaces the old one. A skip is a
+'       label with value "skip"; the export drops it.
+' Kind: UML class diagram (persistence model, migration 0005), proposed.
+' Source: evilflowers-books-digitalizer#7 (task and label sets, export line,
+'         2026-11-16); this repo db/models.py (naming, JSON columns, utcnow).
+' =============================================================================
+
+title Labelling for decider calibration: tables (proposed, 2026-11-16)
+
+class "LabelItem (label_items)" as item <<proposed>> <<focus>> {
+  id : int {PK}
+  kind : str = figure | table | section_pair | entry
+  key : str {unique}
+  ref : JSON = entry_id, run_id, region, region_id, section_a, section_b
+  language : str = ISO 639-1 of the entry
+  stratum : str = language / band
+  payload : JSON = what the screen shows
+  hidden : JSON = band, p, decision (never sent to the SPA)
+  sampled_at : datetime
+}
+
+class "Label (labels)" as label <<proposed>> {
+  id : int {PK}
+  item_pk : int {FK}
+  task : str
+  value : str = a key of the task, or skip
+  labeller : str = the person's name
+  via : str = spa | cli | mcp
+  labelled_at : datetime
+  --
+  unique (item_pk, task, labeller)
+}
+
+class "LabelTask (code)" as task <<proposed>> {
+  name : str
+  item_kind : str
+  labels : tuple of str
+  target : int = 200, table_quality 100
+}
+
+item "1" *-- "0..*" label : answers
+task "1" ..> "0..*" label : value in labels or skip
+task "0..*" ..> "1" item : shows one kind
+
+caption Items point into the catalog by ids, never at studio books. Subject labels are the catalog's category ids.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/class-digitalizer-labelling.puml
+@enduml

@@ -9,6 +9,11 @@ import type {
   BookOut,
   BookQuery,
   ItemMetadata,
+  LabelAnswer,
+  LabelItemOut,
+  LabelSummaryOut,
+  LabelTaskName,
+  LabelTaskOut,
   NoteCreate,
   NoteOut,
   Page,
@@ -60,6 +65,19 @@ export const api = {
 
   createNote: (body: NoteCreate) => request<NoteOut>("POST", "/notes", { body }),
   review: (bookId: number, body: ReviewCreate) => request<ReviewOut>("POST", `/books/${bookId}/reviews`, { body }),
+
+  /** Labelling for decider calibration (#7). `next` is `null` when nothing is left. */
+  labelTasks: () => request<LabelTaskOut[]>("GET", "/labelling/tasks"),
+  labelNext: (task: LabelTaskName) => request<LabelItemOut | null>("GET", `/labelling/tasks/${task}/next`),
+  labelSummary: (task: LabelTaskName) => request<LabelSummaryOut>("GET", `/labelling/tasks/${task}/summary`),
+  /** 202: the catalog fan-out runs in the background; `items` in the task list grows when done. */
+  labelSample: (task: LabelTaskName, n: number) =>
+    request<{ task: string; n: number; status: string }>("POST", `/labelling/tasks/${task}/samples`, { query: { n } }),
+  label: (itemId: number, labels: LabelAnswer[]) =>
+    request<LabelItemOut>("POST", `/labelling/items/${itemId}/labels`, { body: { labels } }),
 };
+
+/** Plain link (a download, not JSON): the browser saves the JSONL. */
+export const labelExportUrl = (task: LabelTaskName) => `/api/v1/labelling/tasks/${task}/export`;
 
 export type Api = typeof api;

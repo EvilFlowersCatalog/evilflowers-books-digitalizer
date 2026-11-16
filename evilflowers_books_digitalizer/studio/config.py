@@ -67,6 +67,12 @@ name so new ones need configuration, not code (open/closed principle)::
     queues = ["evilflowers_analyzer", "evilflowers_image", "evilflowers_equation"]
     max_depth = 25
 
+    [labelling]                                 # hand labels for decider calibration (#7)
+    base_url = "https://dev.evilflowers.elvira.stuba.sk/api/v1"   # catalog, read with GET only
+    api_key_env = "EVILFLOWERS_LABELLING_API_KEY"                 # needs manage rights on the entries
+    catalog_ids = []                            # empty = every catalog the key sees
+    max_entries = 200                           # entries scanned per sample
+
 Paths: ``{storage_root}`` expands to the storage root, then relative paths resolve
 against the config file's directory. Environment variables ``STUDIO_DATABASE_URL`` /
 ``STUDIO_REDIS_URL`` / ``STUDIO_STORAGE_ROOT`` / ``STUDIO_CONFIG`` override the file.
@@ -263,6 +269,27 @@ class ProjectConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LabellingConfig:
+    """``[labelling]``: where hand-labelling items come from (evilflowers-books-digitalizer#7).
+
+    The catalog is read with GET only; its region listing needs *manage* rights on the
+    sampled entries, so the key is a dedicated dev key, never sent to the browser.
+    """
+
+    base_url: str = ""                          # e.g. https://dev.evilflowers.elvira.stuba.sk/api/v1
+    api_key_env: str = "EVILFLOWERS_LABELLING_API_KEY"
+    catalog_ids: tuple[str, ...] = ()           # empty = every catalog the key can see
+    #: catalog entries scanned per sampling call (bounds the requests a sample costs)
+    max_entries: int = 200
+    timeout: float = 30.0
+    seed: int = 7                               # shuffle within strata: reproducible samples
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.base_url)
+
+
+@dataclass(frozen=True, slots=True)
 class StudioConfig:
     database_url: str
     redis_url: str
@@ -275,6 +302,7 @@ class StudioConfig:
     #: the services' ``STORAGE_PATH``: one root holding the scans and ``artifacts_root``.
     #: Paths in a service job are relative to it; needed only by service-backed stages.
     storage_root: Path | None = None
+    labelling: LabellingConfig = field(default_factory=LabellingConfig)
 
     def project(self, slug: str) -> ProjectConfig:
         try:
@@ -413,6 +441,20 @@ def _scheduling(raw: dict[str, Any]) -> SchedulingConfig:
         backpressure=sources)
 
 
+def _labelling(raw: dict[str, Any]) -> LabellingConfig:
+    unknown = set(raw) - set(LabellingConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"[labelling]: unknown keys {', '.join(sorted(unknown))}")
+    d = LabellingConfig()
+    return LabellingConfig(
+        base_url=str(raw.get("base_url", d.base_url)).rstrip("/"),
+        api_key_env=str(raw.get("api_key_env", d.api_key_env)),
+        catalog_ids=tuple(str(c) for c in raw.get("catalog_ids", ())),
+        max_entries=int(raw.get("max_entries", d.max_entries)),
+        timeout=float(raw.get("timeout", d.timeout)),
+        seed=int(raw.get("seed", d.seed)))
+
+
 def load_config(path: str | Path | None = None) -> StudioConfig:
     """Read the studio config (``path`` > ``$STUDIO_CONFIG`` > ``configs/studio.toml``)."""
     from evilflowers_books_digitalizer.config import PROJECT_ROOT
@@ -436,6 +478,7 @@ def load_config(path: str | Path | None = None) -> StudioConfig:
         orchestration=_orchestration(raw.get("orchestration", {})),
         scheduling=_scheduling(raw.get("scheduling", {})),
         storage_root=storage_root,
+        labelling=_labelling(raw.get("labelling", {})),
     )
     _check_shared_storage(config)
     return config

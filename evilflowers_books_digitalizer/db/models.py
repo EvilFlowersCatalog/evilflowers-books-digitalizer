@@ -274,3 +274,45 @@ class Publication(Base):
     published_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     book: Mapped[Book] = relationship(back_populates="publications")
+
+
+class LabelItem(Base):
+    """One catalog item sampled for hand labelling (0005, evilflowers-books-digitalizer#7).
+
+    Independent of studio books: ``ref`` points into the catalog by its ids. ``payload`` is
+    what the labelling screen shows; ``hidden`` holds the model's answer (band, p, decision,
+    relation), used only to stratify the sample and never sent to a labeller.
+    """
+
+    __tablename__ = "label_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)      # figure | table | section_pair | entry
+    key: Mapped[str] = mapped_column(String(255), unique=True)     # stable: one row per catalog item
+    ref: Mapped[dict[str, Any]] = mapped_column(default=dict)       # entry_id, run_id, region, ...
+    language: Mapped[str | None] = mapped_column(String(8))         # ISO 639-1 of the entry ("mixed")
+    stratum: Mapped[str | None] = mapped_column(String(64))         # sampling bucket, e.g. "sk/review"
+    payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    hidden: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    sampled_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    labels: Mapped[list[Label]] = relationship(
+        back_populates="item", order_by="Label.id", cascade="all, delete-orphan")
+
+
+class Label(Base):
+    """One labeller's answer to one task on one item; ``skip`` is stored, never exported."""
+
+    __tablename__ = "labels"
+    __table_args__ = (UniqueConstraint("item_pk", "task", "labeller", name="uq_labels_item_task_labeller"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_pk: Mapped[int] = mapped_column(ForeignKey("label_items.id", ondelete="CASCADE"), index=True)
+    task: Mapped[str] = mapped_column(String(32), index=True)
+    value: Mapped[str] = mapped_column(String(64))
+    labeller: Mapped[str] = mapped_column(String(100))
+    #: the interface the answer came through: spa | cli | mcp (an MCP client relays a person's answer)
+    via: Mapped[str] = mapped_column(String(8), default="spa")
+    labelled_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    item: Mapped[LabelItem] = relationship(back_populates="labels")

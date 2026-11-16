@@ -11,6 +11,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend-image:
+    name: SPA image stage
+    # The Dockerfile's frontend stage alone (minutes, not the full tooling image), so a
+    # broken pnpm install fails in review instead of on master (#10).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the frontend stage
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: frontend
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest

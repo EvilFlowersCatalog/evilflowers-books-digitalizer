@@ -19,13 +19,20 @@ from evilflowers_books_digitalizer.studio.orchestration.scheduling import (
     InMemoryControl,
     NoBackpressure,
 )
-from evilflowers_books_digitalizer.studio.ports import ArtifactStore, EventBus, TaskQueue
+from evilflowers_books_digitalizer.studio.ports import ArtifactStore, EventBus, LabelSource, TaskQueue
 
 #: project slug -> the project's ArtifactStore (None when no adapter is wired)
 type ArtifactsFor = Callable[[str], ArtifactStore | None]
+#: the catalog the labelling items come from (None when ``[labelling]`` is not configured);
+#: called only when a sample or a crop is needed, so no catalog key is needed to serve labels
+type LabelSourceFactory = Callable[[], LabelSource | None]
 
 
 def _no_artifacts(_project: str) -> ArtifactStore | None:
+    return None
+
+
+def _no_label_source() -> LabelSource | None:
     return None
 
 
@@ -39,6 +46,7 @@ class Services:
     #: the scheduler's pause switch (Redis in production: shared with the orchestrator)
     control: ControlStore = field(default_factory=InMemoryControl)
     backpressure: Backpressure = field(default_factory=NoBackpressure)
+    label_source: LabelSourceFactory = _no_label_source
 
     def uow(self) -> UnitOfWork:
         return UnitOfWork(self.sessions, self.bus)

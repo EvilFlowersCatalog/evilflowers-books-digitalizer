@@ -7,7 +7,8 @@ name: Docker
 
 on:
   push:
-    branches: [master, main]
+    # develop -> :develop, the tag the dev k3s deploy pulls (#8, #10)
+    branches: [master, main, develop]
     tags: ["v*"]
     paths:
       - "Dockerfile"
@@ -15,6 +16,7 @@ on:
       - "pyproject.toml"
       - "poetry.lock"
       - "evilflowers_books_digitalizer/**"
+      - "frontend/**"
       - "configs/**"
       - ".github/workflows/docker.yml"
   pull_request:
@@ -22,7 +24,9 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - "pyproject.toml"
+      - "poetry.lock"
       - "evilflowers_books_digitalizer/**"
+      - "frontend/**"
       - ".github/workflows/docker.yml"
   workflow_dispatch:
 

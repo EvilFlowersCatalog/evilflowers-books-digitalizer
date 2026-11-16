@@ -17,9 +17,9 @@ from evilflowers_books_digitalizer.studio.adapters.artifacts import build_artifa
 from evilflowers_books_digitalizer.studio.adapters.ia import build_ia_exporter
 from evilflowers_books_digitalizer.studio.application.services import Services
 from evilflowers_books_digitalizer.studio.config import StudioConfig
-from evilflowers_books_digitalizer.studio.ports import ArtifactStore
+from evilflowers_books_digitalizer.studio.ports import ArtifactStore, LabelSource
 
-__all__ = ["artifact_resolver", "build_ia_exporter", "build_services"]
+__all__ = ["artifact_resolver", "build_ia_exporter", "build_services", "label_source_factory"]
 
 
 def build_services(config: StudioConfig) -> Services:
@@ -32,7 +32,22 @@ def build_services(config: StudioConfig) -> Services:
     admission = production_admission(config)
     return Services(config=config, sessions=sessions, queue=CeleryTaskQueue(config.redis_url),
                     bus=RedisEventBus(config.redis_url), artifacts_for=artifact_resolver(config),
-                    control=admission.control, backpressure=admission.backpressure)
+                    control=admission.control, backpressure=admission.backpressure,
+                    label_source=label_source_factory(config))
+
+
+def label_source_factory(config: StudioConfig) -> Callable[[], LabelSource | None]:
+    """The catalog reader for labelling, built on first use (it needs the API key then, not at boot)."""
+
+    @cache
+    def label_source() -> LabelSource | None:
+        if not config.labelling.enabled:
+            return None
+        from evilflowers_books_digitalizer.studio.adapters.catalog.labelling import CatalogLabelSource
+
+        return CatalogLabelSource(config.labelling)
+
+    return label_source
 
 
 def artifact_resolver(config: StudioConfig) -> Callable[[str], ArtifactStore | None]:

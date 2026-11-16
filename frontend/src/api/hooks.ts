@@ -10,6 +10,8 @@ import { qk } from "./queryKeys";
 import type {
   BookQuery,
   ItemMetadata,
+  LabelAnswer,
+  LabelTaskName,
   NoteCreate,
   PageDetail,
   PagePatch,
@@ -161,6 +163,43 @@ export function useRegionMutations(pageId: number) {
     onSettled: settle,
   });
   return { create, patch, reject };
+}
+
+// ---------------------------------------------------------------- labelling (#7)
+export const useLabelTasks = () => useQuery({ queryKey: qk.labelTasks(), queryFn: api.labelTasks });
+
+/** The next item; never cached across answers (a stale item would be answered twice). */
+export const useLabelNext = (task: LabelTaskName | null) =>
+  useQuery({
+    queryKey: qk.labelNext(task ?? ""),
+    queryFn: () => api.labelNext(task as LabelTaskName),
+    enabled: task !== null,
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+export const useLabelSummary = (task: LabelTaskName | null) =>
+  useQuery({
+    queryKey: qk.labelSummary(task ?? ""),
+    queryFn: () => api.labelSummary(task as LabelTaskName),
+    enabled: task !== null,
+  });
+
+export function useLabelSample() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ task, n }: { task: LabelTaskName; n: number }) => api.labelSample(task, n),
+    // the sample lands later; refresh the counts a little after (no event for it)
+    onSuccess: () => setTimeout(() => void client.invalidateQueries({ queryKey: ["labelling"] }), 15_000),
+  });
+}
+
+export function useLabel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, labels }: { itemId: number; labels: LabelAnswer[] }) => api.label(itemId, labels),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["labelling"] }),
+  });
 }
 
 export function useCreateNote() {

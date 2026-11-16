@@ -10,6 +10,8 @@ Postgres or Redis until a request needs it.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,6 +20,7 @@ from evilflowers_books_digitalizer.studio.adapters.imaging.renditions import Ima
 from evilflowers_books_digitalizer.studio import telemetry
 from evilflowers_books_digitalizer.studio.api import errors, events, media, metrics, routes
 from evilflowers_books_digitalizer.studio.api.deps import AppState
+from evilflowers_books_digitalizer.studio.api.mcp import build_mcp
 from evilflowers_books_digitalizer.studio.adapters.imaging.dzi import TileCache
 from evilflowers_books_digitalizer.studio.api.spa import default_static_dir, spa_router
 from evilflowers_books_digitalizer.studio.api.wiring import build_ia_exporter, build_services
@@ -27,6 +30,8 @@ from evilflowers_books_digitalizer.studio.application.services import Services
 from evilflowers_books_digitalizer.studio.config import StudioConfig, load_config
 
 API_PREFIX = "/api/v1"
+#: streamable-HTTP MCP endpoint (studio.api.mcp); stdio: `evilflowers-digitalizer studio mcp`
+MCP_PATH = "/mcp"
 
 
 def create_app(config: StudioConfig | None = None, *, services: Services | None = None,
@@ -35,9 +40,16 @@ def create_app(config: StudioConfig | None = None, *, services: Services | None 
     if services is None:
         services = build_services(config or load_config())
     config = services.config
+    mcp = build_mcp(services, streamable_http_path=MCP_PATH)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        async with mcp.session_manager.run():    # the /mcp transport's task group
+            yield
+
     app = FastAPI(title="EvilFlowers Restoration Studio", version="1",
                   openapi_url=f"{API_PREFIX}/openapi.json", docs_url=f"{API_PREFIX}/docs",
-                  redoc_url=None)
+                  redoc_url=None, lifespan=lifespan)
     app.state.studio = AppState(
         services=services, fanout=EventFanout(services.bus),
         ia_exporter=ia_exporter or build_ia_exporter(config),
@@ -48,6 +60,9 @@ def create_app(config: StudioConfig | None = None, *, services: Services | None 
     app.include_router(metrics.router)                                   # /metrics (scraped)
     for router in (routes.router, media.router, events.router):
         app.include_router(router, prefix=API_PREFIX)
+    # labelling over MCP (#7): the transport's own route at exactly /mcp (a Mount would only
+    # match /mcp/…, and a bare /mcp would fall through to the SPA catch-all)
+    app.router.routes.extend(mcp.streamable_http_app().routes)
     app.include_router(spa_router(static_dir or default_static_dir()))   # catch-all: last
     telemetry.instrument_fastapi(app)
     return app

@@ -479,6 +479,78 @@ def cmd_studio_export_training(args: argparse.Namespace) -> Any:
 
 
 @_studio_command
+def cmd_studio_sample_labels(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.application.labelling import sample
+
+    return sample(_studio_services(args), args.task, args.n, max_entries=args.max_entries)
+
+
+def _labeller(args: argparse.Namespace) -> str | None:
+    import os
+
+    return (args.operator or os.environ.get("STUDIO_OPERATOR") or "").strip() or None
+
+
+@_studio_command
+def cmd_studio_label(args: argparse.Namespace) -> Any:
+    """Label in the terminal (interactive), or record one answer (``--item`` + ``--value``)."""
+    from evilflowers_books_digitalizer.studio.application import labelling
+    from evilflowers_books_digitalizer.studio.application.errors import BadRequest
+    from evilflowers_books_digitalizer.studio.labelling_cli import label_loop
+
+    svc = _studio_services(args)
+    who = _labeller(args)
+    if args.item is not None:
+        if not args.value:
+            raise BadRequest("--item needs --value (a label key, or skip)")
+        answers = [labelling.LabelIn(task=args.task, value=args.value)]
+        if args.table_quality:
+            answers.append(labelling.LabelIn(task="table_quality", value=args.table_quality))
+        out = labelling.submit(svc, args.item, labelling.LabelsIn(labels=answers), who, via="cli")
+        return {"item_id": out.id, "recorded": out.mine}
+    label_loop(svc, args.task, labelling.require_labeller(who),
+               crops=Path(args.crops) if args.crops else None, open_crops=args.open)
+    return None
+
+
+@_studio_command
+def cmd_studio_labelling_status(args: argparse.Namespace) -> Any:
+    from evilflowers_books_digitalizer.studio.labelling_cli import status_table
+
+    print(status_table(_studio_services(args), _labeller(args)))
+    return None
+
+
+def cmd_studio_mcp(args: argparse.Namespace) -> int:
+    """The studio MCP server over stdio (the same tools as ``/mcp`` on the portal)."""
+    from evilflowers_books_digitalizer.studio.api.mcp import build_mcp
+
+    build_mcp(_studio_services(args)).run("stdio")
+    return 0
+
+
+@_studio_command
+def cmd_studio_export_labels(args: argparse.Namespace) -> Any:
+    """JSONL to ``--out`` (or stdout); the summary (counts, kappa) is printed as JSON on stderr
+    and written next to ``--out`` as ``<out>.summary.json``."""
+    from evilflowers_books_digitalizer.studio.application.labelling import export_lines, summary
+
+    svc = _studio_services(args)
+    lines = [json.dumps(line, ensure_ascii=False) + "\n" for line in export_lines(svc, args.task)]
+    info = summary(svc, args.task).model_dump(mode="json")
+    if args.out and args.out != "-":
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("".join(lines), encoding="utf-8")
+        out.with_name(out.name + ".summary.json").write_text(
+            json.dumps(info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    else:
+        sys.stdout.write("".join(lines))
+    print(json.dumps(info, indent=2, ensure_ascii=False), file=sys.stderr)
+    return None
+
+
+@_studio_command
 def cmd_studio_db_upgrade(args: argparse.Namespace) -> Any:
     from evilflowers_books_digitalizer.db import store
     from evilflowers_books_digitalizer.studio.config import load_config
@@ -524,6 +596,29 @@ def _add_studio_parser(sub: Any) -> None:
     q.add_argument("--out", default=".", help="output directory")
     q = add("export-training", "enqueue the labelled-regions export", cmd_studio_export_training)
     q.add_argument("project")
+    from evilflowers_books_digitalizer.studio.labelling import TASKS
+
+    q = add("sample-labels", "sample catalog items for hand labelling (decider calibration)",
+            cmd_studio_sample_labels)
+    q.add_argument("--task", required=True, choices=sorted(TASKS))
+    q.add_argument("--n", type=int, default=250, help="items to add (stratified by language and band)")
+    q.add_argument("--max-entries", type=int, help="catalog entries to scan (default: [labelling])")
+    q = add("export-labels", "write a task's labels as JSONL (+ summary with Cohen's kappa)",
+            cmd_studio_export_labels)
+    q.add_argument("--task", required=True, choices=sorted(TASKS))
+    q.add_argument("--out", help="JSONL file (default: stdout); the summary goes next to it")
+    q = add("label", "label items in the terminal (or record one answer with --item/--value)",
+            cmd_studio_label)
+    q.add_argument("--task", required=True, choices=sorted(TASKS))
+    q.add_argument("--operator", help="your name, recorded on every label (default: $STUDIO_OPERATOR)")
+    q.add_argument("--item", type=int, help="answer this item only (non-interactive)")
+    q.add_argument("--value", help="with --item: a label key of the task, or skip")
+    q.add_argument("--table-quality", help="with --item on an is_data_table item: its table_quality")
+    q.add_argument("--crops", help="directory for figure/table crops (default: <cache_dir>/labelling)")
+    q.add_argument("--open", action="store_true", help="open each crop in the default image viewer")
+    q = add("labelling-status", "progress of every labelling task", cmd_studio_labelling_status)
+    q.add_argument("--operator", help="also count your own answers (default: $STUDIO_OPERATOR)")
+    add("mcp", "MCP server over stdio: the labelling tools for an MCP client", cmd_studio_mcp)
     q = add("db-upgrade", "apply the studio database migrations", cmd_studio_db_upgrade,
             aliases=("migrate",))
     q.add_argument("revision", nargs="?", default="head")

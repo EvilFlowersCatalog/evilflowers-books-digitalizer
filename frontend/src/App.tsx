@@ -12,6 +12,7 @@ import { Empty, Spinner } from "./components/ui";
 import { BookScreen } from "./features/book/BookScreen";
 import { BooksScreen } from "./features/books/BooksScreen";
 import { DashboardScreen } from "./features/dashboard/DashboardScreen";
+import { LabellingScreen } from "./features/labelling/LabellingScreen";
 import { ReviewQueueScreen } from "./features/review/ReviewQueueScreen";
 import { SettingsScreen } from "./features/settings/SettingsScreen";
 import { SessionProvider } from "./lib/session";
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
         ),
       },
       { path: "review", element: <ReviewQueueScreen /> },
+      { path: "labelling", element: <LabellingScreen /> },
       { path: "settings", element: <SettingsScreen /> },
       { path: "*", element: <Empty>Nothing here.</Empty> },
     ],

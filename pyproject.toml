@@ -41,6 +41,7 @@ dependencies = [
     "evilflowers-protocol (>=0.2.0,<0.3.0)",
     # GET /metrics (ledger gauges, studio/api/metrics.py)
     "prometheus-client (>=0.20,<1.0)",
+    "mcp (>=1.20,<2)",
 ]
 
 [project.optional-dependencies]

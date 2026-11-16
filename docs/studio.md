@@ -244,6 +244,76 @@ zip that unpacks into an IA item directory. From the CLI:
 `studio export-training <project>` writes the confirmed regions as COCO / DocLayNet JSON
 with page crops, for training a layout model.
 
+## 8. Label catalog items for decider calibration
+
+The decision services (`decider`, `decider-vision`) answer with a probability that means
+something only after calibration against our own labels (knowledge#65, issue #7). The
+**Labelling** screen collects those labels over the *catalog's* extraction output (dev), not
+over the studio's scans.
+
+| task | item | labels |
+|---|---|---|
+| `figure_kind` | figure crop + caption + the page's text | `chart` `diagram` `photo` `map` `table` `formula` `stamp` `decoration` `scan` `blank` |
+| `is_data_table` | table crop + its markdown | `yes` `no` |
+| `table_quality` | same screen as `is_data_table` (optional) | `correct` `minor_errors` `broken` |
+| `section_relation` | section A and B: title + first paragraphs | `same` `pre` `example` `loose` `none` |
+| `subject` | entry title, summary, ToC | a category id of the entry's catalog (UDC top level first) |
+
+Every task also has `s` = skip (unsure): stored, never exported. The keys are the exact
+choices the callers send to the decider (image-service#6, text-service#20,
+EvilFlowersCatalog#190/#191).
+
+1. Configure the catalog in the studio TOML. The key needs **manage** rights on the sampled
+   entries, because the region listing is an admin route. It stays on the server: crops are proxied.
+
+   ```toml
+   [labelling]
+   base_url = "https://dev.evilflowers.elvira.stuba.sk/api/v1"
+   api_key_env = "EVILFLOWERS_LABELLING_API_KEY"
+   catalog_ids = []        # empty = every catalog the key sees
+   max_entries = 200       # entries scanned per sample
+   ```
+
+The operator works through whichever interface suits them. All three use the same use
+cases, and every label records which one it came through (`via`).
+
+| step | SPA (**Labelling** in the menu) | CLI (`evilflowers-digitalizer studio …`) | MCP (`/mcp` on the portal, or `studio mcp` over stdio) |
+|---|---|---|---|
+| sample | **Sample 100 more** (runs in the background) | `sample-labels --task <t> --n 300` | `sample_label_items` |
+| label | digits pick, `s` skips, Enter saves a table | `label --task <t> --operator <name>` (interactive; `--open` shows crops), or `label --task <t> --item <id> --value <key>` | `next_label_item` → `submit_label` |
+| progress | the task list | `labelling-status` | `list_label_tasks`, `label_summary` |
+| export | **Export** link | `export-labels --task <t> --out <file>` | `export_labels` |
+
+2. **Sample** items. They are stratified by language × the decider's confidence: its band, or
+   `p` while bands are empty, as they are until knowledge#65 sets thresholds. That way Slovak
+   items and the unsure cases are both represented. Re-running only adds new items.
+3. **Label.** The model's answer is never shown. About 10 % of items are offered to a second
+   person.
+   - **SPA:** set your name first.
+   - **CLI:** pass `--operator`, or set `$STUDIO_OPERATOR`.
+   - **MCP:** the client passes `labeller`.
+
+   **The labels must be human.** An MCP client relays the person's answer and must not answer
+   for them. The server's instructions and tool descriptions say so, and every label records
+   `via` (spa, cli or mcp), so knowledge#65 can filter on it. To use the portal's MCP endpoint
+   from Claude Code, run:
+   `claude mcp add --transport http evilflowers-studio http://<portal>/mcp`.
+4. **Export:** `evilflowers-digitalizer studio export-labels --task figure_kind --out labels/figure_kind.jsonl`,
+   or the **Export** link, or `GET /api/v1/labelling/tasks/{task}/export`. One line per label:
+
+   ```json
+   {"task": "figure_kind", "item": {"entry_id": "…", "run_id": "…", "region": "p012-fig01", "region_id": "…"}, "language": "sk", "label": "stamp", "labeller": "…", "labelled_at": "…", "via": "spa"}
+   ```
+
+   `labels/figure_kind.jsonl.summary.json` holds counts per label, language, labeller and `via`,
+   raw agreement and Cohen's κ on the doubly labelled items, and the sampling note.
+
+Known limits: the catalog has no route for section text yet (the studio matches paragraphs to
+the heading), `sections/{key}/related` drops pairs the catalog hid and is cross-book only, and
+regions carry no key (the studio builds `p012-fig01`). The asks are written up in
+[catalog-labelling-requests](design/catalog-labelling-requests.md). Design:
+`docs/diagrams/*-digitalizer-labelling.puml`.
+
 ## Troubleshooting
 
 | symptom | cause / fix |
