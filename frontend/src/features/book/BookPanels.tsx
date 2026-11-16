@@ -287,7 +287,12 @@ export function PagesGrid({ pages }: { pages: PageOut[] }) {
           }`}
         >
           <div className={s.thumb}>
-            <img src={p.thumb ?? media.pageImage(p.id, "clean", 240, p.version)} alt={`leaf ${p.index}`} loading="lazy" />
+            <img
+              src={p.thumb ?? p.thumb_url ?? media.pageImage(p.id, "clean", 240, p.version)}
+              alt={`leaf ${p.index}`}
+              loading="lazy"
+              decoding="async"
+            />
             {(p.disputed ?? 0) > 0 && (
               <span className={s.disputed} aria-label={`${p.disputed} disputed`}>
                 {p.disputed} ?

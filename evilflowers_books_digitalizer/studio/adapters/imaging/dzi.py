@@ -15,18 +15,35 @@ not ship; one page at 600 dpi is a few hundred tiles, about a second.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import math
 import os
 import shutil
 import tempfile
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None  # 600 dpi pages and uncompressed spreads are large
+
+RENDER_CONCURRENCY_ENV = "STUDIO_RENDER_CONCURRENCY"
+#: Full-size decodes allowed at once per process. One uncompressed 300 dpi frame is ~70 MB
+#: decoded and ~2-3x that while rotated and cropped; a book page asks for every leaf's
+#: thumbnail at once, so without a bound the API's thread pool (40) decoded 40 frames
+#: together and the portal was OOM-killed (#12). Cache hits never take a slot.
+_RENDER_SLOTS = threading.BoundedSemaphore(max(1, int(os.environ.get(RENDER_CONCURRENCY_ENV, "2"))))
+
+
+@contextlib.contextmanager
+def render_slot() -> Iterator[None]:
+    """Hold one of the process's decode slots (blocks while all are busy)."""
+    with _RENDER_SLOTS:
+        yield
 
 TILE_SIZE = 254
 OVERLAP = 1
@@ -169,10 +186,13 @@ class TileCache:
         if target.exists():
             return target
         box = grid.tile_box(level, col, row)   # validates before any pixel work
-        with source.open() as im:
-            tile = im.crop(grid.source_box(level, col, row)).resize(
-                (box[2] - box[0], box[3] - box[1]), Image.Resampling.LANCZOS)
-        return atomic_write(target, encode(tile, fmt))
+        with render_slot():
+            if target.exists():                # rendered while this request waited
+                return target
+            with source.open() as im:
+                tile = im.crop(grid.source_box(level, col, row)).resize(
+                    (box[2] - box[0], box[3] - box[1]), Image.Resampling.LANCZOS)
+            return atomic_write(target, encode(tile, fmt))
 
 
 def write_dzi(image: Image.Image, dzi: Path, *, tile: int = TILE_SIZE, overlap: int = OVERLAP,

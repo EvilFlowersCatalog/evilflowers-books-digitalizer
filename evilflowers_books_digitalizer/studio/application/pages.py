@@ -96,6 +96,7 @@ class PageMedia:
     half: tuple[int, int] | None   # legacy rows: the spread half's x-range only
     rotate: int
     clean: Path | None             # cleaned page image
+    preview: Path | None           # the cleaned page's small WebP (clean stage, 1600 px)
     dzi: Path | None               # pre-rendered deep-zoom descriptor (batch), if any
     pdf: Path | None               # the book's distribution PDF
     access_index: int | None       # page of that PDF; None = not in access formats
@@ -111,6 +112,7 @@ def page_media(svc: Services, page_id: int) -> PageMedia:
                          frame=_existing(page.source_path), crop=_frame_crop(page),
                          half=(page.x0, page.x1) if page.x0 is not None and page.x1 else None,
                          rotate=page.rotate_degree or 0, clean=_existing(page.clean_path),
+                         preview=_existing(page.preview_path),
                          dzi=_existing(page.dzi_path), pdf=_existing(pdf),
                          access_index=_pdf_page(uow.session, book, page.index))
 

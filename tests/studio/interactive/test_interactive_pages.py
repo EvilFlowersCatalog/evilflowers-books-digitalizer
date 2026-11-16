@@ -6,6 +6,7 @@ import io
 
 from PIL import Image
 
+from evilflowers_books_digitalizer.db.models import Page
 from evilflowers_books_digitalizer.studio.events import EventType
 
 
@@ -15,8 +16,39 @@ def test_list_pages_and_access_index(client, seeded):
     pages = r.json()
     assert [p["index"] for p in pages] == [0, 1] and [p["access_index"] for p in pages] == [0, 1]
     assert pages[0]["disputed"] == 1 and pages[0]["hand_side"] == "LEFT"
-    assert pages[0]["thumb_url"].endswith(f"/pages/{seeded.page_ids[0]}/image/clean?w=240")
+    assert pages[0]["thumb_url"].endswith(f"/pages/{seeded.page_ids[0]}/image/clean?w=240&v=1")
     assert client.get("/api/v1/books/999/pages").status_code == 404
+
+
+def test_thumb_falls_back_to_the_raw_leaf_before_clean(client, services, seeded):
+    s = services.sessions()
+    page = s.get(Page, seeded.page_ids[1])
+    page.clean_path = None
+    s.commit()
+    s.close()
+    thumb = client.get(f"/api/v1/books/{seeded.book_id}/pages").json()[1]["thumb_url"]
+    assert thumb.endswith(f"/pages/{seeded.page_ids[1]}/image/original?w=240&v=1")
+    assert _size(client.get(thumb)) == (200, 300)    # the leaf is narrower than 240: as is
+
+
+def test_clean_thumbnail_comes_from_the_preview(client, services, seeded, tmp_path):
+    """A small width is cut from the 1600 px WebP, never from the full-size page (#12)."""
+    p0 = seeded.page_ids[0]
+    preview = tmp_path / "leaves" / "0000.webp"
+    preview.parent.mkdir()
+    Image.new("RGB", (100, 150), (255, 0, 0)).save(preview, "WEBP")   # red: tell them apart
+    s = services.sessions()
+    s.get(Page, p0).preview_path = str(preview)
+    s.commit()
+    s.close()
+    small = client.get(f"/api/v1/pages/{p0}/image/clean", params={"w": 50})
+    assert _size(small) == (50, 75)
+    assert Image.open(io.BytesIO(small.content)).convert("RGB").getpixel((25, 37))[0] > 200
+    # over half the preview's width: the full-size (grey) cleaned image again
+    big = client.get(f"/api/v1/pages/{p0}/image/clean", params={"w": 80})
+    assert _size(big) == (80, 120)
+    r, g, _ = Image.open(io.BytesIO(big.content)).convert("RGB").getpixel((40, 60))
+    assert abs(r - g) < 30
 
 
 def test_page_detail(client, seeded):

@@ -40,6 +40,10 @@ CONTEXT_FIELDS = ("project", "book_pk", "run_id", "job_id", "stage", "lane", "ta
 #: Per-line fields passed through ``extra=``.
 EXTRA_FIELDS = ("duration_ms", "status", "entry_id", "trace_id", "span_id")
 
+#: Libraries whose DEBUG/INFO is noise in a service log (PIL logs a failed optional plugin
+#: import twice per opened image, #13); they log WARNING and above only.
+QUIET_LOGGERS = ("PIL",)
+
 _LEVEL_ALIASES = {"WARN": "WARNING"}
 _LEVEL_LABELS = {"WARNING": "WARN"}
 _TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s%(context)s: %(message)s"
@@ -185,6 +189,8 @@ def setup_logging(
     setattr(handler, _HANDLER_MARK, True)
     root.addHandler(handler)
     root.setLevel(numeric)
+    for quiet in QUIET_LOGGERS:
+        logging.getLogger(quiet).setLevel(max(numeric, logging.WARNING))
     _configured_format = name
     logging.captureWarnings(True)
 

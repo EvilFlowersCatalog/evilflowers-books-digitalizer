@@ -3,8 +3,8 @@
 Every file served here comes from a path recorded in the database (or derived
 from the book's identifier by the ArtifactStore); request input only selects a
 *kind* or a tile number, never a path, so there is no traversal surface.
-Renditions are cached on disk (``adapters.imaging.renditions.ImageCache``, ``dzi.TileCache``)
-and served with ETags; ``Cache-Control: no-cache`` makes the browser revalidate
+Renditions are cached on disk (``adapters.imaging.renditions.ImageCache``, ``dzi.TileCache``),
+decoded a few at a time (``dzi.render_slot``), and served with ETags; ``Cache-Control: no-cache`` makes the browser revalidate
 so a re-run page shows up without a version in the URL.
 """
 
@@ -49,7 +49,7 @@ def _render(images: ImageCache, media: PageMedia, layer: Layer, width: int) -> P
         case "spread":
             return images.original(_need(media.frame, "original frame"), width)
         case "clean":
-            return images.original(_need(media.clean, "cleaned page"), width)
+            return images.original(_clean_source(media, width), width)
         case "pdf":
             if media.access_index is None:
                 raise NotFound(f"page {media.page_id} is excluded from access formats")
@@ -57,6 +57,24 @@ def _render(images: ImageCache, media: PageMedia, layer: Layer, width: int) -> P
                 return images.pdf_page(_need(media.pdf, "PDF"), media.access_index, width)
             except IndexError:
                 raise NotFound(f"the PDF has no page {media.access_index + 1}") from None
+
+
+def _clean_source(media: PageMedia, width: int) -> Path:
+    """The cleaned page, or its WebP preview for small widths.
+
+    The clean stage writes a 1600 px WebP next to the full-size page: a thumbnail cut
+    from it decodes ~5 MB instead of a full 300-600 dpi page (#12). Only widths up to half
+    the preview's use it, so a lossy re-encode never shows at viewing sizes.
+    """
+    clean = _need(media.clean, "cleaned page")
+    if media.preview is not None:
+        try:
+            with Image.open(media.preview) as im:     # header only
+                if im.width >= 2 * width:
+                    return media.preview
+        except OSError:
+            pass                                      # unreadable preview: use the page
+    return clean
 
 
 def _need[T](value: T | None, what: str) -> T:

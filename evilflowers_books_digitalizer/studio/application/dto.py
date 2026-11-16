@@ -380,7 +380,14 @@ def page_out(page: Page, access_index: int | None) -> PageOut:
                    page_number=page.page_number, add_to_access=bool(page.add_to_access),
                    status=page.status, version=page.version or 0, width=page.width,
                    height=page.height, dpi=page.dpi, disputed=disputed,
-                   thumb_url=f"{API_PREFIX}/pages/{page.id}/image/clean?w={THUMB_WIDTH}")
+                   thumb_url=thumb_url(page))
+
+
+def thumb_url(page: Page) -> str:
+    """The cleaned page, or the raw leaf until one exists (no 404 per leaf before clean);
+    ``v=`` changes with every new rendition, so the browser never shows a stale one."""
+    layer = "clean" if page.clean_path else "original"
+    return f"{API_PREFIX}/pages/{page.id}/image/{layer}?w={THUMB_WIDTH}&v={page.version or 0}"
 
 
 class SourceFrame(BaseModel):

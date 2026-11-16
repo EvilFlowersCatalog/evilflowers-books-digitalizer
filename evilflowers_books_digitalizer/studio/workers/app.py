@@ -3,7 +3,8 @@
 Queues (``studio.config``) and who consumes them::
 
     digitalizer.portal       orchestrator: runs, job_done/job_failed callbacks, pump,
-                             reconcile, discover, gate, publish   (+ beat, one replica)
+                             reconcile, discover, gate, publish   (+ beat, one replica,
+                             + the ledger's /metrics on $DIGITALIZER_METRICS_PORT)
     digitalizer.cpu          in-process clean / render            (until scan/render services)
     digitalizer.ai           in-process layout / formulas         (until analyzer/equation tasks)
     digitalizer.interactive  in-process operator re-runs          (one replica, always on)
@@ -26,9 +27,11 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+import warnings
 
 from celery import Celery
-from celery.signals import worker_process_init
+from celery.signals import setup_logging, worker_process_init, worker_ready
 from kombu import Exchange, Queue
 
 from evilflowers_books_digitalizer.studio.adapters.queue import QUEUES, TRANSPORT_OPTIONS
@@ -115,7 +118,9 @@ def make_app() -> Celery:
         # task events: Flower and the Celery exporter read them (observability)
         worker_send_task_events=True,
         task_send_sent_event=True,
+        # logging is ours (``_logging`` below): no Celery handler, no stdout/stderr proxy
         worker_hijack_root_logger=False,
+        worker_redirect_stdouts=False,
         task_always_eager=eager(),
         # never propagate: Celery re-raises *before* calling errbacks, so link_error (and
         # with it digitalizer.job_failed) would never run inline; a job's failure is the
@@ -125,14 +130,67 @@ def make_app() -> Celery:
     return app
 
 
+def _gid_without_group_entry() -> bool:
+    """A non-root process whose gid has no /etc/group entry (the k8s overlay's runAsGroup).
+
+    Celery's privilege check cannot name such a group, *assumes root* and warns "You're
+    running the worker with superuser privileges" (#13). That warning is false here and
+    trains people to ignore the real one, so it is silenced in exactly this case: a real
+    root, or a non-root member of ``sudo``/``wheel``, still gets it.
+    """
+    if not hasattr(os, "geteuid") or 0 in (os.getuid(), os.geteuid()):
+        return False
+    import grp
+
+    try:
+        grp.getgrgid(os.getgid())
+        grp.getgrgid(os.getegid())
+    except KeyError:
+        return True
+    return False
+
+
+if _gid_without_group_entry():
+    from celery.exceptions import SecurityWarning
+
+    warnings.filterwarnings("ignore", category=SecurityWarning)
+
 celery = make_app()
+
+
+@setup_logging.connect
+def _logging(**_: object) -> None:
+    """The app's own handler (``EVILFLOWERS_LOG_FORMAT``/``_LEVEL``) on the real stderr.
+
+    A receiver on this signal makes Celery skip its own setup: no handler of its own on the
+    root logger (the plain-text duplicate of every line) and no stdout/stderr proxy (which
+    re-logged every JSON line at WARNING behind a ``[time: WARNING/ForkPoolWorker-1]``
+    prefix, #13). Pool processes inherit the handler through the fork.
+    """
+    from evilflowers_books_digitalizer.logs import setup_logging as setup
+
+    setup(stream=sys.__stderr__, force=True)
+
+
+@worker_ready.connect
+def _ledger_metrics(**_: object) -> None:
+    """The ledger gauges, from the main process of the worker that sets
+    ``DIGITALIZER_METRICS_PORT`` (the orchestrator), once its pool is up: never from a pool
+    process (they would fight for the port), and they keep reporting while the portal is
+    down (#13)."""
+    from evilflowers_books_digitalizer.studio import ledger_metrics
+
+    try:
+        ledger_metrics.serve()
+    except OSError as exc:              # port taken: the worker itself must still run
+        logger.error("ledger metrics not served: %s", exc)
 
 
 @worker_process_init.connect
 def _telemetry(**_: object) -> None:
     """Tracing starts in each pool process (after the fork), never in the parent."""
-    from evilflowers_books_digitalizer.logs import setup_logging
+    from evilflowers_books_digitalizer.logs import setup_logging as setup
     from evilflowers_books_digitalizer.studio import telemetry
 
-    setup_logging()
+    setup(stream=sys.__stderr__)        # no-op when inherited from the parent
     telemetry.configure("digitalizer-worker")

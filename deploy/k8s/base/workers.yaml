@@ -33,6 +33,12 @@ spec:
       labels:
         app.kubernetes.io/name: digitalizer-orchestrator
         app.kubernetes.io/component: orchestrator
+      annotations:
+        # Deploy-a-Service §3: the ledger gauges (studio/ledger_metrics.py), served here
+        # because the orchestrator owns the ledger and outlives a portal outage (#13)
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portName: metrics
+        k8s.grafana.com/metrics.path: /metrics
     spec:
       terminationGracePeriodSeconds: 60
       containers:
@@ -58,6 +64,9 @@ spec:
           env:
             - { name: DIGITALIZER_PUMP_INTERVAL_SECONDS, value: "15" }
             - { name: DIGITALIZER_RECONCILE_INTERVAL_SECONDS, value: "60" }
+            - { name: DIGITALIZER_METRICS_PORT, value: "9464" }   # only this worker serves them
+          ports:
+            - { name: metrics, containerPort: 9464 }
           livenessProbe:
             exec:
               command: [sh, -c, 'celery -A evilflowers_books_digitalizer.studio.workers.app:celery inspect ping -d "orchestrator@$HOSTNAME" --timeout 10 >/dev/null']

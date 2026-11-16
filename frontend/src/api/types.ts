@@ -335,6 +335,8 @@ export interface PageOut {
   height: number | null;
   /** thumbnail URL (API-relative); the SPA builds one from the id when absent */
   thumb?: string | null;
+  /** the API's thumbnail: the cleaned page, or the raw leaf before clean (absolute path) */
+  thumb_url?: string;
   disputed?: number;
 }
 

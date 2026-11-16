@@ -8,8 +8,8 @@ HTTP.
 
 | Deployment | Role | Replicas | Priority | Requests → limits |
 |---|---|---|---|---|
-| `portal` | uvicorn: REST, SSE, tiles, SPA, `/metrics`, `/api/v1/scheduler` | 1 (Recreate) | default | 100m/512Mi → 1/2Gi |
-| `orchestrator` | Celery `digitalizer.portal` + beat: runs, job callbacks, pump (15 s), reconcile (60 s), discover, gate, publish | 1 (Recreate) | default | 200m/768Mi → 1/2Gi |
+| `portal` | uvicorn: REST, SSE, tiles, SPA, `/api/v1/scheduler` | 1 (Recreate) | default | 100m/512Mi → 1/2Gi |
+| `orchestrator` | Celery `digitalizer.portal` + beat: runs, job callbacks, pump (15 s), reconcile (60 s), discover, gate, publish; ledger `/metrics` on :9464 | 1 (Recreate) | default | 200m/768Mi → 1/2Gi |
 | `worker-interactive` | Celery `digitalizer.interactive`: operator re-runs, concurrency 2 | 1 | default | 500m/2Gi → 2/6Gi |
 | `worker-cpu` | Celery `digitalizer.cpu`: bulk clean / render, concurrency 2 | **0..3 (KEDA)** | `digitalizer-batch` | 500m/2Gi → 2/6Gi |
 | `worker-ai` | Celery `digitalizer.ai`: bulk layout / formulas, concurrency 1 | **0..1 (KEDA)** | `digitalizer-batch` | 500m/2Gi → 2/6Gi |
@@ -55,10 +55,18 @@ interactive). Full bulk scale adds 2.0 CPU (3 × cpu + 1 × ai).
 * Spans carry `digitalizer.run.id`, `digitalizer.job.id` and `digitalizer.stage`. The
   same ids appear in the JSON logs (`run_id`, `job_id`, `stage`, plus `trace_id`).
 * Celery messages carry `digitalizer_*` headers, so a service worker can tag its spans.
-* The `portal` exposes `/metrics`, scraped through the `k8s.grafana.com/scrape`
-  annotations. Its gauges include `digitalizer_jobs{status,lane,stage}`,
-  `digitalizer_job_oldest_planned_seconds`, `digitalizer_runs`,
-  `digitalizer_scheduler_capacity` and `digitalizer_scheduler_mode`.
+* The `orchestrator` serves the ledger's `/metrics` from its Celery main process
+  (`DIGITALIZER_METRICS_PORT=9464`, port `metrics`, `studio/ledger_metrics.py`), scraped
+  through the `k8s.grafana.com/scrape` annotations. Its gauges include
+  `digitalizer_jobs{status,lane,stage}`, `digitalizer_job_oldest_planned_seconds`,
+  `digitalizer_runs`, `digitalizer_books`, `digitalizer_scheduler_capacity` and
+  `digitalizer_scheduler_mode`. They come from the component that owns the ledger, so they
+  survive a portal outage; the portal serves no `/metrics` (#13).
+* Logs are one JSON object per line on stderr with the record's own level
+  (`EVILFLOWERS_LOG_FORMAT=json`): Celery's handler and its stdout/stderr proxy are off
+  (`studio/workers/app.py`), and `PIL` logs WARNING and above only.
+* The portal decodes at most `STUDIO_RENDER_CONCURRENCY` (default 2) full-size images at
+  once; thumbnails of cleaned pages are cut from the 1600 px WebP preview (#12).
 
 Service `portal` (ClusterIP :80) is VPN-only: no HTTPRoute.
 URL: `http://portal.digitalizer.stu.k8s.internal`.

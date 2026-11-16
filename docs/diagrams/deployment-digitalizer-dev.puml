@@ -63,10 +63,10 @@ node "**control** · 192.168.122.60" <<virtualMachine>> as ct {
     node portal <<container>> <<proposed>> <<focus>> [
 **digitalizer image** · default priority
 ----
-portal: FastAPI + SPA, /metrics, /scheduler
+portal: FastAPI + SPA, /scheduler
 orchestrator ×1: queue digitalizer.portal,
 job_done / job_failed + beat (pump 15 s,
-reconcile 60 s)
+reconcile 60 s), ledger /metrics :9464
 worker-interactive ×1: operator re-runs
 ]
     node local <<container>> <<proposed>> [

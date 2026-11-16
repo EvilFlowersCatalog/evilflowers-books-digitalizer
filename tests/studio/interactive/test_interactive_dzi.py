@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from PIL import Image
 
+from evilflowers_books_digitalizer.studio.adapters.imaging import dzi
 from evilflowers_books_digitalizer.studio.adapters.imaging.dzi import (
     DeepZoomGrid,
     TileCache,
     TileSource,
 )
+from evilflowers_books_digitalizer.studio.adapters.imaging.renditions import ImageCache
 
 
 def test_levels_halve_and_round_up():
@@ -80,3 +86,36 @@ def test_crop_and_rotation_define_the_tiled_image(tmp_path):
     assert TileSource(src, rotate=90).size() == (300, 400)
     with TileSource(src, rotate=90).open() as im:
         assert im.size == (300, 400)
+
+
+def test_a_thumbnail_burst_decodes_two_at_a_time_and_only_once(tmp_path, monkeypatch):
+    """A book page asks for every leaf at once (#12): decodes are bounded, hits are free."""
+    monkeypatch.setattr(dzi, "_RENDER_SLOTS", threading.BoundedSemaphore(2))
+    sources = []
+    for i in range(24):
+        src = tmp_path / f"{i:04d}.png"
+        Image.new("L", (400, 600), i).save(src)
+        sources.append(src)
+    active, peak, decodes, lock = 0, 0, 0, threading.Lock()
+    real_open = TileSource.open
+
+    def counting_open(self: TileSource) -> Image.Image:
+        nonlocal active, peak, decodes
+        with lock:
+            active, decodes = active + 1, decodes + 1
+            peak = max(peak, active)
+        time.sleep(0.01)
+        try:
+            return real_open(self)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(TileSource, "open", counting_open)
+    cache = ImageCache(tmp_path / "viewer")
+    with ThreadPoolExecutor(16) as pool:
+        first = list(pool.map(lambda p: cache.original(p, 240), sources))
+    assert peak <= 2 and decodes == 24
+    with ThreadPoolExecutor(16) as pool:
+        again = list(pool.map(lambda p: cache.original(p, 240), sources))
+    assert again == first and decodes == 24                 # a reload decodes nothing

@@ -19,7 +19,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Engine, create_engine, event, select
+import sqlalchemy
+from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from evilflowers_books_digitalizer.db.models import Book, Page, utcnow
@@ -41,6 +42,10 @@ def database_url(rt: RuntimeConfig) -> str:
 
 @lru_cache(maxsize=8)
 def get_engine(url: str) -> Engine:
+    # ``sqlalchemy.create_engine`` looked up at call time, not imported by name: the
+    # OpenTelemetry instrumentation wraps that attribute (studio.telemetry), and a name
+    # bound at import would bypass it and leave every query untraced (#13)
+    create_engine = sqlalchemy.create_engine
     if url.startswith("sqlite:///"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(url, connect_args={"timeout": 30})

@@ -236,8 +236,13 @@ ENV EVILFLOWERS_DOCRES_REPO=/opt/evilflowers-tools/DocRes \
 # Everything the pipeline reads at runtime (venvs, DocRes, tessdata, bundled
 # fonts/logos, the default config) must be readable — never writable — by an
 # arbitrary uid: the k8s Job runs as the owner of the scans, unknown here.
+# The group entry for the default gid keeps Celery's privilege check from assuming root
+# (deploy/k8s/base runs 10001:10001); an overlay's other gid is handled in
+# studio/workers/app.py (#13).
 RUN chmod -R a+rX /opt/venv /opt/evilflowers-tools /app /usr/share/tesseract-ocr \
- && useradd --uid 10001 --gid 0 --home-dir /tmp --no-create-home --shell /usr/sbin/nologin digitalizer
+ && groupadd --gid 10001 digitalizer \
+ && useradd --uid 10001 --gid 0 --groups digitalizer --home-dir /tmp --no-create-home \
+      --shell /usr/sbin/nologin digitalizer
 
 ENV EVILFLOWERS_DIGITALIZER_CONFIG=/app/configs/pipeline.toml \
     STUDIO_STATIC_DIR=/app/frontend/dist \

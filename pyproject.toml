@@ -18,8 +18,10 @@ dependencies = [
     "pandas (>=2.2,<3.0)",
     "openpyxl (>=3.1,<4.0)",
     "rich (>=13,<15)",
-    # processing database + migrations (SQLite default; any SQLAlchemy URL)
-    "sqlalchemy (>=2.0,<3.0)",
+    # processing database + migrations (SQLite default; any SQLAlchemy URL).
+    # <2.1 until opentelemetry-instrumentation-sqlalchemy supports 2.1 (0.66b2: "< 2.1.0";
+    # on 2.1 it refuses to instrument and also needs greenlet): no SQL spans otherwise (#13)
+    "sqlalchemy (>=2.0.44,<2.1)",
     "alembic (>=1.13,<2.0)",
     "psycopg[binary] (>=3.2,<4.0)",
     # restoration studio: job queue + event bus
@@ -39,7 +41,7 @@ dependencies = [
     # source is pinned in [tool.poetry.dependencies] below; the Docker image
     # installs it from git first (see Dockerfile, PROTOCOL_REF).
     "evilflowers-protocol (>=0.2.0,<0.3.0)",
-    # GET /metrics (ledger gauges, studio/api/metrics.py)
+    # GET /metrics (ledger gauges, served by the orchestrator: studio/ledger_metrics.py)
     "prometheus-client (>=0.20,<1.0)",
     "mcp (>=1.20,<2)",
 ]
