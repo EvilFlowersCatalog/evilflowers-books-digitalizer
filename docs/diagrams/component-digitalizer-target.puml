@@ -8,7 +8,8 @@
 '       command with a Celery link/link_error callback to its own queue, reads
 '       the worker's outcome file, and sends the next stage. Publishing to the
 '       catalog is optional; the catalog's own pipeline runs after it.
-' Kind: UML component diagram, specification level, proposal. Scope: components,
+' Kind: UML component diagram, specification level; implemented in code (#4, #6, #14,
+'       #15), deployment pending (knowledge#66, #77). Scope: components,
 '       the contract between them and the shared services they reuse. Omitted:
 '       telemetry wiring (every component exports OTLP), config loading, CI.
 ' Source: this repo docs/design/studio-spec.md, studio/workers/stages/
@@ -20,40 +21,42 @@
 '         processing.py (2026-11-16); Celery 5.7 docs canvas/calling/routing/
 '         redis (link, link_error, chords need a backend, priorities);
 '         knowledge notes Extraction-Pipeline (2026-11-14), OCR-Service,
-'         Shared-Inference (2026-11-15), Books-Digitalizer (2026-11-08).
+'         Shared-Inference (2026-11-15), Books-Digitalizer (2026-11-08);
+'         studio/config.py DEFAULT_ROUTES, studio/workers/stages/{marks,title_page}.py,
+'         knowledge Cookbooks/Deploy-Decision-Models (2026-11-16, after #6).
 ' =============================================================================
 
-title Books digitalizer, target: portal + orchestrator here,\nstandalone tasks on the shared workers (proposal, 2026-11-16)
+title Books digitalizer: portal + orchestrator here,\nstandalone tasks on the shared workers (implemented in code, 2026-11-16)
 
 package "**this repo**: portal · orchestration · lab" as repo {
   component "**SPA** · React\nreview · page studio" as spa
   component "**Portal API**\nFastAPI · REST · SSE\nDZI tiles" as api
-  component "**Orchestrator** · Celery\njob ledger · job_done callbacks\nadmission pump · reconcile\ngate · publish" as orch <<proposed>> <<focus>>
+  component "**Orchestrator** · Celery\njob ledger · job_done callbacks\nadmission pump · reconcile\nleaf planning · marks · title page\ngate · publish" as orch <<focus>>
   component "**Lab** (not deployed)\nnotebooks · experiments" as lab
 }
 
 package "**Shared state** (dev)" as state {
-  component "**Redis** db 8\nbroker" as redis <<proposed>>
+  component "**Valkey** db 8\nbroker" as redis <<proposed>>
   component "**postgresql18**\nvia PgBouncer\ndb digitalizer" as pg <<proposed>>
   component "**Library storage**\nraw-scans ro\ndigitized rw (NFS)" as lib <<proposed>>
 }
 
 package "**Existing repos**: + standalone task, same core" as existing {
-  component "**ocr-service**\n…standalone.hocr\nengines.py" as ocr <<proposed>>
-  component "**analyzer-service**\n…standalone.layout\nlayout.py (Docling)" as analyzer <<proposed>>
-  component "**equation-service**\n…standalone.formulas\nlatex.py + paddleocr-vl" as equation <<proposed>>
+  component "**ocr-service**\n…standalone.hocr\nengines.py" as ocr
+  component "**analyzer-service**\n…standalone.layout\nlayout.py (Docling)" as analyzer
+  component "**equation-service**\n…standalone.formulas\nlatex.py + paddleocr-vl" as equation
   component "**image-service**\n…standalone.figures\nfigures.py · captions.py" as image <<proposed>>
 }
 
 package "**New repos**" as fresh {
-  component "**scan-service**\nevilflowers_scan.clean\nScanTailor · DocRes" as scan <<proposed>>
-  component "**render-service**\nevilflowers_render.book\nMRC · PDF/A-2b · EPUB" as render <<proposed>>
+  component "**scan-service**\nevilflowers_scan.clean\nScanTailor · DocRes" as scan
+  component "**render-service**\nevilflowers_render.book\nMRC · PDF/A-2b · EPUB" as render
 }
 
 package "**Shared inference + catalog**" as infer {
-  component "**vlm**\nPaddleOCR-VL\nPOST /v1/formulas" as vlm <<proposed>>
+  component "**vlm**\nPaddleOCR-VL\nPOST /v1/formulas" as vlm
   component "**Ollama**\nelvira-assistant\nvision · /api/chat" as ollama
-  component "**Laya**\ndecision model\n(announced)" as laya <<proposed>>
+  component "**decider** (Laya) ·\n**decider-vision** (Strands)\nPOST /v1/systemone" as laya
   component "**EvilFlowers catalog**\n(dev) REST /api/v1\n+ its own pipeline" as catalog
 }
 
@@ -90,7 +93,7 @@ render -[hidden]right- kit
 equation --> vlm : HTTP crops
 image --> laya : uncertain\nregions
 image --> ollama : captions
-orch --> ollama : title page\n→ metadata
+orch --> laya : scan_mark per group (#14)\ntitle page fields (#15)
 orch --> catalog : optional: POST entry\n+ PDF, EPUB
 
 $legend_live_proposed()

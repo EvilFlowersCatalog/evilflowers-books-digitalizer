@@ -17,8 +17,9 @@ from evilflowers_books_digitalizer.studio.domain import (
     RunKind,
     RunStatus,
 )
-from evilflowers_books_digitalizer.studio.ports import CleanedPage, FormulaJob, LeafPlan
+from evilflowers_books_digitalizer.studio.ports import CleanedPage, LeafPlan
 from evilflowers_books_digitalizer.studio.testing import fakes
+from evilflowers_books_digitalizer.studio.testing.engines import FormulaJob
 from evilflowers_books_digitalizer.studio.workers import tasks
 from evilflowers_books_digitalizer.studio.workers.stages.clean import MOVED_REASON
 
@@ -76,7 +77,7 @@ def test_formulas_keep_a_region_the_operator_decided_meanwhile(tmp_path: Path) -
             s.commit()
             return super().recognize(jobs)
 
-    studio.adapters.formulas = Slow(default=None)          # no answer: would wipe the text
+    studio.engines.formulas = Slow(default=None)           # no answer: would wipe the text
     tasks.discover.delay(PROJECT)
     studio.execute(RunKind.FULL)
     formulas = studio.session().query(Region).filter_by(kind="formula").all()
@@ -106,7 +107,7 @@ class ShrinkingCleaner(fakes.FakePageCleaner):
 
 def test_rerun_that_changes_geometry_disputes_operator_regions(tmp_path: Path) -> None:
     studio = make_studio(tmp_path)
-    studio.adapters.cleaner = ShrinkingCleaner(dpi=300)
+    studio.engines.cleaner = ShrinkingCleaner(dpi=300)     # scan-service honours the crop
     tasks.discover.delay(PROJECT)
     studio.execute(RunKind.FULL)
     s = studio.session()

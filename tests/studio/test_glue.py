@@ -16,11 +16,8 @@ def test_fakes_satisfy_ports(tmp_path):
     pairs = [
         (fakes.FakeScanStore(), ports.ScanStore),
         (fakes.FakeArtifactStore(tmp_path), ports.ArtifactStore),
-        (fakes.FakePageCleaner(), ports.PageCleaner),
-        (fakes.FakeOcr(), ports.OcrEngine),
-        (fakes.FakeLayout(), ports.LayoutDetector),
-        (fakes.FakeFormulaRecognizer(), ports.FormulaRecognizer),
-        (fakes.FakeRenderer(tmp_path), ports.Renderer),
+        (fakes.FakePageCleaner(), ports.LeafPlanner),
+        (fakes.FakeDecider(), ports.Decider),
         (fakes.FakePublisher(), ports.CatalogPublisher),
         (fakes.FakeMetadataProvider(), ports.MetadataProvider),
         (InMemoryEventBus(), ports.EventBus),
@@ -28,6 +25,13 @@ def test_fakes_satisfy_ports(tmp_path):
     ]
     for impl, port in pairs:
         assert isinstance(impl, port), (type(impl).__name__, port.__name__)
+
+
+def test_the_orchestrator_has_no_engine_ports():
+    """OCR, layout, formulas, rendering and cleaning are the services' (#6)."""
+    for gone in ("PageCleaner", "OcrEngine", "LayoutDetector", "FormulaRecognizer", "Renderer",
+                 "ImageOps", "RenderRequest", "FormulaJob", "OcrPage"):
+        assert not hasattr(ports, gone), gone
 
 
 def test_fake_cleaner_plans_then_cleans(tmp_path):

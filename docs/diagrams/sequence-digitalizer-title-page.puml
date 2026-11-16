@@ -1,0 +1,46 @@
+@startuml sequence-digitalizer-title-page
+!include elvira.iuml
+' =============================================================================
+' What: title, authors, publisher and year prefilled from the title page
+'       (evilflowers-books-digitalizer#15): after analyze, the orchestrator ranks
+'       hOCR line candidates of the first and last leaves and asks the text decider
+'       one choice per field; the operator confirms in the SPA, which alone writes
+'       the item metadata and records a labelled case (#7).
+' Kind: UML sequence diagram, one scenario (a full run, then the operator).
+'       Omitted: SSE, telemetry, the IA export.
+' Source: this repo studio/title_page.py, studio/workers/stages/title_page.py,
+'         studio/application/title_page.py, studio/api/routes.py (2026-11-16);
+'         knowledge Cookbooks/Deploy-Decision-Models (decider contract, model
+'         multilingual); knowledge#77 (DECIDER_URL, written, not applied).
+' =============================================================================
+
+title Title page: suggestions from OCR lines, confirmed by the operator (implemented, 2026-11-16)
+
+actor "Operator" as op
+participant "SPA\nbook screen" as spa
+participant "Portal API" as api
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+database "postgresql18\ndb digitalizer" as pg
+collections "Shared storage\n{storage_root}" as fs
+participant "decider (Laya)\n(namespace shared)" as dec <<proposed>>
+
+orch -> pg : last analyze job applied -> plan analyze/title_page (local)
+group analyze/title_page (digitalizer.local.title_page)
+  orch -> fs : hOCR of the first 4 and last 2 leaves
+  orch -> orch : lines with size and position; rank per field
+  loop title, authors, publisher, year
+    orch -[$accent_msg()]> dec : <b>POST /v1/systemone choice</b>\n<b>criteria: top 12 line ids + none · state: the lines</b>
+    dec --> orch : choice, p, model
+  end
+  orch -> pg : books.metadata_suggestions (never item_metadata)
+end
+op -> spa : open the book
+spa -> api : GET /books/{id}/title-page
+api -> pg : suggestions with p
+op -> spa : edit, Confirm
+spa -> api : POST /books/{id}/title-page/confirm
+api -> pg : item_metadata (validated) + metadata_confirmed\n(accepted / changed / none per field)
+
+caption Fail soft: without DECIDER_URL, or when a call fails, nothing is suggested and the run goes on.\nEvery confirmed form is a title_page case in labelling mode's JSONL export (evilflowers-books-digitalizer#7).
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-title-page.puml
+@enduml

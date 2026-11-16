@@ -1,19 +1,37 @@
 # Restoration Studio — implementation contract
 
-> **Partly superseded (2026-11-16).** Execution, deployment and queues are now described
-> in [target-architecture.md](target-architecture.md) and `docs/diagrams/`:
+> **Status (2026-11-17): partly superseded.** The data model, the IA compatibility rules, the REST
+> API and the SPA still apply. The execution model changed with the move to service workers
+> (evilflowers-books-digitalizer#6), described in [target-architecture.md](target-architecture.md)
+> and [architecture.md](../architecture.md).
 >
-> * a job ledger replaces the Celery canvas, `heartbeat_at` / `dispatched_at` and `recover_runs`;
-> * the queues are named `digitalizer.*`;
-> * the Deployments are `portal` and `orchestrator`;
-> * publication is optional.
+> **Still valid:** *Internet Archive compatibility*, *REST API* (updated below), *SPA*, the
+> DTO shapes.
 >
-> The data model, the IA compatibility rules, the API and the SPA sections still apply.
+> **Superseded:**
+>
+> * *Rules for every implementer* and *Package layout and ownership*: the build-time rules of the
+>   first implementation. They name modules that are deleted (`reflow/`, `pipeline/steps/*`,
+>   `catalog/publisher.py`, `imaging.py`, the `studio/adapters/{ocr,layout,formula,render}` adapters,
+>   DocLayout-YOLO, the VLM sidecar, `db.Recorder`).
+> * *Queues and tasks (Celery)*: the queues `interactive`, `cpu`, `ai`, `io`, the `studio.*` tasks,
+>   `studio.recover_runs` and the liveness columns. A job ledger replaces the Celery canvas,
+>   `heartbeat_at` / `dispatched_at` and `recover_runs`; there is one queue, `digitalizer.portal`; every
+>   stage runs on a service. The current tasks are in the replacement table in that section.
+> * *Detectors and formulas* (adapter names `heuristic`, `doclayout`, `paddleocr-vl`,
+>   `paddleocr-vl-http`, `layout_detectors`, `formula_recognizer`): gone; the services choose their
+>   engines and the config keys are rejected.
+> * *Testing the whole system locally*: use [deploy/dev/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/dev/README.md).
+> * Publication is optional (`[publish] target = "none"` ends a book in `approved`).
+>
+> **Added since:** scan-mark groups (#14), the title-page prefill (#15), the scheduler endpoints,
+> and the labelling tasks `scan_mark` and `title_page` (#7); see the REST table and
+> [studio.md](../studio.md).
 
-The single source of truth for everyone implementing the studio. Diagrams:
-`docs/design/*.puml` (component, deployment, two sequences).
+The contract for the data model, the API and the IA rules. Diagrams: `docs/diagrams/`
+(the old `docs/design/*.puml` files are deleted).
 
-**Rules for every implementer**
+**Rules for every implementer** (historical: the build-time rules of the first implementation)
 
 - **Own only your directory** (table below). If you need a change in a shared contract file
   (`studio/domain.py`, `studio/ports.py`, `studio/events.py`, `studio/metadata.py`,
@@ -44,7 +62,10 @@ The single source of truth for everyone implementing the studio. Diagrams:
     (a synthetic TIFF tree `fei/E2E_FYZIKA_VEKTORY/scan_000N.tif`);
   - `output/` (legacy produced books).
 
-## Package layout and ownership
+## Package layout and ownership (historical)
+
+> The adapters `ocr`, `layout`, `formula`, `render` and `imaging/scantailor` listed below are
+> deleted (#6). The current layout is in [architecture.md](../architecture.md#parts).
 
 The split is by *side*: interactive and batch both code against ports, DB models and
 events. Their only touchpoint is the `runs` row (the API creates it and enqueues
@@ -126,7 +147,7 @@ The DB column is `books.item_metadata`.
 | `images` | `<id>_jp2.zip`, holding `<id>_jp2/<id>_%04d.jp2` (cleaned pages, all leaves) | original |
 | `hocr` | `<id>_hocr.html` (one `ocr_page` per leaf with `id="page_%06d"`; excluded leaves are empty pages) | derivative |
 | `page_numbers` | `<id>_page_numbers.json` (format-version "2", access leaves only) | derivative |
-| `pdf` | `<id>.pdf` (distribution, JPEG MRC; recode_pdf with `--scandata`) | derivative |
+| `pdf` | `<id>.pdf` (distribution, JPEG MRC; made by render-service, recode_pdf with `--scandata`) | derivative |
 | `pdfa` | `<id>_archival.pdf` (PDF/A-2b JP2 master) | derivative |
 | `epub` | `<id>.epub` (reflow edition) | derivative |
 | `text` | `<id>_djvu.txt` (plain text, IA's name) | derivative |
@@ -140,13 +161,50 @@ The IA adapter (`studio/adapters/ia/`) writes and reads `_meta.xml`, `_scandata.
   plain data, so the API path needs no database access in the adapter
   (`adapters.ia.build_ia_exporter(config)` returns `IaItemExporter`). Without an `images`
   file it builds `<id>_jp2.zip` from `leaf_images` when every leaf has one.
-- `studio.render` ends by writing the four IA documents from the rows
+- The render stage (the orchestrator's half, after `evilflowers_render.book`) ends by writing
+  the four IA documents from the rows
   (`IaItemExporter(store).write_item(book, pages)`), so the output tree is a complete IA
   item after every render; `_files.xml` is written last and lists every file. Upload helpers may
 emit `ia upload`-compatible metadata (`x-archive-meta-*` with `mediatype=texts`, and
 `x-archive-queue-derive:0` when we upload our own derivatives).
 
 ## Queues and tasks (Celery)
+
+> **Superseded (#6).** The tasks below are the current ones. The text after them (the
+> `interactive` / `cpu` / `ai` / `io` queues, the `studio.*` tasks, liveness, detectors) is the
+> first design, kept for history. One queue, `digitalizer.portal`, is consumed by the
+> orchestrator (`studio/workers/app.py`); the jobs are in the `jobs` table
+> ([architecture.md](../architecture.md#the-job-ledger)).
+
+Orchestrator tasks (queue `digitalizer.portal`; the app is
+`evilflowers_books_digitalizer.studio.workers.app:celery`):
+
+| Task | Effect |
+|---|---|
+| `digitalizer.run` | start a queued run: plan its first stage, then pump |
+| `digitalizer.pump` (beat, 15 s) | admit planned jobs within capacity and send them |
+| `digitalizer.job_done`, `digitalizer.job_failed` | the `link` and `link_error` callbacks of a service job |
+| `digitalizer.reconcile` (beat, 60 s) | settle lost outcomes, dead workers and jobs past their deadline |
+| `digitalizer.discover` | scan store to books (status `discovered`) |
+| `digitalizer.export_training` | confirmed regions to COCO / DocLayNet JSON and crops |
+| `digitalizer.local.clean_marks` | `clean/marks`: book-wide scan-mark groups (#14) |
+| `digitalizer.local.title_page` | `analyze/title_page`: metadata suggestions (#15) |
+| `digitalizer.local.render_prepare` | `render/prepare`: metadata lookup, text files, the render request |
+| `digitalizer.local.gate` | quality gate |
+| `digitalizer.local.publish` | catalog publication |
+
+Service tasks (defaults of `DEFAULT_ROUTES`; the services' own queues):
+
+| Stage | Task | Queue |
+|---|---|---|
+| clean | `evilflowers_scan.clean` | `evilflowers_scan.standalone[.interactive]` |
+| analyze | `evilflowers_ocr_worker.standalone.hocr` | `evilflowers_ocr_worker.standalone[.interactive]` |
+| analyze | `evilflowers_analyzer.standalone.layout` | `evilflowers_analyzer.standalone[.interactive]` |
+| analyze (confirmed `remove` boxes) | `evilflowers_scan.erase` | `evilflowers_scan.standalone[.interactive]` |
+| formulas | `evilflowers_equation.standalone.formulas` | `evilflowers_equation.standalone[.interactive]` |
+| render | `evilflowers_render.book` | `evilflowers_render.standalone` |
+
+### Historical: the first design
 
 The app is `evilflowers_books_digitalizer.studio.workers.app:celery`, with Redis as both
 broker and result backend.
@@ -222,11 +280,17 @@ region edits.
 | `GET /healthz` (no prefix) | | `{status: "ok"}`; no database or broker round trip (probes) |
 | `GET /projects` | | `[ProjectOut]`: slug, name, auto_publish, outputs, `collections {key: name}`, `collection_counts {key: {status: n}}`, `counts {status: n}` |
 | `GET /projects/{p}/config` | | `ProjectConfigOut`: the read-only preset (no secrets, only the API key's env var name) |
-| `POST /projects/{p}/imports` | `{collection?}` | `202 {task_id}` (enqueues `studio.discover`) |
+| `POST /projects/{p}/imports` | `{collection?}` | `202 {task_id}` (enqueues `digitalizer.discover`) |
 | `GET /books` | `project, collection?, status?, q?, flagged?, limit, offset, sort` | `{items: [BookOut], total}` |
 | `GET /books/{id}` | | `BookDetail`: book, item metadata, quality report, latest runs, publication, artifacts with exists flags, every path |
 | `PATCH /books/{id}/metadata` | partial `ItemMetadata` | `ItemMetadata` (validated) |
-| `POST /books/{id}/runs` | `{kind: full\|rerun\|render\|publish, pages?: [int], interactive?: bool}` | `202 RunOut` |
+| `GET /books/{id}/title-page` | | `TitlePageOut`: `suggestions [{field, metadata_field, value, p, line, leaf}]` (fields `title`, `authors`, `publisher`, `year`), `decider_model`, `suggested_at`, `confirmed` (the comparison, or null). Never imported until confirmed (#15) |
+| `POST /books/{id}/title-page/confirm` | `{title?, authors?, publisher?, year?}`, `X-Operator` | `TitlePageOut`. Writes the final values to the item metadata (`title`, `creator`, `publisher`, `date`) and stores per field `accepted` / `changed` / `none` in `books.metadata_confirmed`; 400 when there are no suggestions |
+| `GET /books/{id}/mark-groups` | | `[MarkGroupOut]`: id, category, band (`keep` / `review` / `hide`), decision, p, source (`signals` / `rule` / `decider` / `operator`), decider_model, leaves, members, crop_leaf, crop_bbox, `on_leaves`, `image_url`, `split_from`. Largest first (#14) |
+| `PATCH /mark-groups/{id}` | `{band: keep\|review\|hide}`, `X-Operator` | `MarkGroupOut`. Sets source `operator`; the members' marks change at once, their regions at the next analyze of those leaves |
+| `POST /mark-groups/{id}/split` | `{leaves: [int]}` (at least one), `X-Operator` | `201 MarkGroupOut` (the new group, verdict `review`, `split_from` = the old one); 400 when no occurrence is on those leaves or none would stay |
+| `GET /mark-groups/{id}/image` | | PNG crop of the group's clearest occurrence (max side 640) |
+| `POST /books/{id}/runs` | `{kind: full\|rerun\|render\|publish, pages?: [int], interactive?: bool}` | `202 RunOut` (creates the run and enqueues `digitalizer.run`) |
 | `GET /runs/{id}` | | `RunOut` (status, stage, done/total, log tail) |
 | `POST /runs/{id}/cancel` | | `RunOut` |
 | `GET /books/{id}/pages` | | `[PageOut]` (index/leaf, page type, side, printed number, status, version, dims, thumbs) |
@@ -242,13 +306,16 @@ region edits.
 | `GET /pages/{id}/dzi` (alias `dzi.xml`) / `GET /pages/{id}/dzi_files/{level}/{col}_{row}.{ext}` | `layer=clean\|original\|spread`, `v` | Deep Zoom (OpenSeadragon). Clients open `dzi.xml?v=…`: only with an extension does OSD keep the query string for tile URLs |
 | `GET /books/{id}/files/{kind}` | | the artifact (`pdf`, `pdfa`, `epub`, `meta_xml`, `scandata_xml`, …) |
 | `GET /books/{id}/export/ia` | | a zip in IA item layout (meta.xml, scandata.xml, page_numbers.json, hocr, page images) |
-| `GET /labelling/tasks` | | `[TaskOut]`: name, title, label keys + hints, target, items, labelled, skipped, double, mine (#7) |
-| `POST /labelling/tasks/{task}/samples` | `n` (1–2000) | `202`: samples up to `n` new items from the catalog in the background |
+| `GET /scheduler` | | `SchedulerOut`: `mode` (`normal`, `peak`, `contended`, `paused`), `reason`, `lanes` and `queues` (max jobs in flight), `held_stages`, `peak_hours`, `timezone`, `jobs` (open jobs by status and lane) |
+| `POST /scheduler/pause` | optional `{reason?}`, `X-Operator` | `SchedulerOut`: holds bulk jobs (Redis key `digitalizer:scheduler:paused`); interactive jobs are never held |
+| `POST /scheduler/resume` | | `SchedulerOut` |
+| `GET /labelling/tasks` | | `[TaskOut]`: name, title, label keys + hints, target, items, labelled, skipped, double, mine (#7). Tasks: `figure_kind`, `is_data_table`, `table_quality`, `section_relation`, `subject`, `scan_mark` (item kind `mark_group`, from the studio DB), `title_page` (item kind `book`, `by_hand = false`: progress and export only) |
+| `POST /labelling/tasks/{task}/samples` | query `n` (1–2000, default 100) | `202 {task, n, status}`: samples up to `n` new items in the background, from the catalog or, for `scan_mark`, from the studio DB. 503 when `[labelling]` is not configured (catalog tasks only; `scan_mark` needs none). `title_page` is not sampled: its cases come from confirmed forms |
 | `GET /labelling/tasks/{task}/next` | `X-Operator` required | `LabelItemOut \| null`: payload only, never the model's answer (band, p, decision, relation) |
 | `GET /labelling/items/{id}` | | `LabelItemOut` |
 | `POST /labelling/items/{id}/labels` | `{labels: [{task, value}]}`, `X-Operator` required | `LabelItemOut`; one answer per (item, task, labeller), `skip` allowed |
-| `GET /labelling/items/{id}/image` | | the region crop, proxied from the catalog (the key stays on the server) |
-| `GET /labelling/tasks/{task}/export` | | JSONL, one line per non-skip label |
+| `GET /labelling/items/{id}/image` | | the crop: proxied from the catalog (the key stays on the server), or cut from the cleaned page for a mark group |
+| `GET /labelling/tasks/{task}/export` | | JSONL, one line per non-skip label; for `title_page`, one line per field of each confirmed form |
 | `GET /labelling/tasks/{task}/summary` | | counts per label / language / labeller / via, agreement, Cohen's κ, sampling note |
 | `POST /mcp` (no prefix) | MCP streamable HTTP (JSON-RPC) | labelling tools: `list_label_tasks`, `next_label_item` (text + crop image), `submit_label`, `sample_label_items`, `label_summary`, `export_labels`; also `studio mcp` over stdio |
 
@@ -283,7 +350,9 @@ keep it light.
    bulk actions (queue run, approve).
 3. **Book.** Metadata form (`ItemMetadata`, IA field names, OPAC lookup button); quality
    flags; runs with a live log; a pages grid (page type badges, disputed markers);
-   review/approve; publication history; and downloads.
+   review/approve; publication history; and downloads. Added since: a **Scan marks** panel
+   (keep / hide / split a book-wide mark group, #14) and a **Title page** panel (the suggested
+   title, authors, publisher and year, confirmed by the operator, #15).
 4. **Page studio** (the core).
    - **Viewer.** OpenSeadragon deep zoom with layers (original frame half, whole spread,
      cleaned page, PDF render), side-by-side or swipe compare, and synced viewports.
@@ -297,7 +366,7 @@ keep it light.
      previews crop, deskew and threshold instantly before a re-run.
    - **Text & math.** The OCR text per region is editable. Formula LaTeX is edited with a
      live KaTeX/MathML preview.
-   - **Re-run page** (interactive queue). The tile swaps when `page.updated` arrives.
+   - **Re-run page** (interactive lane). The tile swaps when `page.updated` arrives.
 5. **Review queue.** Flagged books sorted by score, keyboard-driven (`j/k`, `a` approve,
    `o` open).
 6. **Settings.** Operator name (local), project presets (read-only view of the config).
@@ -310,7 +379,11 @@ polling, except as a fallback when SSE is down.
 1. Start the dev stack.
 2. Run the API:
    `uvicorn evilflowers_books_digitalizer.studio.api.app:create_app --factory`.
-3. Run the workers: `celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q interactive,cpu,ai,io`.
+3. Run the orchestrator:
+   `celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.portal --beat`
+   (or `evilflowers-digitalizer studio worker -- -B`), and the service workers you need from
+   their repositories, on the same Redis. See
+   [deploy/dev/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/dev/README.md).
 4. Serve the SPA with `pnpm dev`, which proxies `/api` to the API.
-5. Config: `configs/studio.dev.toml`, with project `stu-local` pointing at the synthetic scan
-   tree.
+5. Config: `configs/studio.dev.toml`, with project `stu-local`; its scans must be under the
+   storage root (`.data`).

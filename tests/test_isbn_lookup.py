@@ -1,11 +1,10 @@
-"""ISBN validation, provider parsing (network mocked), caching, draft enrichment."""
+"""ISBN validation, provider parsing (network mocked), caching."""
 
 from __future__ import annotations
 
 import json
 
 from evilflowers_books_digitalizer.metadata import isbn_lookup as il
-from evilflowers_books_digitalizer.metadata.draft import HEADERS, DraftBook, build_draft_rows
 
 
 def test_is_valid_isbn():
@@ -161,34 +160,3 @@ def test_stu_opac_year_falls_back_to_imprint(monkeypatch):
     assert out["year"] == 1992  # not None from the 2-digit pubDate
     assert out["publisher"] == "Alfa"
     assert out["place"] == "Bratislava"
-
-
-class _FakeEnricher:
-    def lookup(self, isbn):
-        return {
-            "title": "Rethinking Architecture",
-            "authors": ["Neil Leach"],
-            "year": 1997,
-            "publisher": "Routledge",
-            "_source": "Open Library",
-        }
-
-
-def test_build_rows_with_enricher_fills_and_marks_source():
-    rows = build_draft_rows(
-        [DraftBook("fad", "CVI_OPACID_FA_0415128269", "FAD")], enricher=_FakeEnricher()
-    )
-    row = rows[0]
-    assert row[HEADERS["title"]] == "Rethinking Architecture"
-    assert row[HEADERS["authors"]] == "Neil Leach"
-    assert row[HEADERS["year"]] == 1997
-    assert row[HEADERS["source_meta"]] == "Open Library"
-
-
-def test_build_rows_slug_dir_not_enriched():
-    rows = build_draft_rows(
-        [DraftBook("svf", "CVI_OPACID_SVF_Betonove_konstrukcie", "SVF")], enricher=_FakeEnricher()
-    )
-    # no ISBN in the dir -> enricher not called -> source stays empty, title is the guess
-    assert rows[0][HEADERS["source_meta"]] == ""
-    assert rows[0][HEADERS["title"]] == "Betonove Konstrukcie"

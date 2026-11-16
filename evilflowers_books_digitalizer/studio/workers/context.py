@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from evilflowers_books_digitalizer.studio.config import ProjectConfig, StudioConfig
 from evilflowers_books_digitalizer.studio.events import Event, EventType
 from evilflowers_books_digitalizer.studio.orchestration.scheduling import Admission
-from evilflowers_books_digitalizer.studio.ports import EventBus
+from evilflowers_books_digitalizer.studio.ports import Decider, EventBus
 from evilflowers_books_digitalizer.studio.adapters.registry import Adapters, build_adapters
 
 type AdaptersFactory = Callable[[StudioConfig, ProjectConfig], Adapters]
@@ -48,10 +48,24 @@ class WorkerContext:
     _adapters: dict[str, Adapters] = field(default_factory=dict)
     #: admission policy (scheduling); in-memory pause switch and no backpressure unless wired
     admission: Admission | None = None
+    #: ``"text"`` / ``"vision"`` -> the decision service; built from ``[decider]`` unless given
+    #: (tests install fakes). A missing one switches its use off (#14, #15).
+    deciders: dict[str, Decider | None] | None = None
 
     def __post_init__(self) -> None:
         if self.admission is None:
             self.admission = Admission(self.config.scheduling)
+
+    def decider(self, kind: str) -> Decider | None:
+        """The text (``decider``, Laya) or ``vision`` (``decider-vision``) service, or None."""
+        if self.deciders is None:
+            from evilflowers_books_digitalizer.studio.adapters.decider import HttpDecider
+
+            d = self.config.decider
+            self.deciders = {
+                "text": HttpDecider(d.url, timeout=d.timeout, model=d.model) if d.url else None,
+                "vision": HttpDecider(d.vision_url, timeout=d.timeout) if d.vision_url else None}
+        return self.deciders.get(kind)
 
     def project(self, slug: str) -> ProjectConfig:
         return self.config.project(slug)
@@ -63,7 +77,7 @@ class WorkerContext:
         return self._adapters[slug]
 
     def work_dir(self, project: str, item_id: str) -> Path:
-        """Scratch for one book: cleaned TIFFs, per-leaf hOCR, VLM cache (not an artifact)."""
+        """Scratch for one book (not an artifact)."""
         return self.config.cache_dir / project / item_id
 
     @contextmanager

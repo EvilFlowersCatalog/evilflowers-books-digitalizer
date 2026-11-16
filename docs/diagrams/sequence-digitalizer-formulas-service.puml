@@ -4,7 +4,7 @@
 ' What: the formulas stage on equation-service: the ledger plans jobs only for
 '       leaf batches that have regions to re-read (formulas, tables), sends
 '       their crops as fractions of the cleaned page, and applies the answers
-'       through the same guards as the in-process stage (fix_latex,
+'       through the orchestrator's own guards (fix_latex,
 '       looks_hallucinated), so the quality gate counts rejections the same
 '       way; a region an operator decided meanwhile keeps the operator's text.
 ' Kind: UML sequence diagram, one batch, as implemented on the orchestrator
@@ -37,6 +37,6 @@ orch -> fs : read formulas.json (only the keys it asked)
 orch -> orch : per region still open: judge (fix_latex,\nlooks_hallucinated) -> text or reason;\nan operator's decision is left alone
 orch -> fs : after commit: delete the attempt dir
 
-caption The recognizer only answers; the orchestrator judges, so an in-process and a service run give the same regions and the same gate verdict.
+caption The recognizer only answers; the orchestrator judges, so the gate counts every answer the same way. A row the service marks\ndisputed (its render check or cross-check) keeps its text and becomes a disputed region (#6).
 footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-formulas-service.puml
 @enduml

@@ -175,8 +175,8 @@ export interface ProjectConfigOut {
   item_id?: string;
   language?: string;
   ocr_language?: string;
-  layout_detectors?: string[];
-  formula_recognizer?: string;
+  /** stage -> the service task(s) that run it, comma-separated (#6) */
+  services?: Record<string, string>;
   outputs?: string[];
   auto_publish?: string;
   quality?: Record<string, number>;
@@ -443,6 +443,77 @@ export interface TaskAccepted {
 }
 
 export type ImageLayer = "original" | "spread" | "clean" | "pdf";
+
+// ------------------------------------------------------------------ title page (#15)
+export const TITLE_FIELDS = ["title", "authors", "publisher", "year"] as const;
+export type TitleField = (typeof TITLE_FIELDS)[number];
+export type TitleOutcome = "accepted" | "changed" | "none";
+
+/** What the decider picked from the title page's OCR lines for one field. */
+export interface TitleSuggestion {
+  field: TitleField;
+  /** the ItemMetadata field it fills: title | creator | publisher | date */
+  metadata_field: string;
+  value: string | string[] | null;
+  p: number | null;
+  line: string | null;
+  leaf: number | null;
+}
+
+export interface TitleConfirmedField {
+  suggested: string | string[] | null;
+  line: string | null;
+  leaf: number | null;
+  p: number | null;
+  final: string | string[] | null;
+  outcome: TitleOutcome;
+}
+
+export interface TitleConfirmed {
+  fields: Partial<Record<TitleField, TitleConfirmedField>>;
+  labeller: string | null;
+  at: string;
+  decider_model: string | null;
+}
+
+export interface TitlePageOut {
+  suggestions: TitleSuggestion[];
+  decider_model: string | null;
+  suggested_at: string | null;
+  confirmed: TitleConfirmed | null;
+}
+
+/** `POST /books/{id}/title-page/confirm`: the operator's final values; null = the page does not say it. */
+export interface TitleConfirmIn {
+  title?: string | null;
+  authors?: string[] | null;
+  publisher?: string | null;
+  year?: string | null;
+}
+
+// ------------------------------------------------------------------ scan-mark groups (#14)
+export type MarkBand = "keep" | "review" | "hide";
+export type MarkSource = "signals" | "rule" | "decider" | "operator";
+
+export interface MarkGroupOut {
+  id: number;
+  category: string;
+  band: MarkBand;
+  decision: string | null;
+  p: number | null;
+  source: MarkSource;
+  decider_model: string | null;
+  /** leaves the mark occurs on */
+  leaves: number;
+  /** occurrences in all */
+  members: number;
+  crop_leaf: number | null;
+  crop_bbox: number[] | null;
+  /** leaf indexes (not page ids) */
+  on_leaves: number[];
+  image_url: string;
+  split_from: number | null;
+}
 
 // ------------------------------------------------------------------ events (events.py)
 export const EVENT_TYPES = [

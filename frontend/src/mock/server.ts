@@ -12,6 +12,7 @@ import type {
   ItemMetadata,
   LabelAnswer,
   LabelTaskName,
+  MarkGroupOut,
   NoteCreate,
   PageDetail,
   PagePatch,
@@ -21,11 +22,17 @@ import type {
   ReviewCreate,
   RunCreate,
   RunOut,
+  TitleConfirmed,
+  TitleConfirmIn,
+  TitleField,
+  TitlePageOut,
 } from "../api/types";
+import { TITLE_FIELDS } from "../api/types";
 import { defaultAction } from "../lib/regions";
+import { titleOutcome } from "../lib/titlePage";
 import { MockBus } from "./bus";
-import { MockLabelling } from "./labelling";
-import { FRAME_H, FRAME_W, PROJECT, createDb, type MockBook, type MockDb, type MockPage } from "./fixtures";
+import { CROP, FORM_TASKS, MockLabelling } from "./labelling";
+import { FRAME_H, FRAME_W, PROJECT, createDb, type MockBook, type MockDb, type MockMarkGroup, type MockPage } from "./fixtures";
 
 class HttpError extends Error {
   constructor(
@@ -275,8 +282,12 @@ export class MockServer {
       item_id: "stu-{collection}-{book}",
       language: "slk",
       ocr_language: "slk+eng",
-      layout_detectors: ["heuristic"],
-      formula_recognizer: "paddleocr-vl",
+      services: {
+        clean: "evilflowers_scan.clean",
+        analyze: "evilflowers_ocr_worker.standalone.hocr, evilflowers_analyzer.standalone.layout, evilflowers_scan.erase",
+        formulas: "evilflowers_equation.standalone.formulas",
+        render: "evilflowers_render.book",
+      },
       outputs: ["pdf", "pdfa", "epub"],
       auto_publish: "gate",
       quality: { min_ocr_conf: 80, max_disputed: 0, max_formula_fallback_ratio: 0.25, max_vlm_rejected: 2 },
@@ -304,6 +315,32 @@ export class MockServer {
       const b = this.book(n(id));
       return { title: b.title ?? "", publisher: "Bratislava : Alfa", date: "1983", oclc_id: ["39921187"], language: ["slo"], subject: ["fyzika", "vektorová analýza"] };
     });
+    // title page (#15)
+    this.on("GET", "/books/:id/title-page", ([id]) => this.titlePage(this.book(n(id))));
+    this.on("POST", "/books/:id/title-page/confirm", ([id], body, _q, op) =>
+      this.confirmTitlePage(this.book(n(id)), (body ?? {}) as Record<string, unknown>, op));
+    // scan-mark groups (#14)
+    this.on("GET", "/books/:id/mark-groups", ([id]) => {
+      const b = this.book(n(id));
+      return this.db.markGroups
+        .filter((g) => g.book_id === b.id)
+        .map((g) => this.markOut(g))
+        .sort((a, c) => c.leaves - a.leaves || a.id - c.id);
+    });
+    this.on("PATCH", "/mark-groups/:id", ([id], body, _q, op) => {
+      const g = this.markGroup(n(id));
+      const band = (body as { band?: string } | undefined)?.band;
+      if (band !== "keep" && band !== "review" && band !== "hide") throw new HttpError(422, "band must be keep, review or hide");
+      Object.assign(g, {
+        band,
+        source: "operator",
+        decision: ({ keep: "content", hide: g.category } as Record<string, string>)[band] ?? null,
+        p: null,
+        decider_model: `operator:${op || "?"}`,
+      });
+      return this.markOut(g);
+    });
+    this.on("POST", "/mark-groups/:id/split", ([id], body, _q, op) => this.splitMarkGroup(this.markGroup(n(id)), (body as { leaves?: number[] } | undefined)?.leaves ?? [], op));
     this.on("POST", "/books/:id/runs", ([id], body, _q, op) => this.createRun(this.book(n(id)), body as RunCreate, op));
     this.on("GET", "/runs/:id", ([id]) => this.run(n(id)));
     this.on("POST", "/runs/:id/cancel", ([id]) => {
@@ -384,14 +421,96 @@ export class MockServer {
 
     // labelling (#7)
     this.on("GET", "/labelling/tasks", (_p, _b, _q, op) => this.labelling.tasks(op));
-    this.on("GET", "/labelling/tasks/:t/next", ([t], _b, _q, op) => this.labelling.next(t as LabelTaskName, op));
+    this.on("GET", "/labelling/tasks/:t/next", ([t], _b, _q, op) => this.labelling.next(this.handTask(t), op));
     this.on("GET", "/labelling/tasks/:t/summary", ([t]) => this.labelling.summary(t as LabelTaskName));
-    this.on("POST", "/labelling/tasks/:t/samples", ([t], _b, q) => ({ task: t, n: n(q.get("n") ?? 100), status: "sampling" }));
+    this.on("POST", "/labelling/tasks/:t/samples", ([t], _b, q) => ({ task: this.handTask(t), n: n(q.get("n") ?? 100), status: "sampling" }));
     this.on("POST", "/labelling/items/:id/labels", ([id], body, _q, op) =>
       this.labelling.label(n(id), (body as { labels: LabelAnswer[] }).labels, op));
   }
 
-  private readonly labelling = new MockLabelling();
+  private readonly labelling = new MockLabelling(() => {
+    const confirmed = Object.values(this.db.titlePages).filter((t) => t.confirmed);
+    return {
+      books: Object.values(this.db.titlePages).length,
+      cases: confirmed.reduce((acc, t) => acc + Object.keys(t.confirmed?.fields ?? {}).length, 0),
+    };
+  });
+
+  /** As the API: title_page is collected from metadata forms, not labelled on an item. */
+  private handTask(t: string | undefined): LabelTaskName {
+    if (FORM_TASKS.has(t as LabelTaskName)) throw new HttpError(400, `${t} is labelled by confirming a book's metadata form, not here`);
+    return t as LabelTaskName;
+  }
+
+  // ---------------------------------------------------------------- title page (#15)
+  private titlePage(b: MockBook): TitlePageOut {
+    return this.db.titlePages[b.id] ?? { suggestions: [], decider_model: null, suggested_at: null, confirmed: null };
+  }
+
+  /** Mirrors `title_page.confirm`: 400 without suggestions, truthy values into the metadata. */
+  private confirmTitlePage(b: MockBook, body: Record<string, unknown>, op: string): TitlePageOut {
+    const extra = Object.keys(body).filter((k) => !(TITLE_FIELDS as readonly string[]).includes(k));
+    if (extra.length) throw new HttpError(422, `extra fields not permitted: ${extra.join(", ")}`);
+    const tp = this.db.titlePages[b.id];
+    if (!tp || tp.suggestions.length === 0) throw new HttpError(400, `book ${b.id} has no title-page suggestions to confirm`);
+    const final = body as TitleConfirmIn;
+    const target: Record<TitleField, keyof ItemMetadata> = { title: "title", authors: "creator", publisher: "publisher", year: "date" };
+    for (const field of TITLE_FIELDS) {
+      const value = final[field];
+      if (Array.isArray(value) ? value.length : value) Object.assign(b.metadata, { [target[field]]: value });
+    }
+    if (b.metadata.title) b.title = b.metadata.title;
+    b.updated_at = now();
+    const fields: TitleConfirmed["fields"] = {};
+    for (const s of tp.suggestions) {
+      const value = final[s.field] ?? null;
+      fields[s.field] = { suggested: s.value, line: s.line, leaf: s.leaf, p: s.p, final: value, outcome: titleOutcome(s.value, value) };
+    }
+    tp.confirmed = { fields, labeller: op || null, at: now(), decider_model: tp.decider_model };
+    return tp;
+  }
+
+  // ---------------------------------------------------------------- scan-mark groups (#14)
+  private markGroup(id: number): MockMarkGroup {
+    const g = this.db.markGroups.find((x) => x.id === id);
+    if (!g) throw new HttpError(404, `mark group ${id} not found`);
+    return g;
+  }
+
+  private markOut(g: MockMarkGroup): MarkGroupOut {
+    const { book_id: _b, per_leaf, ...out } = g;
+    const on_leaves = Object.keys(per_leaf).map(Number).sort((a, c) => a - c);
+    return { ...out, on_leaves, leaves: on_leaves.length, members: on_leaves.reduce((acc, l) => acc + (per_leaf[l] ?? 0), 0) };
+  }
+
+  /** Mirrors `marks.split`: 400 when no leaf matches or nothing would stay; the new group is `review`. */
+  private splitMarkGroup(g: MockMarkGroup, leaves: number[], op: string): MarkGroupOut {
+    const moved = Object.keys(g.per_leaf).map(Number).filter((l) => leaves.includes(l));
+    if (!moved.length) throw new HttpError(400, `mark group ${g.id} has no occurrence on leaves [${leaves.join(", ")}]`);
+    if (moved.length === Object.keys(g.per_leaf).length) throw new HttpError(400, "a split must leave at least one occurrence in the group");
+    const per_leaf: Record<number, number> = {};
+    for (const l of moved) {
+      per_leaf[l] = g.per_leaf[l] ?? 1;
+      delete g.per_leaf[l];
+    }
+    const id = ++this.db.seq;
+    const created: MockMarkGroup = {
+      ...g,
+      id,
+      band: "review",
+      decision: null,
+      p: null,
+      source: "operator",
+      decider_model: `operator:${op || "?"}`,
+      crop_leaf: Math.min(...moved),
+      image_url: CROP(`${g.category} #${id}`),
+      split_from: g.id,
+      per_leaf,
+    };
+    if (g.crop_leaf !== null && moved.includes(g.crop_leaf)) g.crop_leaf = Math.min(...Object.keys(g.per_leaf).map(Number));
+    this.db.markGroups.push(created);
+    return this.markOut(created);
+  }
 
   private review(b: MockBook, body: ReviewCreate, op: string) {
     if (body.decision === "approved" && !["review", "approved", "ok", "published"].includes(b.status))
@@ -460,7 +579,8 @@ export class MockServer {
       if (!match) continue;
       try {
         const result = handler(match.slice(1), body, parsed.searchParams, operator);
-        const status = method === "DELETE" ? 204 : method === "POST" && /\/(runs|imports)$/.test(path) ? 202 : 200;
+        const status =
+          method === "DELETE" ? 204 : method === "POST" && /\/(runs|imports)$/.test(path) ? 202 : method === "POST" && /\/split$/.test(path) ? 201 : 200;
         return json(status, result);
       } catch (e) {
         if (e instanceof HttpError) return json(e.status, { detail: e.detail });

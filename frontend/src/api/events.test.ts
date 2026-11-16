@@ -59,13 +59,15 @@ describe("planEvent", () => {
     }
   });
 
-  it("run.finished also refreshes the run and the pages", () => {
+  it("run.finished also refreshes the run, the pages, title-page suggestions and mark groups", () => {
     expect(planEvent(ev("run.finished", { run_id: 5, status: "succeeded" })).invalidate).toEqual([
       qk.run(5),
       qk.projects(),
       qk.booksAll(),
       qk.book(1),
       qk.pages(1),
+      qk.titlePage(1),
+      qk.markGroups(1),
     ]);
   });
 

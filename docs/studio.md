@@ -2,32 +2,44 @@
 
 The studio turns a tree of scanned TIFF frames into an Internet Archive "texts" item per
 book: cleaned page images, an hOCR text layer, a distribution PDF, a PDF/A-2b master, an
-EPUB, and the IA metadata files. Workers do the heavy lifting in the background. The
+EPUB, and the IA metadata files. Service workers do the heavy lifting in the background. The
 operator steps in only where the machine is unsure: a region it could not classify, a
-page that needs a different crop, or a book the quality gate flagged.
+scan mark that repeats across the book, a page that needs a different crop, a title page it
+read, or a book the quality gate flagged.
 
 This guide follows one book from import to publication. The screens are described in
 [Studio UI](web_ui.md); the contract between the parts is in
-[design/studio-spec.md](design/studio-spec.md).
+[design/studio-spec.md](design/studio-spec.md); the parts and the job flow are in
+[Architecture](architecture.md).
 
 ![Page studio: regions coloured by kind, a disputed picture selected](screenshots/page-studio.png)
 
 ## 1. Start the studio
 
-Locally, everything except Postgres and Redis runs from the repository's venv
-(full commands in [deploy/dev/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/dev/README.md)):
+Locally, the portal and the orchestrator run from the repository's venv; Postgres and Redis
+run in Docker (full commands in
+[deploy/dev/README.md](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/dev/README.md)):
 
 ```bash
 docker compose -f deploy/dev/compose.yml up -d                  # Postgres :55432, Redis :56379
 export STUDIO_CONFIG=$PWD/configs/studio.dev.toml
+export STUDIO_DATABASE_URL=postgresql+psycopg://studio:studio@127.0.0.1:55432/studio
+export STUDIO_REDIS_URL=redis://127.0.0.1:56379/0
+mkdir -p .cache/studio                                          # beat's schedule file
 evilflowers-digitalizer studio migrate                          # schema (alias of db-upgrade)
-evilflowers-digitalizer studio serve --port 8000                # API + the built SPA
-evilflowers-digitalizer studio worker -Q interactive,cpu,ai,io  # one worker, every queue
+evilflowers-digitalizer studio serve --port 8000                # the portal: API + the built SPA
+evilflowers-digitalizer studio worker -- -B                     # the orchestrator, with beat
 ```
 
 Build the SPA once with `pnpm --dir frontend install && pnpm --dir frontend build`; the API
 serves it from `frontend/dist` at <http://127.0.0.1:8000>. For SPA development, `pnpm
---dir frontend dev` serves it on :5173 and proxies `/api` to the API.
+--dir frontend dev` serves it on :5173 and proxies `/api` to the API; `pnpm --dir frontend
+dev:mock` runs the whole UI on fixtures.
+
+The portal and the orchestrator run no OCR, cleaning, layout, formula or render engine. A run
+plans its jobs and waits until the service workers take them: start the ones you need from
+their own repositories, on the same Redis, with `STORAGE_PATH` set to the studio's storage
+root. Without them, a run stays `running` with its jobs `dispatched`.
 
 There is no login: the studio is reachable only over the VPN. Click **Set your name** in
 the top bar once. The name is kept in the browser and recorded on every note, review and
@@ -40,133 +52,55 @@ books are named:
 
 | key | example | meaning |
 |---|---|---|
-| `scans_root` | `/data/raw-scans` | the read-only scan tree |
+| `scans_root` | `{storage_root}/raw-scans` | the read-only scan tree; it must be below the storage root |
 | `book_pattern` | `{collection}/*-skeny/{book}` | where a book's directory is; `{collection}` and `{book}` are captured |
 | `frames_glob` | `stream_pages_tif/*.tif` | frames inside the book directory |
 | `item_id` | `stu-{collection}-{book}` | the permanent IA identifier (lowercased, never renamed) |
 | `auto_publish` | `never` / `gate` / `review` | when a book goes to the catalog by itself |
 
 On the **Dashboard**, click **Import** next to a collection (or **Import all**). Discovery
-runs on the `io` queue and adds one row per book in status `discovered`; nothing is read
-except directory listings. From the CLI: `evilflowers-digitalizer studio import stu-local fei`.
+runs as the orchestrator task `digitalizer.discover` and adds one row per book in status
+`discovered`; nothing is read except directory listings. From the CLI:
+`evilflowers-digitalizer studio import stu-local fei`.
 
 ## 3. Run a book
 
-Open the book and click **Full run**. The run goes through five stages, each visible
-live in the run log:
+Open the book and click **Full run**. The run goes through five stages, each visible live in
+the run log. Each stage is sent as jobs to a service; the orchestrator's own steps are marked.
 
-1. **clean**: spread detection decides the leaves once (two per spread, LEFT/RIGHT), then
-   ScanTailor splits, deskews, crops and binarises each leaf; previews and Deep Zoom tiles
-   are written.
-2. **analyze**: Tesseract OCR plus the layout detectors (the heuristic by default,
-   DocLayout-YOLO when configured) propose regions; `fuse()` merges them, and regions the
-   detectors disagree on become **disputed**.
-3. **formulas**: formula regions go to PaddleOCR-VL when `formula_recognizer` is
-   `paddleocr-vl` (local tool venv) or `paddleocr-vl-http` (the `vlm` service, see
-   [Formula recognition service](#formula-recognition-service)); with `none` they stay images.
-4. **render**: the IA item files, the PDFs and the EPUB, from the access leaves only.
-5. **gate**: the quality signals decide `approved`, or `review` with the flags listed.
+1. **clean.**
+   - The orchestrator plans the leaves once (OpenCV spread detection, two leaves per spread,
+     LEFT and RIGHT), so leaf numbers stay stable across batches and re-runs.
+   - scan-service (`evilflowers_scan.clean`) splits, deskews, crops and binarises each
+     leaf and writes previews and Deep Zoom tiles. It also reports stamp, sticker,
+     bleed-through and edge candidates (`marks`) per leaf.
+   - Then the orchestrator groups the marks across the whole book: see
+     [Scan-mark groups](#scan-mark-groups-14).
+2. **analyze.**
+   - ocr-service (`evilflowers_ocr_worker.standalone.hocr`) and analyzer-service
+     (`evilflowers_analyzer.standalone.layout`) read each leaf batch in parallel.
+   - The orchestrator fuses their results and the scan marks with `fuse()` into regions.
+     Regions that overlapping proposals disagree on, or that have a low confidence, become
+     **disputed**; a stamp or sticker is always disputed until a person decides.
+   - Confirmed `remove` boxes are painted out of the page by scan-service
+     (`evilflowers_scan.erase`).
+   - Then the orchestrator prefills the metadata: see [Title-page prefill](#title-page-prefill-15).
+3. **formulas.**
+   - Formula regions (and regions marked `re-OCR`) go to equation-service
+     (`evilflowers_equation.standalone.formulas`).
+   - The orchestrator judges every answer: LaTeX is normalised, and a "formula" that reads like
+     a drawing is rejected (the region stays an image crop, with the reason recorded).
+   - An answer the service itself doubts (`disputed` and `reason` in its result) keeps its text
+     and becomes a disputed region with that reason.
+4. **render.** The orchestrator looks up metadata and writes the item's text files
+   (`render/prepare`); render-service (`evilflowers_render.book`) makes the PDF, the PDF/A-2b
+   master, the EPUB and the JP2 package from the access leaves only; the orchestrator writes
+   the IA XML documents.
+5. **gate.** The quality signals decide `approved`, or `review` with the flags listed.
 
-On the synthetic 6-frame test book a full run takes about two minutes on a laptop: 12
-leaves, 168 regions, OCR confidence 86, and the gate flags *"44/44 formulas left as
-images"* because no formula recognizer is configured.
-
-### Layout detectors
-
-`layout_detectors` lists the detectors whose proposals `fuse()` merges. Two that disagree
-are what turns a region **disputed**, so a second detector is worth its CPU time.
-
-| name | what it is | needs |
-|---|---|---|
-| `heuristic` | the reflow analysis over hOCR and pixels, plus the blue-stamp mask | nothing |
-| `doclayout` (alias `yolo`) | DocLayout-YOLO, DocStructBench classes, ONNX on CPU | `onnxruntime`, the model file |
-
-The `doclayout` model is the ONNX export
-[`wybxc/DocLayout-YOLO-DocStructBench-onnx`](https://huggingface.co/wybxc/DocLayout-YOLO-DocStructBench-onnx),
-converted from `juliozhao/DocLayout-YOLO-DocStructBench`. Both model cards state
-Apache-2.0. The metadata embedded in the graph still carries the Ultralytics AGPL-3.0
-boilerplate of the training code. The studio uses only the weights, never that code.
-Install the model once per worker:
-
-```bash
-mkdir -p ~/.local/share/evilflowers-tools/models/doclayout-yolo
-curl -L -o ~/.local/share/evilflowers-tools/models/doclayout-yolo/doclayout_yolo_docstructbench_imgsz1024.onnx \
-  https://huggingface.co/wybxc/DocLayout-YOLO-DocStructBench-onnx/resolve/main/doclayout_yolo_docstructbench_imgsz1024.onnx
-# sha256 fece9af02f618b603ff7921ccec6861d13e7e1f9830e091dfb7e8ad9311e5b21
-```
-
-Settings live in `[projects.<p>.pipeline.layout]`: `model` (defaults to the path above),
-`conf` (0.25), `iou` (0.5, per-class NMS), `imgsz` (1024) and `threads` (0 means all
-cores). The model maps `abandon` (running heads, folios) to page header or footer by
-position, and equation numbers (`formula_caption`) to caption. Only the ONNX graph is
-loaded. The PyTorch `.pt` checkpoint is a pickle and the studio never opens it.
-
-On an M1 Max a 600 dpi leaf takes about 1.2 s with all cores and 2.3 s with two threads.
-On the 12-leaf test book the two detectors produced 237 regions, 12 of them disputed.
-
-### Formula recognition service
-
-In k8s the nodes have no GPU, so PaddleOCR-VL-1.6 (0.9 B, Apache-2.0) runs on CPU as its
-own Deployment, `vlm` (`evilflowers_books_digitalizer/vlm_service`, Dockerfile target
-`vlm`, weights baked in at a pinned Hugging Face revision). worker-ai's `studio.formulas`
-calls it with `formula_recognizer = "paddleocr-vl-http"`:
-
-```toml
-[projects.stu.pipeline.vlm]
-url = "http://vlm.digitalizer.svc.cluster.local:8000"
-batch_size = 4        # crops per request
-timeout_s = 900       # read timeout of one request (queueing included)
-attempts = 6          # on 503 / connection errors, backoff 2 s doubling to 60 s
-```
-
-The client crops each region exactly as the local sidecar does (10 px padding, aspect
-ratio padded to at most 10:1, at most 1280×28×28 pixels) and posts PNGs to
-`POST /v1/formulas`; each item comes back with `text` or a per-item `error`. The
-service runs one crop at a time per pod; two more requests may wait, and any beyond that
-get `503` with `Retry-After`, which the client honours. A region that fails, times out
-or comes back empty stays an image crop. The stage's guards (`fix_latex`,
-`looks_hallucinated`) judge the answers exactly as for the local sidecar.
-
-`GET /readyz` turns 200 once the model is loaded; `GET /healthz` is 500 if loading failed.
-`vlm` is **off by default** (replicas 0, control has no CPU to spare for it permanently):
-
-```bash
-kubectl -n digitalizer scale deploy/vlm --replicas=1
-kubectl -n digitalizer rollout status deploy/vlm     # waits for /readyz
-# run or re-run the books, then
-kubectl -n digitalizer scale deploy/vlm --replicas=0
-```
-
-While it is down, `studio.formulas` fails after its retries (about two minutes) and the
-stage can be re-run later.
-
-**Expected throughput** (measured 2026-11-07 on an Apple M-series CPU, 4 torch threads,
-fp32, KV cache on, 10 formula regions of `fyzika_vektory`):
-
-| | per formula | notes |
-|---|---|---|
-| display formula, one line | 2.5–9 s | e.g. `\int A\cdot d\boldsymbol{r}`, a three-term limit |
-| page-wide two-line region | ~22 s | usually prose with math the heuristic labelled formula |
-| mean over the 10 | 8.4 s | ≈ 430 formulas per hour per pod at 4 cores |
-| model load | ~6 s | from a local SSD; RSS 3.8 GiB once serving |
-| through HTTP | 8.45 s | `HttpFormulaRecognizer` → service, 10 regions in 3 batches: same LaTeX |
-
-bfloat16 was 2.5–4.6× *slower* than float32 on this CPU (no native bf16 matmul) and
-changed some outputs, so the service runs float32 (`VLM_DTYPE`). An x86 node with AMX
-might reverse that; measure before switching.
-
-The checkpoint ships `use_cache: false` in its generation config; the service turns the
-KV cache on (`VLM_KV_CACHE=1`), which gave byte-identical LaTeX on all 10 regions and was
-3.6× faster (30.5 s mean without it). At the pod's 1-CPU *request* with no idle cores to
-burst into, expect roughly 4× the times above. The math-dense 53-page book of
-`docs/reflow_edition.md` had ~180 VLM regions, so about 25 minutes of CPU at 4 cores.
-
-Quality on the sample: real formulas came back exact (`\Delta P=(\Delta P)_{x}+…
-=\frac{\partial P}{\partial x}\Delta x+…`, `s=2\mathrm{~m}/\mathrm{s},u=-9,81\mathrm{~m}\cdot\mathrm{s}^{-2}`).
-Two regions that were really Slovak prose with inline math came back as letter-spaced
-`\begin{array}` text — those are layout mistakes (they should be `text` regions with
-the `OCR:` prompt), and the reviewer should re-label them. A fragment cut out of a
-larger formula (`dt (dt) (dt)`) is read faithfully, i.e. uselessly.
+The jobs are batched (32 leaves per bulk job, one leaf per operator re-run) and admitted by
+the scheduler: bulk work yields at peak hours and while the catalog's queues are busy; operator
+re-runs are never held. See [Operations](operations.md#holding-and-releasing-bulk-work).
 
 ## 4. Review a flagged book
 
@@ -190,14 +124,19 @@ Open a leaf to get the **page studio**:
 
 Rejected regions are never deleted, so a re-run cannot bring a rejected stamp back.
 
+On the book screen, two more panels ask for a decision: **Scan marks** and **Title page**
+(below).
+
 ## 5. Re-run a page
 
 After changing overrides or confirming `remove` regions, click **Re-run page**. It runs
-clean → analyze → formulas for that one leaf on the `interactive` queue (about 5 seconds
-for a test page), bumps the page version, and the viewer swaps to the new tiles when the
-`page.updated` event arrives. Operator decisions survive the re-run: confirmed and
-rejected regions are kept and absorb overlapping detector proposals; notes on replaced
-machine proposals move to the page.
+clean → analyze → formulas for that one leaf in the interactive lane (the services'
+`.interactive` queues, one leaf per job), bumps the page version, and the viewer swaps to the
+new tiles when the `page.updated` event arrives. Operator decisions survive the re-run:
+confirmed and rejected regions are kept and absorb overlapping detector proposals; notes on
+replaced machine proposals move to the page. If a re-run changes a page's geometry (size or
+deskew), the decided regions on it become disputed again, with the reason "page geometry
+changed by a re-run".
 
 A re-run does not rebuild the book's PDFs. Click **Re-render** on the book (or approve
 it, which re-renders) to bring page edits into the outputs and into `_scandata.xml`.
@@ -205,9 +144,12 @@ it, which re-renders) to bring page edits into the outputs and into `_scandata.x
 ## 6. Approve and publish
 
 **Approve** on the book records the review and marks every leaf `done`. Unless the
-project's `auto_publish` is `never`, approval enqueues a render run and then a publish
-run; the publish run waits until the render has finished. **Needs work** sends the book
-back to `review`; **Reject** is recorded only.
+project's `auto_publish` is `never`, approval enqueues a render run, and, when the project has a
+publish target, a publish run behind it; the publish run waits until the render has finished. **Needs
+work** sends the book back to `review`; **Reject** is recorded only.
+
+Publication is optional. A project without a `[publish]` target (`target = "none"`) never
+publishes: an approved book is complete, with its files on the digitized storage.
 
 Publishing creates or updates the EvilFlowers catalog entry. A republish updates the
 same entry and appends a publication row with the next version number.
@@ -235,7 +177,7 @@ Everything lives under `<artifacts_root>/<project>/<item_id>/`, laid out like an
 | `<id>_jp2.zip` | cleaned pages of all leaves as JPEG 2000 |
 | `<id>_hocr.html`, `<id>_djvu.txt` | text layer per leaf, plain text |
 | `<id>.pdf`, `<id>_archival.pdf`, `<id>.epub` | distribution PDF, PDF/A-2b master, reflow edition |
-| `<id>_studio/` | studio-only previews, tiles and `regions.json` |
+| `<id>_studio/` | studio-only previews, tiles, `regions.json` and the job attempt directories |
 
 The book screen's **Downloads** panel serves each file, and **IA export (.zip)** builds a
 zip that unpacks into an IA item directory. From the CLI:
@@ -244,12 +186,12 @@ zip that unpacks into an IA item directory. From the CLI:
 `studio export-training <project>` writes the confirmed regions as COCO / DocLayNet JSON
 with page crops, for training a layout model.
 
-## 8. Label catalog items for decider calibration
+## 8. Label items for decider calibration
 
 The decision services (`decider`, `decider-vision`) answer with a probability that means
 something only after calibration against our own labels (knowledge#65, issue #7). The
-**Labelling** screen collects those labels over the *catalog's* extraction output (dev), not
-over the studio's scans.
+**Labelling** screen collects those labels. Most items come from the *catalog's* extraction
+output (dev); the scan-mark items come from the studio's own database.
 
 | task | item | labels |
 |---|---|---|
@@ -258,13 +200,28 @@ over the studio's scans.
 | `table_quality` | same screen as `is_data_table` (optional) | `correct` `minor_errors` `broken` |
 | `section_relation` | section A and B: title + first paragraphs | `same` `pre` `example` `loose` `none` |
 | `subject` | entry title, summary, ToC | a category id of the entry's catalog (UDC top level first) |
+| `scan_mark` | one crop per book-wide mark group (the studio's, [#14](#scan-mark-groups-14)) | `stamp` `sticker` `bleed_through` `edge` `content` |
+| `title_page` | a book's confirmed metadata form ([#15](#title-page-prefill-15)) | `accepted` `changed` `none`, per field; not labelled by hand |
 
-Every task also has `s` = skip (unsure): stored, never exported. The keys are the exact
-choices the callers send to the decider (image-service#6, text-service#20,
-EvilFlowersCatalog#190/#191).
+Every hand-labelled task also has `s` = skip (unsure): stored, never exported. The keys are the
+exact choices the callers send to the decider (image-service#6, text-service#20,
+EvilFlowersCatalog#190/#191, scan-service#2 for `scan_mark`).
 
-1. Configure the catalog in the studio TOML. The key needs **manage** rights on the sampled
-   entries, because the region listing is an admin route. It stays on the server: crops are proxied.
+The two studio tasks:
+
+- **`scan_mark`** is sampled from the studio database, so it needs no `[labelling]` catalog.
+  One item is one mark group: the crop of its clearest occurrence, the book title, the leaf and
+  how many leaves and occurrences the group has. The group's band, decision, probability and
+  source are kept back and never shown. Items are stratified by the book's language and the
+group's band (or probability bucket).
+- **`title_page`** is not sampled and not labelled on a screen (`by_hand = False` in
+  `studio/labelling.py`). Every metadata form an operator confirms is a labelled case per
+  field. The Labelling screen lists its progress and export only; `sample-labels` and `label`
+  refuse it, while `export-labels` and `labelling-status` include it.
+
+1. Configure the catalog in the studio TOML (for the catalog tasks). The key needs **manage**
+   rights on the sampled entries, because the region listing is an admin route. It stays on the
+   server: crops are proxied.
 
    ```toml
    [labelling]
@@ -305,6 +262,12 @@ cases, and every label records which one it came through (`via`).
    {"task": "figure_kind", "item": {"entry_id": "…", "run_id": "…", "region": "p012-fig01", "region_id": "…"}, "language": "sk", "label": "stamp", "labeller": "…", "labelled_at": "…", "via": "spa"}
    ```
 
+   A `title_page` line comes from a confirmed form, one per suggested field:
+
+   ```json
+   {"task": "title_page", "item": {"book_id": 12, "item_id": "stu-fei-…", "field": "year", "leaf": 3}, "language": "slo", "label": "changed", "suggested": "1998", "line": "…", "p": 0.81, "value": "2007", "decider_model": "…", "labeller": "…", "labelled_at": "…", "via": "spa"}
+   ```
+
    `labels/figure_kind.jsonl.summary.json` holds counts per label, language, labeller and `via`,
    raw agreement and Cohen's κ on the doubly labelled items, and the sampling note.
 
@@ -314,12 +277,160 @@ regions carry no key (the studio builds `p012-fig01`). The asks are written up i
 [catalog-labelling-requests](design/catalog-labelling-requests.md). Design:
 `docs/diagrams/*-digitalizer-labelling.puml`.
 
+## Scan-mark groups (#14)
+
+Library stamps, stickers and bleed-through repeat across the pages of a book. scan-service
+only counts repeats inside one clean job (at most 32 leaves; an interactive job has one leaf),
+so a stamp on every 20th page would cost one decider call per occurrence. The orchestrator
+groups the marks of the whole book instead and decides once per distinct mark.
+
+![Scan marks](diagrams/sequence-digitalizer-scan-marks.svg)
+
+**When.** The `clean/marks` step (`digitalizer.local.clean_marks`) runs once after every clean
+job of a run is applied, before analyze. Code: `studio/marks.py` (pure rules),
+`studio/workers/stages/marks.py` (the step).
+
+**Grouping** (`[marks]`):
+
+| rule | default |
+|---|---|
+| same category: `stamp`, `sticker` or `bleed_through` (an `edge` band is a page border, not grouped) | |
+| 64-bit dHashes differ in at most `hash_distance` bits | 6 |
+| aspect ratios differ by at most `aspect_tolerance` (relative) | 25 % |
+| a group on at least `min_leaves` leaves is furniture | 3 |
+
+A mark already in a group keeps it, so a group's verdict and an operator's split survive later
+runs. A new mark joins the first matching group, else forms a group with the other new marks
+(single linkage). A re-clean of a leaf carries the groups over.
+
+**Verdicts.**
+
+- A group on `min_leaves` leaves or more is `hide`, decision `repeated`, source `rule`. No
+  model is asked.
+- A group with an uncertain member (band `review`) is sent to decider-vision **once**, with its
+  clearest occurrence (highest probability, then the largest). The question is `scan_mark`;
+  the choices are `stamp`, `sticker`, `bleed_through`, `edge`, `content`. The verdict is every
+  member's.
+- The decider's verdict becomes `hide` or `keep` only when its probability reaches
+  `[marks] hide_above` or `keep_above`. Both are unset until knowledge#65 calibrates
+  `scan_mark`, so every decider verdict is `review`: stored with its probability, never acted
+  on.
+- Fail soft: with no `[decider] vision_url` (or `DECIDER_ENABLED=false`), or when a call
+  fails, the group keeps its members' bands and is asked again on the next run. The run never
+  fails on it.
+
+**Effect.** At analyze, stamps and stickers become *disputed* regions (a mark whose band is
+`keep` is not proposed). Bleed-through and edge marks have no region kind. **Nothing is erased
+by a verdict.** Erasing stays a confirmed `remove` region, which scan-service paints out
+(`evilflowers_scan.erase`).
+
+**Operator.** The book screen's **Scan marks** panel lists the groups, largest first, each with
+its crop, category, band, probability, who decided it, and the leaves it is on.
+
+| action | what it does | API |
+|---|---|---|
+| **Keep** | the mark is part of the printed page | `PATCH /api/v1/mark-groups/{id}` with `{"band": "keep"}` |
+| **Hide** | the mark is an artefact | the same, `{"band": "hide"}` |
+| **Split…** | move the occurrences on the given leaves into a new group (verdict `review`); at least one occurrence stays | `POST /api/v1/mark-groups/{id}/split` with `{"leaves": [...]}` |
+
+Other routes: `GET /api/v1/books/{id}/mark-groups`, `GET /api/v1/mark-groups/{id}/image` (the
+crop). An operator verdict sets the group's source to `operator`, which the next regrouping
+leaves alone. The members' marks change at once; their regions change at the next analyze of
+those leaves, that is, when you re-run those pages.
+
+Data: table `mark_groups`, column `pages.marks` (migration `0007_marks_title_page`). Metrics:
+`digitalizer_marks`, `digitalizer_mark_groups`, `digitalizer_mark_decider_calls_saved`.
+
+## Title-page prefill (#15)
+
+The title page and the colophon carry the title, authors, publisher and year. The studio
+suggests them; an operator confirms them.
+
+![Title page](diagrams/sequence-digitalizer-title-page.svg)
+
+**When.** The `analyze/title_page` step (`digitalizer.local.title_page`) runs once after every
+analyze job of a run is applied. Code: `studio/title_page.py` (candidate lines from hOCR),
+`studio/workers/stages/title_page.py` (the step), `studio/application/title_page.py` (the API).
+
+**How.**
+
+1. The first `[title_page] first_leaves` leaves (4) and the last `last_leaves` leaves (2) give
+   the candidate lines from their hOCR.
+2. For each field (`title`, `authors`, `publisher`, `year`) the decider (text model) gets one
+   `choice` question: which candidate line is it? There are at most `max_candidates` (12) lines,
+   plus "none".
+3. The answers are stored in `books.metadata_suggestions` with their probability, the line and
+   the leaf.
+
+The step is skipped when the decider is off, when a re-run touched no title or colophon leaf,
+or once an operator confirmed the book's metadata. A failed call leaves that field without a
+suggestion. The run never fails on it.
+
+**Operator.** The book screen's **Title page** panel shows the suggestions as a form, each with
+its probability, the source line and a link to the leaf. An empty field means the page does not
+say it.
+
+- `GET /api/v1/books/{id}/title-page` returns the suggestions and, once confirmed, the
+  comparison.
+- `POST /api/v1/books/{id}/title-page/confirm` takes the final `title`, `authors`, `publisher`
+  and `year`. It writes them to the item metadata (`title`, `creator`, `publisher`, `date`)
+  through the same validation as any metadata edit. It answers 400 when the book has no
+  suggestions.
+
+**Nothing is imported unconfirmed.** Confirming also stores, per suggested field, the outcome in
+`books.metadata_confirmed`: `accepted` (the final value is the suggestion), `changed` (the
+operator typed another value) or `none` (left empty). Each is a labelled `title_page` case
+([labelling](#8-label-items-for-decider-calibration)).
+
+This is separate from the metadata providers (Excel, OPAC, OCR colophon) that
+`render/prepare` consults; see [Metadata](metadata.md). Values an operator has saved win over a
+provider's lookup, which only fills gaps.
+
+Metric: `digitalizer_title_page_fields{field,outcome}`.
+
+## Decision services
+
+Two shared HTTP services judge uncertain cases. Both are in namespace `shared` on the cluster;
+knowledge#77 admits the `digitalizer` namespace.
+
+| Service | `[decider]` key | Used by |
+|---|---|---|
+| `decider` (Laya, text only) | `url` | title-page prefill (#15) |
+| `decider-vision` (images) | `vision_url` | scan-mark groups (#14) |
+
+```toml
+[decider]
+url = "http://decider.shared.svc.cluster.local/v1/systemone"
+vision_url = "http://decider-vision.shared.svc.cluster.local/v1/systemone"
+model = "multilingual"      # Laya checkpoint; without it Laya may swap
+timeout = 60
+```
+
+The environment wins over the file: `DECIDER_URL`, `DECIDER_VISION_URL`, `DECIDER_MODEL`,
+`DECIDER_TIMEOUT`. `DECIDER_ENABLED=false` switches both off. An empty URL switches that use
+off.
+
+The client is `studio/adapters/decider.py` (`HttpDecider`, port `ports.Decider`). It posts one
+`choice` question per call to `POST /v1/systemone` with `state` (at most 50 000 characters),
+optionally up to four `images`, and the criteria. It reads back the chosen key, its probability
+and the model name, which is stored as `decider_model`. There is no API key; a NetworkPolicy
+admits the calling namespaces.
+
+**Both uses fail soft.** A missing URL, a timeout or an error leaves marks at `review` and the
+metadata unprefilled. A run never fails because a decision service is down. The probabilities
+mean something only after calibration (knowledge#65), which is what [labelling](#8-label-items-for-decider-calibration)
+collects.
+
 ## Troubleshooting
 
 | symptom | cause / fix |
 |---|---|
-| A run stays `queued` | no worker consumes its queue: check `celery … inspect active_queues` |
+| A run stays `queued` | the orchestrator is not running (no worker on `digitalizer.portal`, or no beat) |
+| A run stays `running`, its jobs `dispatched` | no service worker takes the job's queue: check it is on the same Redis db and has the task and queue of `DEFAULT_ROUTES` |
 | Render fails with "access leaves without cleaned image" | the scratch cache (`cache_dir`) was evicted: run a full run or re-run those leaves |
 | The original layer says the frame is missing | the scan mount is offline; cleaned pages and PDFs still work |
 | Tiles do not change after a re-run | hard-reload; tile URLs carry `?v=<page version>` |
 | `studio serve` fails with "configs/studio.toml" | set `STUDIO_CONFIG` or pass `--config` |
+| The config is refused at load | a removed key or a path outside the storage root; the message names it ([Deployment](deployment.md#configuration)) |
+
+More in [Operations](operations.md#common-issues).

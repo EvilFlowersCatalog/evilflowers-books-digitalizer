@@ -1,8 +1,52 @@
 # Target architecture: portal + orchestration + lab, digitalization on the shared workers
 
-Status: **proposal** (2026-11-16, revised the same day after review). Nothing here is deployed. It supersedes the
-deployment and component parts of `docs/design/*-restoration-studio.puml` (the single-image studio). `studio-spec.md`
-stays valid for the API, the SPA and the Internet Archive data model.
+> **Status (2026-11-17): implemented in the repository, not yet deployed or run on a real book.**
+> This page was written as a proposal (2026-11-16); the code now follows it, with the deviations
+> below. What remains is deploying the service workers and a parity run on a real book
+> (evilflowers-books-digitalizer#4, knowledge#66). The sections below are the design as proposed;
+> where they differ from the code, this note and [architecture.md](../architecture.md) win.
+>
+> **Implemented**
+>
+> - The repository is the portal, the orchestrator and `lab/`. The batch pipeline, its CLI, `pipeline/`,
+>   `reflow/`, `vlm_service/`, `sources/`, `covers/`, `catalog/publisher.py` and the in-process adapters
+>   (ocr, layout, formula, render, ScanTailor) are deleted (#6). The last commit that has them is `c94a858`.
+> - Every stage runs as a service task (§2, §3). The routes are `DEFAULT_ROUTES` and `DEFAULT_PARTS` in
+>   `studio/config.py`. `backend = "local"` for clean, analyze, formulas and render is rejected, and the
+>   in-process fallback of §8 step 3 is gone.
+> - The job ledger, `link` / `link_error` callbacks, `digitalizer.reconcile`, token-checked outcome files,
+>   bulk and interactive lanes, admission (peak hours, backpressure, pause), publication as an option (§2).
+> - One Celery queue, `digitalizer.portal`. The image has only the SPA and the package; `deploy/k8s` has two
+>   Deployments, `portal` and `orchestrator`.
+> - O3 (job size): 32 leaves per bulk job, one per interactive job, one job per book for render.
+> - `lab/` holds the notebooks, pinned to `c94a858` (`lab/README.md`).
+>
+> **Differs from the proposal**
+>
+> - §3, the orchestrator column: `covers/` is gone (no covers are generated); `metadata/` stays (Excel, OPAC,
+>   OCR colophon lookup, called at `render/prepare`).
+> - §3, the `render` row's "task `evilflowers_render.book`" has a local `render/prepare` step before it, and
+>   the orchestrator, not the service, writes the IA XML and the text files.
+> - §3, `analyze` also uses `evilflowers_scan.erase` (confirmed "remove" boxes) and has the local tail step
+>   `title_page`; `clean` has the local tail step `marks` (`TAIL_PARTS`).
+> - §3, the figures task of image-service (`evilflowers_image.standalone.figures`) and the tables task are
+>   not routed. There is no figures stage.
+> - §6, model-assisted checks: not inside the extractors. The orchestrator calls the decision services
+>   itself, over HTTP, fail soft (`[decider]`, `studio/adapters/decider.py`): scan marks grouped across the
+>   book (#14, decider-vision) and the title-page prefill (#15, decider). The shared `judges` library of
+>   evilflowers-worker is not a dependency of this repository. The metadata draft from the title page uses
+>   the text decider, not the Ollama vision model of §5.
+> - §6, thresholds: `[marks] hide_above` / `keep_above` are unset until knowledge#65 calibrates
+>   `scan_mark`, so every decider verdict stays `review`.
+> - O7 (old batch CLI): removed in #6 instead of after a parity run on 10 books. The parity run on a real
+>   book is still open (#4).
+>
+> **Superseded**
+>
+> - The deployment and component parts of the single-image studio. The PlantUML sources of the old studio
+>   (`docs/design/*-restoration-studio.puml`) are deleted; the diagrams below replace them.
+> - `studio-spec.md` stays valid for the API, the SPA and the Internet Archive data model; see its own
+>   status note.
 
 Diagrams (`docs/diagrams/`, ELVIRA theme, rendered `.svg` + `.png` next to each `.puml`):
 
@@ -14,6 +58,8 @@ Diagrams (`docs/diagrams/`, ELVIRA theme, rendered `.svg` + `.png` next to each 
 | [sequence-digitalizer-page-rerun](../diagrams/sequence-digitalizer-page-rerun.svg) | an operator's page re-run, and how a superseded run is refused |
 | [state-digitalizer-book](../diagrams/state-digitalizer-book.svg) | book lifecycle |
 | [state-digitalizer-run-job](../diagrams/state-digitalizer-run-job.svg) | run and job (ledger) state machines |
+| [sequence-digitalizer-scan-marks](../diagrams/sequence-digitalizer-scan-marks.svg) | scan marks grouped across the book, one decision per group (#14) |
+| [sequence-digitalizer-title-page](../diagrams/sequence-digitalizer-title-page.svg) | title-page prefill and its confirmation (#15) |
 
 ## 1. Decisions taken (2026-11-16)
 

@@ -203,6 +203,13 @@ def test_sample_without_config_is_unavailable(services: Services, client: TestCl
         app.sample(services, "figure_kind", 5)
 
 
+def test_title_page_cannot_be_sampled_over_the_api(client: TestClient):
+    r = client.post("/api/v1/labelling/tasks/title_page/samples")
+    assert r.status_code == 400 and "confirmed metadata forms" in r.text
+    # scan_mark samples the studio's own groups: no [labelling] catalog needed
+    assert client.post("/api/v1/labelling/tasks/scan_mark/samples").status_code == 202
+
+
 # ---------------------------------------------------------------- serving: no anchoring
 def _walk_keys(obj: Any) -> set[str]:
     if isinstance(obj, dict):

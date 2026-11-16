@@ -1,4 +1,5 @@
-"""Shared test doubles for every studio port — use these, do not write your own.
+"""Shared test doubles for every studio port and every stand-in service's engine — use these,
+do not write your own.
 
 Each fake is deterministic, writes only under the directory it is given, and
 records calls so tests can assert on them. ``sqlite_session()`` gives a fresh
@@ -28,13 +29,11 @@ from evilflowers_books_digitalizer.studio.metadata import ItemMetadata
 from evilflowers_books_digitalizer.studio.ports import (
     ARTIFACT_KINDS,
     CleanedPage,
-    FormulaJob,
     LeafPlan,
-    OcrPage,
     PublishResult,
-    RenderRequest,
     ScannedBook,
 )
+from evilflowers_books_digitalizer.studio.testing.engines import FormulaJob, OcrPage, RenderRequest
 
 
 def sqlite_session() -> Session:
@@ -103,7 +102,9 @@ class FakeArtifactStore:
 
 @dataclass
 class FakePageCleaner:
-    """Splits every frame into two leaves (left/right halves); 'cleans' by copying the half."""
+    """Splits every frame into two leaves (left/right halves); 'cleans' by copying the half.
+
+    ``plan`` stands in for the orchestrator's LeafPlanner, ``clean`` for scan-service's cleaner."""
 
     dpi: int = 600
     calls: list[tuple[Any, ...]] = field(default_factory=list)
@@ -167,6 +168,7 @@ class FakeLayout:
 class FakeFormulaRecognizer:
     answers: dict[str, str] = field(default_factory=dict)   # key -> latex; missing keys fail
     default: str | None = "x^2"
+    dispute: str | None = None      # the stand-in service marks every answer disputed with it
 
     def recognize(self, jobs: Sequence[FormulaJob]) -> dict[str, str]:
         out = {}
@@ -204,6 +206,36 @@ class FakePublisher:
         return PublishResult(entry_id or f"entry-{item_id}", f"https://catalog.test/{item_id}",
                              created=entry_id is None,
                              acquisitions={fmt: f"acq-{fmt}" for fmt in files})
+
+
+@dataclass
+class FakeDecider:
+    """A decision service. Per question id: ``answers`` gives (choice, p); else ``by_text``
+    picks the first criterion whose text contains the given words; else the first criterion.
+    ``fail`` makes every call raise like a timeout. Records the calls."""
+
+    answers: dict[str, tuple[str, float]] = field(default_factory=dict)
+    by_text: dict[str, str] = field(default_factory=dict)
+    fail: bool = False
+    model: str = "fake-decider@1"
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def choose(self, question: str, instructions: str, criteria: Any, *, state: Any = "",
+               images: Sequence[bytes] = ()) -> Any:
+        from evilflowers_books_digitalizer.studio.ports import Decision, PortError
+
+        self.calls.append({"question": question, "criteria": dict(criteria), "state": state,
+                           "images": list(images)})
+        if self.fail:
+            raise PortError("decider: ReadTimeout: timed out")
+        if question in self.answers:
+            choice, p = self.answers[question]
+        else:
+            words = self.by_text.get(question)
+            choice = next((k for k, text in criteria.items() if words and words in text),
+                          next(iter(criteria)))
+            p = 0.9
+        return Decision(choice, p, {choice: p}, self.model)
 
 
 @dataclass

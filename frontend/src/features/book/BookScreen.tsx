@@ -1,6 +1,6 @@
 /**
- * Screen 3 — Book: metadata, quality flags, runs with a live log, the pages grid,
- * review/approve, publication history and downloads.
+ * Screen 3 — Book: metadata (with the title-page suggestions), quality flags, runs with a
+ * live log, the pages grid, scan-mark groups, review/approve, publication history and downloads.
  */
 
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -9,7 +9,9 @@ import type { RunKind } from "../../api/types";
 import { Button, Empty, ErrorNote, PageHeader, Panel, Spinner, StatusBadge } from "../../components/ui";
 import s from "../screen.module.css";
 import { DownloadsPanel, NotesPanel, PagesGrid, PathsPanel, PublicationsPanel, QualityPanel, ReviewPanel, RunsPanel } from "./BookPanels";
+import { MarksPanel } from "./MarksPanel";
 import { MetadataForm } from "./MetadataForm";
+import { TitlePagePanel } from "./TitlePagePanel";
 
 export function BookScreen() {
   const bookId = Number(useParams().bookId);
@@ -65,7 +67,9 @@ export function BookScreen() {
           <Panel title={`Leaves (${pages.length})`} actions={<span className="faint" style={{ fontSize: 12 }}>dimmed = excluded from access formats</span>}>
             <PagesGrid pages={pages} />
           </Panel>
+          <TitlePagePanel bookId={bookId} pages={pages} />
           <MetadataForm bookId={bookId} metadata={detail.item_metadata} />
+          <MarksPanel bookId={bookId} pages={pages} />
         </div>
         <div className={s.stack}>
           <QualityPanel detail={detail} />

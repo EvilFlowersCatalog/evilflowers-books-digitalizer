@@ -11,7 +11,6 @@ import pytest
 
 from evilflowers_books_digitalizer import logs
 from evilflowers_books_digitalizer.logs import log_context, setup_logging
-from evilflowers_books_digitalizer.pipeline.base import BookContext, Pipeline, PipelineStep
 
 
 def _json_lines(stream: io.StringIO) -> list[dict]:
@@ -61,24 +60,6 @@ def test_exceptions_carry_type_and_traceback(json_stream):
     assert line["level"] == "ERROR"
     assert line["exc_type"] == "RuntimeError"
     assert "tesseract died" in line["exc"] and "Traceback" in line["exc"]
-
-
-def test_pipeline_steps_set_the_step_field(json_stream, tmp_path):
-    class Probe(PipelineStep):
-        name = "probe"
-
-        def run(self, ctx: BookContext) -> BookContext:
-            logging.getLogger("probe").info("working")
-            return ctx
-
-    ctx = BookContext(source="svf", book_id="B1", work_dir=tmp_path, output_dir=tmp_path)
-    with log_context(source="svf", book_id="B1"):
-        Pipeline([Probe()]).run(ctx)
-    lines = _json_lines(json_stream)
-    working = next(line for line in lines if line["msg"] == "working")
-    assert working["step"] == "probe" and working["book_id"] == "B1"
-    done = next(line for line in lines if line["msg"].startswith("step probe"))
-    assert done["step"] == "probe" and isinstance(done["duration_ms"], int)
 
 
 def test_level_env_and_warn_alias(monkeypatch):

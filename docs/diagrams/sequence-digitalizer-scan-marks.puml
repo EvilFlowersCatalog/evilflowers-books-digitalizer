@@ -1,0 +1,43 @@
+@startuml sequence-digitalizer-scan-marks
+!include elvira.iuml
+' =============================================================================
+' What: scan marks grouped across a whole book (evilflowers-books-digitalizer#14):
+'       after every clean job of a run is applied, the orchestrator's local step
+'       clean/marks groups every mark of the book by dHash + aspect, hides a group
+'       seen on >= min_leaves leaves without a model, and asks decider-vision once
+'       per uncertain group; the verdict becomes every member's band.
+' Kind: UML sequence diagram, one scenario (a full run, one uncertain group).
+'       Omitted: SSE, telemetry, the operator's split / verdict (REST).
+' Source: this repo studio/marks.py, studio/workers/stages/marks.py,
+'         studio/orchestration/{ledger,appliers}.py (TAIL_PARTS) (2026-11-16);
+'         evilflowers-scan-service artefacts.py @ master (dhash, scan_mark question);
+'         knowledge Cookbooks/Deploy-Decision-Models (decider-vision contract);
+'         knowledge#77 (namespace digitalizer admitted, written, not applied).
+' =============================================================================
+
+title Scan marks across the book: one decider-vision call per distinct mark (implemented, 2026-11-16)
+
+participant "scan-service\nevilflowers_scan.clean" as scan
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+database "postgresql18\ndb digitalizer" as pg
+participant "decider-vision\n(namespace shared)" as dv <<proposed>>
+
+scan -> orch : clean outcome per batch: leaves[].marks\n{bbox, category, p, band, signals.dhash, signals.aspect}
+orch -> pg : pages.marks (a re-cleaned mark keeps its old group)
+orch -> pg : last clean job applied -> plan clean/marks (local, digitalizer.portal)
+group clean/marks (digitalizer.local.clean_marks)
+  orch -> pg : group every mark of the book: same category,\nHamming <= 6, aspect within 25 %; existing groups keep members
+  orch -> pg : group on >= 3 leaves -> band hide, decision repeated (rule)
+  orch -[$accent_msg()]> dv : <b>POST /v1/systemone choice scan_mark</b>\n<b>one crop (clearest member), per uncertain group</b>
+  dv --> orch : choice, probabilities, model
+  orch -> pg : mark_groups verdict + every member's mark\n(band review until knowledge#65 sets thresholds)
+end
+orch -> pg : plan analyze: marks fused as disputed stamp / sticker proposals
+
+alt decider-vision off, unreachable or timed out
+  orch -> pg : members keep their bands (review); decider_error -> asked on the next run
+end
+
+caption Nothing is erased: a hidden mark is a disputed region, and only an operator's confirmed "remove" reaches evilflowers_scan.erase.\nThe operator may split a group or overrule its verdict (source operator), which later regroupings keep.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-scan-marks.puml
+@enduml

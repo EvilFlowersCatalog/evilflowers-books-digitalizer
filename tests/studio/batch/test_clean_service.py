@@ -1,28 +1,22 @@
-"""The clean stage on a service, end to end (evilflowers-books-digitalizer#4).
+"""The clean stage on scan-service, end to end (evilflowers-books-digitalizer#4, #6).
 
 Real Celery (eager) with ``link`` / ``link_error``: the ledger sends ``evilflowers_scan.clean``,
-the reference implementation (:mod:`studio.testing.standalone`) stands in for
-evilflowers-scan-service on the synthetic scan tree, its ``job_done`` callback applies the
-outcome, and the rest of the run (analyze, formulas, render, gate) continues in-process.
+the reference implementation (:mod:`studio.testing.standalone`, registered by the harness)
+stands in for evilflowers-scan-service on the synthetic scan tree, its ``job_done`` callback
+applies the outcome, and the run goes on (marks, analyze, formulas, render, gate).
 docs/diagrams/sequence-digitalizer-clean-service.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 
-import pytest
+from batch_harness import CLEAN as TASK
 from batch_harness import PROJECT, Studio, make_studio
 
 from evilflowers_books_digitalizer.db.models import Book, Job, Run, utcnow
-from evilflowers_books_digitalizer.studio.config import (
-    SERVICE_BATCH,
-    OrchestrationConfig,
-    StageRoute,
-    _orchestration,
-)
+from evilflowers_books_digitalizer.studio.config import SERVICE_BATCH, _orchestration
 from evilflowers_books_digitalizer.studio.domain import (
     BookStatus,
     JobStatus,
@@ -35,40 +29,15 @@ from evilflowers_books_digitalizer.studio.domain import (
     RunStatus,
 )
 from evilflowers_books_digitalizer.studio.orchestration import contract, ledger
-from evilflowers_books_digitalizer.studio.testing import fakes, standalone
+from evilflowers_books_digitalizer.studio.testing import fakes
 from evilflowers_books_digitalizer.studio.workers import context, tasks
-from evilflowers_books_digitalizer.studio.workers.app import celery
 
-TASK = "evilflowers_scan.clean"
 QUEUE, INTERACTIVE = "evilflowers_scan.standalone", "evilflowers_scan.standalone.interactive"
-#: leaf -> the artefact marks the stand-in service reports for it
-MARKS: dict[int, list[dict]] = {}
-
-
-@pytest.fixture(autouse=True)
-def _scan_service() -> Iterator[None]:
-    """Register the stand-in service task on the eager app for this module only."""
-
-    @celery.task(name=TASK)
-    def scan_clean(**message):  # type: ignore[no-untyped-def]
-        ctx = context.current()
-        adapters = ctx.adapters(PROJECT)
-        assert ctx.config.storage_root is not None
-        return standalone.scan_clean(ctx.config.storage_root, adapters.cleaner,
-                                     adapters.image_ops, marks_of=lambda n: MARKS.get(n, []),
-                                     **message)
-
-    yield
-    celery.tasks.pop(TASK, None)
-    MARKS.clear()
 
 
 def _studio(tmp_path: Path, **route: object) -> Studio:
-    routes = dict(OrchestrationConfig().routes)
-    routes["clean"] = StageRoute("service", TASK, QUEUE, INTERACTIVE, 3600,
-                                 **({"batch": SERVICE_BATCH} | route))  # type: ignore[arg-type]
-    studio = make_studio(tmp_path, orchestration=OrchestrationConfig(routes=routes),
-                         storage_root=tmp_path)
+    studio = make_studio(tmp_path, orchestration=_orchestration(
+        {"stages": {"clean": dict(route)}} if route else {}))
     tasks.discover.delay(PROJECT)
     return studio
 
@@ -84,13 +53,14 @@ def _attempt_dirs(studio: Studio) -> set[Path]:
 
 
 # ---------------------------------------------------------------- end to end
-def test_full_run_cleans_on_the_service_and_finishes_in_process(tmp_path: Path) -> None:
+def test_full_run_cleans_on_the_service(tmp_path: Path) -> None:
     studio = _studio(tmp_path)
     run = studio.execute(RunKind.FULL)
     assert run.status == RunStatus.SUCCEEDED, run.error
     assert studio.book().status == BookStatus.APPROVED
 
-    (job,) = _clean_jobs(studio, run.id)                  # 4 leaves, batch 32: one job
+    job, marks = _clean_jobs(studio, run.id)              # 4 leaves, batch 32: one job + tail
+    assert (contract.part(marks), marks.backend) == ("marks", "local")
     assert (job.backend, job.task, job.queue, job.status) == ("service", TASK, QUEUE, "applied")
     assert job.params["pages"] == [0, 1, 2, 3]
     pages = studio.book().pages
@@ -112,10 +82,10 @@ def test_scan_marks_become_disputed_stamp_proposals_at_analyze(tmp_path: Path) -
     """scan-service's artefact candidates (evilflowers-scan-service#2) wait on the page and
     enter the analyze fusion: a stamp or sticker always needs the operator's consent; a mark
     the decider kept as content, or a category with no region kind, is not proposed."""
-    MARKS[1] = [_mark("stamp", "hide", [10, 10, 60, 60]),
-                _mark("sticker", "keep", [100, 100, 150, 150]),
-                _mark("edge", "hide", [0, 0, 5, 200])]
     studio = _studio(tmp_path)
+    studio.engines.marks[1] = [_mark("stamp", "hide", [10, 10, 60, 60]),
+                               _mark("sticker", "keep", [100, 100, 150, 150]),
+                               _mark("edge", "hide", [0, 0, 5, 200])]
     run = studio.execute(RunKind.FULL)
     assert run.status == RunStatus.SUCCEEDED, run.error
     page = next(p for p in studio.book().pages if p.index == 1)
@@ -128,16 +98,15 @@ def test_scan_marks_become_disputed_stamp_proposals_at_analyze(tmp_path: Path) -
                for p in studio.book().pages)
 
 
-def test_an_in_process_clean_forgets_the_service_marks(tmp_path: Path) -> None:
-    MARKS[0] = [_mark("stamp", "review", [10, 10, 60, 60])]
+def test_a_reclean_replaces_the_marks_of_the_page(tmp_path: Path) -> None:
     studio = _studio(tmp_path)
+    studio.engines.marks[0] = [_mark("stamp", "review", [10, 10, 60, 60])]
     studio.execute(RunKind.FULL)
     assert next(p for p in studio.book().pages if p.index == 0).marks
-    # the operator's project goes back to in-process cleaning
-    studio.ctx.config.orchestration.routes["clean"] = OrchestrationConfig().routes["clean"]
+    studio.engines.marks.clear()                          # this time scan-service finds none
     assert studio.execute(RunKind.RERUN, pages=[0]).status == RunStatus.SUCCEEDED
     page = next(p for p in studio.book().pages if p.index == 0)
-    assert page.marks is None
+    assert page.marks == []
     assert RegionSource.SCAN not in {r.source for r in page.regions}
 
 
@@ -146,7 +115,7 @@ def test_operator_rerun_is_one_interactive_job_per_leaf(tmp_path: Path) -> None:
     studio.execute(RunKind.FULL)
     rerun = studio.execute(RunKind.RERUN, pages=[1, 3], interactive=True)
     assert rerun.status == RunStatus.SUCCEEDED, rerun.error
-    jobs = _clean_jobs(studio, rerun.id)
+    jobs = [j for j in _clean_jobs(studio, rerun.id) if contract.part(j) is None]
     assert [(j.queue, j.params["pages"]) for j in jobs] == [(INTERACTIVE, [1]), (INTERACTIVE, [3])]
 
 
@@ -175,7 +144,7 @@ def test_a_failing_service_fails_the_run_through_the_errback_and_leaves_no_files
         tmp_path: Path) -> None:
     studio = _studio(tmp_path)
     run = studio.execute(RunKind.FULL)                   # plans the leaves, cleans them once
-    studio.adapters.cleaner = _Broken(dpi=300)
+    studio.engines.cleaner = _Broken(dpi=300)
     failed = studio.execute(RunKind.RERUN, pages=[2], interactive=True)
     assert failed.status == RunStatus.FAILED
     assert "scantailor exited 3" in (failed.error or "")  # read back from the failed outcome
@@ -218,22 +187,19 @@ def test_reconcile_discards_a_lost_attempt_before_sending_it_again(tmp_path: Pat
 
 # ---------------------------------------------------------------- configuration
 def test_batch_sizes_per_lane() -> None:
-    routes = _orchestration({"stages": {"clean": {"backend": "service", "task": TASK,
-                                                  "queue": QUEUE}}}).routes
-    assert (routes["clean"].batch, routes["clean"].interactive_batch) == (SERVICE_BATCH, 1)
-    local = OrchestrationConfig().routes["clean"]
-    assert local.batch_size(interactive=False, project_default=8) == 8   # [pipeline] chunk_size
-    assert local.batch_size(interactive=True, project_default=8) == 1
-    tuned = _orchestration({"stages": {"clean": {"backend": "service", "task": TASK,
-                                                 "queue": QUEUE, "batch": 4,
-                                                 "interactive_batch": 2}}}).routes["clean"]
-    assert tuned.batch_size(interactive=False, project_default=8) == 4
-    assert tuned.batch_size(interactive=True, project_default=8) == 2
+    route = _orchestration({}).routes["clean"]
+    assert (route.task, route.queue, route.interactive_queue) == (TASK, QUEUE, INTERACTIVE)
+    assert route.batch_size(interactive=False) == SERVICE_BATCH
+    assert route.batch_size(interactive=True) == 1
+    tuned = _orchestration({"stages": {"clean": {"batch": 4, "interactive_batch": 2}}}
+                           ).routes["clean"]
+    assert tuned.batch_size(interactive=False) == 4
+    assert tuned.batch_size(interactive=True) == 2
 
 
 def test_a_bulk_book_is_split_into_service_batches(tmp_path: Path) -> None:
     studio = _studio(tmp_path, batch=3)
     run = studio.execute(RunKind.FULL)
     assert run.status == RunStatus.SUCCEEDED, run.error
-    assert [j.params["pages"] for j in _clean_jobs(studio, run.id)] == [[0, 1, 2], [3]]
+    assert [j.params.get("pages") for j in _clean_jobs(studio, run.id)] == [[0, 1, 2], [3], None]
     assert studio.session().query(Book).one().status == BookStatus.APPROVED

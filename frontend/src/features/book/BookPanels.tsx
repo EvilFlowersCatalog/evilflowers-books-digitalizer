@@ -3,7 +3,7 @@
  * publications, downloads, notes, paths. Each is small and data-driven.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useCancelRun, useCreateNote, useReview } from "../../api/hooks";
 import { media } from "../../api/media";
@@ -270,6 +270,19 @@ export function PathsPanel({ detail }: { detail: BookDetail }) {
         ))}
       </dl>
     </Panel>
+  );
+}
+
+/** A leaf index as a link to that leaf's page studio (plain text when the leaf is not loaded). */
+export function LeafLink({ leaf, pages, children }: { leaf: number; pages: PageOut[]; children?: ReactNode }) {
+  const page = pages.find((p) => p.index === leaf);
+  const text = children ?? `#${leaf}`;
+  return page ? (
+    <Link to={`/pages/${page.id}`} title={`leaf ${leaf} · ${page.page_type}`}>
+      {text}
+    </Link>
+  ) : (
+    <span>{text}</span>
   );
 }
 

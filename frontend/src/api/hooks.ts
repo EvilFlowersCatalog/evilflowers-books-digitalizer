@@ -12,6 +12,7 @@ import type {
   ItemMetadata,
   LabelAnswer,
   LabelTaskName,
+  MarkBand,
   NoteCreate,
   PageDetail,
   PagePatch,
@@ -20,6 +21,7 @@ import type {
   RegionPatch,
   ReviewCreate,
   RunCreate,
+  TitleConfirmIn,
 } from "./types";
 
 export const useProjects = () => useQuery({ queryKey: qk.projects(), queryFn: api.projects });
@@ -89,6 +91,42 @@ export function usePatchMetadata(bookId: number) {
     mutationFn: (patch: Partial<ItemMetadata>) => api.patchMetadata(bookId, patch),
     onSuccess: () => client.invalidateQueries({ queryKey: qk.book(bookId) }),
   });
+}
+
+// ---------------------------------------------------------------- title page (#15)
+export const useTitlePage = (bookId: number) =>
+  useQuery({ queryKey: qk.titlePage(bookId), queryFn: () => api.titlePage(bookId), enabled: bookId > 0 });
+
+/** Confirming writes the item metadata too, and adds `title_page` labelling cases. */
+export function useConfirmTitlePage(bookId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TitleConfirmIn) => api.confirmTitlePage(bookId, body),
+    onSuccess: (out) => {
+      client.setQueryData(qk.titlePage(bookId), out);
+      void client.invalidateQueries({ queryKey: qk.book(bookId) });
+      void client.invalidateQueries({ queryKey: qk.booksAll() });
+      void client.invalidateQueries({ queryKey: ["labelling"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------- scan-mark groups (#14)
+export const useMarkGroups = (bookId: number) =>
+  useQuery({ queryKey: qk.markGroups(bookId), queryFn: () => api.markGroups(bookId), enabled: bookId > 0 });
+
+export function useMarkGroupMutations(bookId: number) {
+  const client = useQueryClient();
+  const settle = () => client.invalidateQueries({ queryKey: qk.markGroups(bookId) });
+  const decide = useMutation({
+    mutationFn: ({ id, band }: { id: number; band: MarkBand }) => api.patchMarkGroup(id, band),
+    onSettled: settle,
+  });
+  const split = useMutation({
+    mutationFn: ({ id, leaves }: { id: number; leaves: number[] }) => api.splitMarkGroup(id, leaves),
+    onSettled: settle,
+  });
+  return { decide, split };
 }
 
 export function useReview(bookId: number) {

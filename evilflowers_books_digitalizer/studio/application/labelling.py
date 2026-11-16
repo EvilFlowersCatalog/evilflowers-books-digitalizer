@@ -24,6 +24,7 @@ import random
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,8 +32,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from evilflowers_books_digitalizer.studio.application.errors import BadRequest, NotFound, Unavailable
 from evilflowers_books_digitalizer.studio.application.services import Services
 from evilflowers_books_digitalizer.studio.application.uow import (
+    Book,
     Label,
     LabelItem,
+    MarkGroup,
     Session,
     func,
     select,
@@ -42,6 +45,7 @@ from evilflowers_books_digitalizer.studio.labelling import (
     LABEL_HINTS,
     SECOND_LABELLER_SHARE,
     SKIP,
+    STUDIO_KINDS,
     TASKS,
     ItemKind,
     LabelTask,
@@ -66,6 +70,13 @@ SAMPLING_NOTES: dict[str, str] = {
     ItemKind.FIGURE: "regions of every band (keep, review, hide, none) of the entries' active runs",
     ItemKind.TABLE: "regions of every band (keep, review, hide, none) of the entries' active runs",
     ItemKind.ENTRY: "entries with an active extraction run",
+    ItemKind.MARK_GROUP: (
+        "the studio's book-wide scan-mark groups (#14), one crop per group (its clearest "
+        "occurrence); stratified by language x band (rule-hidden repeated groups included)"),
+    ItemKind.BOOK: (
+        "every metadata form an operator confirmed after a title-page prefill (#15): one line "
+        "per suggested field; label = accepted (the suggestion stood), changed (the operator "
+        "typed another value) or none (the field was left empty)"),
 }
 
 
@@ -146,7 +157,9 @@ def sample(svc: Services, task_name: str, n: int, *, max_entries: int | None = N
     t = _task(task_name)
     if n < 1:
         raise BadRequest("n must be at least 1")
-    source = svc.label_source()
+    if not t.by_hand:
+        raise BadRequest(f"{t.name} is not sampled: its cases come from confirmed metadata forms")
+    source = _StudioSource(svc) if t.item_kind in STUDIO_KINDS else svc.label_source()
     if source is None:
         raise Unavailable("labelling is not configured ([labelling] base_url)")
     cfg = svc.config.labelling
@@ -187,6 +200,57 @@ def sample(svc: Services, task_name: str, n: int, *, max_entries: int | None = N
                      strata=dict(Counter(stratum(c.language, _band(c)) for c in chosen)))
 
 
+class _StudioSource:
+    """Candidates from the studio's own rows: mark groups (#14). The group's verdict (band,
+    decision, p, category) is ``hidden``: a labeller sees the crop and where it is, never what
+    the rule or the decider said."""
+
+    def __init__(self, svc: Services) -> None:
+        self._svc = svc
+
+    def candidates(self, kind: str, *, max_entries: int) -> Iterator[LabelCandidate]:
+        with self._svc.uow() as uow:
+            rows = uow.session.execute(select(MarkGroup, Book).join(Book, MarkGroup.book_pk == Book.id)
+                                       .where(MarkGroup.crop_leaf.is_not(None))
+                                       .order_by(MarkGroup.id)).all()
+            found = [self._candidate(group, book) for group, book in rows]
+        yield from found
+
+    @staticmethod
+    def _candidate(group: MarkGroup, book: Book) -> LabelCandidate:
+        langs = (book.item_metadata or {}).get("language") or []
+        language = {"slo": "sk", "cze": "cs", "eng": "en", "ger": "de", "hun": "hu"}.get(
+            langs[0] if langs else "", langs[0] if langs else None)
+        return LabelCandidate(
+            kind=ItemKind.MARK_GROUP, key=f"mark_group:{group.id}",
+            ref={"book_id": book.id, "item_id": book.item_id, "group_id": group.id,
+                 "leaf": group.crop_leaf, "bbox": list(group.crop_bbox or [])},
+            language=language,
+            payload={"title": book.title, "leaf": group.crop_leaf, "leaves": group.leaves,
+                     "occurrences": group.members},
+            hidden={"band": group.band, "decision": group.decision, "p": group.p,
+                    "source": group.source, "category": group.category})
+
+    def complete(self, candidate: LabelCandidate) -> LabelCandidate:
+        return candidate
+
+    def image(self, ref: Any) -> ImageBytes:
+        from evilflowers_books_digitalizer.studio.adapters.imaging.crops import crop_png
+
+        with self._svc.uow() as uow:
+            book = uow.session.get(Book, int(ref["book_id"]))
+            page = next((p for p in (book.pages if book else []) if p.index == ref.get("leaf")),
+                        None)
+            image = page.clean_path if page else None
+        if not image:
+            raise PortError(f"mark group {ref.get('group_id')}: its page has no cleaned image")
+        try:
+            return ImageBytes(crop_png(Path(image), tuple(ref["bbox"]), max_side=640),
+                              "image/png")
+        except (OSError, ValueError) as exc:
+            raise PortError(f"mark group {ref.get('group_id')}: {exc}") from exc
+
+
 def sample_quietly(svc: Services, task_name: str, n: int) -> None:
     """:func:`sample` for a background run (API): the outcome goes to the log, not a caller."""
     try:
@@ -225,6 +289,8 @@ def list_tasks(svc: Services, labeller: str | None = None) -> list[TaskOut]:
 
 
 def _task_out(session: Session, t: LabelTask, labeller: str | None) -> TaskOut:
+    if not t.by_hand:
+        return _form_task_out(session, t)
     items = session.scalar(select(func.count()).select_from(LabelItem)
                            .where(LabelItem.kind == t.item_kind)) or 0
     rows = session.execute(select(Label.item_pk, Label.value, Label.labeller)
@@ -239,9 +305,21 @@ def _task_out(session: Session, t: LabelTask, labeller: str | None) -> TaskOut:
                    mine=mine, left_for_me=max(0, items - mine))
 
 
+def _form_task_out(session: Session, t: LabelTask) -> TaskOut:
+    """``title_page``: cases are fields of confirmed metadata forms, nothing to answer here."""
+    books = session.scalars(select(Book).where(Book.metadata_suggestions.is_not(None))).all()
+    rows = [r for b in books for r in _form_rows(b)]
+    return TaskOut(name=t.name, title=t.title, item_kind=str(t.item_kind),
+                   labels=[LabelChoice(key=k, hint=None) for k in t.labels],
+                   companion_of=None, target=t.target, items=len(books),
+                   labelled=len(rows), skipped=0, double=0)
+
+
 def next_item(svc: Services, task_name: str, labeller: str | None) -> LabelItemOut | None:
     """The next item for this labeller, or None when they have answered every item."""
     t = _task(task_name)
+    if not t.by_hand:
+        raise BadRequest(f"{t.name} is labelled by confirming a book's metadata form, not here")
     who = _require(labeller)
     with svc.uow() as uow:
         item = _pick(uow.session, t, who)
@@ -310,9 +388,9 @@ def item_image(svc: Services, item_id: int) -> ImageBytes:
     with svc.uow() as uow:
         item = _get(uow.session, item_id)
         kind, ref = item.kind, dict(item.ref)
-    if kind not in (ItemKind.FIGURE, ItemKind.TABLE):
+    if kind not in IMAGE_KINDS:
         raise NotFound(f"label item {item_id} has no image")
-    source = svc.label_source()
+    source = _StudioSource(svc) if kind in STUDIO_KINDS else svc.label_source()
     if source is None:
         raise Unavailable("labelling is not configured ([labelling] base_url)")
     try:
@@ -322,9 +400,44 @@ def item_image(svc: Services, item_id: int) -> ImageBytes:
 
 
 # ---------------------------------------------------------------- export
+def _form_rows(book: Book) -> list[dict[str, Any]]:
+    """The labelled cases of one book's confirmed metadata form, one per suggested field."""
+    conf = book.metadata_confirmed or {}
+    out = []
+    for field, case in (conf.get("fields") or {}).items():
+        if not isinstance(case, dict) or case.get("outcome") not in TASKS["title_page"].labels:
+            continue
+        out.append({"field": field, **case, "labeller": conf.get("labeller"),
+                    "at": conf.get("at"), "decider_model": conf.get("decider_model")})
+    return out
+
+
+def _form_lines(svc: Services) -> list[dict[str, Any]]:
+    with svc.uow() as uow:
+        books = uow.session.scalars(select(Book).where(Book.metadata_confirmed.is_not(None))
+                                    .order_by(Book.id)).all()
+        lines = []
+        for book in books:
+            langs = (book.item_metadata or {}).get("language") or []
+            for row in _form_rows(book):
+                lines.append({
+                    "task": "title_page",
+                    "item": {"book_id": book.id, "item_id": book.item_id, "field": row["field"],
+                             "leaf": row.get("leaf")},
+                    "language": langs[0] if langs else None, "label": row["outcome"],
+                    "suggested": row.get("suggested"), "line": row.get("line"),
+                    "p": row.get("p"), "value": row.get("final"),
+                    "decider_model": row.get("decider_model"),
+                    "labeller": row.get("labeller"), "labelled_at": row.get("at"), "via": "spa"})
+    return lines
+
+
 def export_lines(svc: Services, task_name: str) -> Iterator[dict[str, Any]]:
     """One dict per non-skip label (the JSONL line of #7), oldest first."""
     t = _task(task_name)
+    if not t.by_hand:
+        yield from _form_lines(svc)
+        return
     with svc.uow() as uow:
         rows = uow.session.execute(
             select(Label, LabelItem).join(LabelItem, Label.item_pk == LabelItem.id)
@@ -347,6 +460,17 @@ def _line(t: LabelTask, label: Label, item: LabelItem) -> dict[str, Any]:
 
 def summary(svc: Services, task_name: str) -> SummaryOut:
     t = _task(task_name)
+    if not t.by_hand:
+        lines = _form_lines(svc)
+        return SummaryOut(
+            task=t.name, target=t.target, labels=len(lines), skipped=0,
+            done=len(lines) >= t.target,
+            by_label=dict(Counter(f"{ln['item']['field']}/{ln['label']}" for ln in lines)
+                          .most_common()),
+            by_language=dict(Counter(ln["language"] or "??" for ln in lines).most_common()),
+            labellers=dict(Counter(ln["labeller"] or "?" for ln in lines).most_common()),
+            by_via={"spa": len(lines)} if lines else {}, double=0, agreement=None, kappa=None,
+            sampling=SAMPLING_NOTES[t.item_kind])
     with svc.uow() as uow:
         rows = uow.session.execute(
             select(Label.item_pk, Label.value, Label.labeller, Label.via, Label.labelled_at,
@@ -394,8 +518,12 @@ def _get(session: Session, item_id: int) -> LabelItem:
     return item
 
 
+#: item kinds with a crop to show
+IMAGE_KINDS = (ItemKind.FIGURE, ItemKind.TABLE, ItemKind.MARK_GROUP)
+
+
 def _item_out(item: LabelItem, labeller: str | None) -> LabelItemOut:
-    has_image = item.kind in (ItemKind.FIGURE, ItemKind.TABLE)
+    has_image = item.kind in IMAGE_KINDS
     return LabelItemOut(
         id=item.id, kind=item.kind, key=item.key, language=item.language, ref=dict(item.ref),
         payload=dict(item.payload),

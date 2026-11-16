@@ -3,8 +3,21 @@
  * model's answer (band, p, decision, relation): labellers must not be anchored.
  */
 
-export type LabelItemKind = "figure" | "table" | "section_pair" | "entry";
-export type LabelTaskName = "figure_kind" | "is_data_table" | "table_quality" | "section_relation" | "subject";
+export type LabelItemKind = "figure" | "table" | "section_pair" | "entry" | "mark_group" | "book";
+export type LabelTaskName =
+  | "figure_kind"
+  | "is_data_table"
+  | "table_quality"
+  | "section_relation"
+  | "subject"
+  | "scan_mark"
+  | "title_page";
+
+/**
+ * Tasks of item kind `book` (`title_page`) are not answered on the labelling screen: their
+ * cases come from confirmed title-page forms, and `next` / `samples` answer 400 for them.
+ */
+export const labelledHere = (task: Pick<LabelTaskOut, "item_kind">): boolean => task.item_kind !== "book";
 
 export const SKIP = "skip";
 
@@ -57,6 +70,10 @@ export interface LabelPayload {
   summary?: string;
   table_of_contents?: string[];
   options?: CategoryOption[];
+  /** mark_group (`scan_mark`): the leaf of the crop, and how far the mark spreads */
+  leaf?: number | null;
+  leaves?: number;
+  occurrences?: number;
 }
 
 export interface LabelItemOut {

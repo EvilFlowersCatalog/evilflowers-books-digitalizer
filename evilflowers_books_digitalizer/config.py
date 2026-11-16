@@ -1,9 +1,5 @@
-"""Project-wide constants.
-
-Runtime configuration lives in TOML: ``configs/pipeline*.toml`` for the batch
-pipeline (:mod:`.runtime`) and ``configs/studio.*.toml`` for the studio
-(:mod:`.studio.config`).
-"""
+"""Project-wide constants. Runtime configuration lives in ``configs/studio.*.toml``
+(:mod:`.studio.config`)."""
 
 from __future__ import annotations
 

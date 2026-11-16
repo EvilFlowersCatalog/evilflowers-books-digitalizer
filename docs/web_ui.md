@@ -30,7 +30,15 @@ the URL; sort by quality score; bulk actions (queue a run, approve).
 excluded from access), the quality gate with its flags and signals, review buttons, runs
 with a live log and cancel, publication history, downloads (every artifact plus the IA
 export zip), notes, paths, and the IA metadata form (`_meta.xml` field names; saves only
-changed fields).
+changed fields). Two panels ask for decisions:
+
+- **Scan marks**: the book-wide mark groups with their crop, band and leaves, and **Keep**,
+  **Hide** and **Split…** buttons ([#14](studio.md#scan-mark-groups-14)). It says so when the
+  book has no repeated marks. Nothing is erased from here.
+- **Title page**: shown only when the book has suggestions. The suggested title, authors,
+  publisher and year as a form, each with its
+  probability, source line and leaf. **Confirm** writes the values to the metadata
+  ([#15](studio.md#title-page-prefill-15)); after that the panel shows the comparison read-only.
 
 ![Book](screenshots/book.png)
 
@@ -44,7 +52,7 @@ changed fields).
 - **Page:** IA leaf fields and the overrides for a re-run, with an optional OpenCV.js
   preview of crop, deskew and threshold.
 - **Text & math:** editable OCR text per region; formula LaTeX with a live KaTeX preview.
-- **Re-run page** on the interactive queue; the tile swaps when `page.updated` arrives.
+- **Re-run page** in the interactive lane; the tile swaps when `page.updated` arrives.
 
 ![Swipe compare: original frame against the cleaned page](screenshots/compare-swipe.png)
 
@@ -88,10 +96,14 @@ There is no authentication (VPN only). The `X-Operator` header carries the name 
 Settings, percent-encoded because HTTP headers are Latin-1 and Slovak names are not;
 the API decodes it.
 
-## Processing database (classic batch CLI)
+## Labelling
 
-The classic `run-book` / `run-source` runner still records each book in the same database
-through `db.Recorder` (fail-safe: a broken database logs a warning and the book carries
-on). `evilflowers-digitalizer db upgrade` migrates it and `db import` backfills books
-produced before it existed. The studio adds its own tables and columns in migration
-`0002`; `studio migrate` applies the same Alembic history.
+The **Labelling** screen collects hand labels for decider calibration: figures, tables,
+section pairs and subjects from the catalog, and scan-mark groups from the studio. The
+`title_page` task is listed with its progress and export only: its cases come from confirmed
+title-page forms. See [Studio guide, section 8](studio.md#8-label-items-for-decider-calibration).
+
+## Database
+
+The studio's tables and columns are managed by Alembic (`evilflowers-digitalizer studio
+migrate`, or `db upgrade`; `db current` shows the revision).

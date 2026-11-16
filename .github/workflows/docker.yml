@@ -1,9 +1,8 @@
 name: Docker
 
-# Build the full tooling image (scantailor-deviant-cli, jbig2enc, tesseract,
-# recode_pdf, DocRes). On pull requests we only build (no push) and skip the
-# ~900 MB DocRes weights to keep CI fast. On master and tags we build the full
-# image and push it to GitHub Container Registry (GHCR).
+# Build the portal image (API + orchestrator, evilflowers-books-digitalizer#6: no OCR,
+# cleaning or rendering toolchain). On pull requests we only build (no push); on master,
+# develop and tags we push it to GitHub Container Registry (GHCR).
 
 on:
   push:
@@ -76,9 +75,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          # PRs build a lean image (skip DocRes weights); real builds bake them in.
-          build-args: |
-            DOCRES_WEIGHTS=${{ github.event_name == 'pull_request' && '0' || '1' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

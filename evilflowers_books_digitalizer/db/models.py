@@ -67,6 +67,16 @@ class Book(Base):
     #: QualityReport.as_dict() of the last gate
     quality: Mapped[dict[str, Any]] = mapped_column(default=dict)
     quality_score: Mapped[float | None] = mapped_column(index=True)
+    # ---- title-page prefill (0007, evilflowers-books-digitalizer#15) ------------
+    #: what the decider picked from the OCR lines, per field: {"title": {"value", "p",
+    #: "line", "leaf"}, …, "decider_model", "at"}. Never imported: only the operator's
+    #: confirmation writes ``item_metadata``.
+    metadata_suggestions: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: the operator's confirmation of those suggestions: {"fields": {field: {"suggested",
+    #: "line", "leaf", "p", "final", "outcome": accepted | changed | none}}, "labeller",
+    #: "at", "decider_model"}: labelled ``title_page`` cases for #7
+    #: (studio.application.title_page)
+    metadata_confirmed: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     pages: Mapped[list[Page]] = relationship(
         back_populates="book", order_by="Page.index", cascade="all, delete-orphan")
@@ -125,7 +135,8 @@ class Page(Base):
     #: operator-only scandata fields: {"book_start": bool, "toc_title": str, "toc_level": int}
     leaf_extra: Mapped[dict[str, Any]] = mapped_column(default=dict)
     #: (0006) scan-service's artefact candidates from the last clean (contract.Mark rows),
-    #: fused as proposals by analyze; None when the page was cleaned in-process
+    #: fused as proposals by analyze. (0007) each row may carry ``group`` (a mark_groups id):
+    #: the book-wide group's verdict is the mark's band and decision (#14)
     marks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
 
     book: Mapped[Book] = relationship(back_populates="pages")
@@ -277,6 +288,39 @@ class Publication(Base):
     published_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     book: Mapped[Book] = relationship(back_populates="publications")
+
+
+class MarkGroup(Base):
+    """One distinct scan mark of a book: its occurrences on many leaves (0007, #14).
+
+    Members are the ``pages.marks`` rows whose ``group`` is this id. The verdict applies to
+    every member: ``source`` says who gave it (``signals`` = scan-service's own band, ``rule``
+    = seen on enough leaves, ``decider`` = decider-vision asked once for the group,
+    ``operator``). ``crop_leaf`` + ``crop_bbox`` name the clearest occurrence: what the
+    decider was shown and what labelling mode (#7) shows.
+    """
+
+    __tablename__ = "mark_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    book_pk: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(16))            # stamp | sticker | bleed_through
+    dhash: Mapped[str] = mapped_column(String(16))               # the first member's 64-bit hex
+    aspect: Mapped[float] = mapped_column(default=1.0)
+    leaves: Mapped[int] = mapped_column(Integer, default=0)      # distinct leaves it is on
+    members: Mapped[int] = mapped_column(Integer, default=0)
+    band: Mapped[str] = mapped_column(String(8), default="review")   # keep | review | hide
+    decision: Mapped[str | None] = mapped_column(String(32))     # repeated | a scan_mark key
+    p: Mapped[float | None]
+    source: Mapped[str] = mapped_column(String(16), default="signals")
+    decider_model: Mapped[str | None] = mapped_column(String(128))
+    crop_leaf: Mapped[int | None]
+    crop_bbox: Mapped[list[int] | None] = mapped_column(JSON)
+    #: decider asked and failed (timeout, unreachable): asked again on the next run
+    decider_error: Mapped[str | None] = mapped_column(String(500))
+    split_from: Mapped[int | None]                               # the group an operator split it off
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class LabelItem(Base):

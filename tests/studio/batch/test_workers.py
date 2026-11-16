@@ -81,7 +81,7 @@ def test_full_run_renders_access_leaves_only_and_ia_hocr(discovered: Studio) -> 
     s.commit()
     run = discovered.execute(RunKind.RENDER)
     assert run.status == RunStatus.SUCCEEDED, run.error
-    request = discovered.adapters.renderer.requests[-1]          # type: ignore[attr-defined]
+    request = discovered.engines.renderer.requests[-1]           # render-service's request
     assert [p.name for p in request.pages] == ["0000.tif", "0001.tif", "0003.tif"]
     hocr = Path(discovered.book().artifacts["hocr"]).read_text()
     assert [f"page_{i:06d}" in hocr for i in range(4)] == [True] * 4
@@ -123,26 +123,26 @@ def test_rerun_bumps_version_and_honours_override(discovered: Studio) -> None:
     page.regions.append(Region(kind="picture", x0=50, y0=50, x1=120, y1=120, source="operator",
                                status="confirmed", action="as_image", author="op"))
     s.commit()
-    cleaner: fakes.FakePageCleaner = discovered.adapters.cleaner  # type: ignore[assignment]
+    cleaner: fakes.FakePageCleaner = discovered.engines.cleaner   # scan-service's cleaner
     run = discovered.execute(RunKind.RERUN, pages=[1], interactive=True)
     assert run.status == RunStatus.SUCCEEDED, run.error
 
     _, leaves, overrides = cleaner.calls[-1]
     assert leaves == [1] and overrides[1].despeckle == "off" and overrides[1].crop.x0 == 200
     pages = _pages(discovered)
-    assert [p.version for p in pages] == [1, 2, 1, 1]
+    assert [p.version for p in pages] == [1, 3, 1, 1]   # the clean, then scan-service's erase
     kept = [r for r in pages[1].regions if r.source == "operator"]
     assert len(kept) == 2 and all(r.status == "confirmed" for r in kept)
     with Image.open(pages[1].clean_path or "") as im:
-        assert im.getpixel((5, 5)) == 255                         # removed: erased in the page
+        assert im.getpixel((5, 5)) == 255                         # removed: erased (scan erase)
         assert im.getpixel((60, 60)) != 255                       # as_image: kept in the page
-    ocr_input = discovered.adapters.ocr.images[-1]                # type: ignore[attr-defined]
-    assert ocr_input.parent.name == "ocr"
+    ocr_input = discovered.engines.ocr.images[-1]                 # ocr-service's masked copy
+    assert ocr_input.parent.name == "masked"
     with Image.open(ocr_input) as im:
         assert im.getpixel((60, 60)) == 255                       # ... but hidden from OCR
     assert discovered.book().status == BookStatus.APPROVED        # reruns leave the book alone
     updated = [e for e in discovered.events(EventType.PAGE_UPDATED) if e.data["index"] == 1]
-    assert updated[-1].data["version"] == 2
+    assert updated[-1].data["version"] == 3
 
 
 def test_rerun_keeps_rejected_regions_rejected(tmp_path: Path) -> None:
@@ -183,13 +183,13 @@ def test_formulas_fill_latex_and_reject_drawings(tmp_path: Path) -> None:
     formula = RegionProposal(RegionKind.FORMULA, BBox(10, 160, 150, 200), RegionSource.HEURISTIC,
                              0.9)
     studio = make_studio(tmp_path, layout=fakes.FakeLayout(extra=[formula]))
-    studio.adapters.formulas = fakes.FakeFormulaRecognizer(default="\\[ E = mc^2 \\]")
+    studio.engines.formulas = fakes.FakeFormulaRecognizer(default="\\[ E = mc^2 \\]")
     tasks.discover.delay(PROJECT)
     studio.execute(RunKind.FULL)
     texts = {r.text for r in studio.session().query(Region).filter_by(kind="formula")}
     assert texts == {"E = mc^2"}
 
-    studio.adapters.formulas = fakes.FakeFormulaRecognizer(default="Obr. 3 \\alpha")
+    studio.engines.formulas = fakes.FakeFormulaRecognizer(default="Obr. 3 \\alpha")
     studio.execute(RunKind.FULL)
     formulas = studio.session().query(Region).filter_by(kind="formula").all()
     assert all(r.text is None and "vlm rejected" in (r.reason or "") for r in formulas)
@@ -242,7 +242,7 @@ def test_failed_task_marks_run_and_book(discovered: Studio) -> None:
         def clean(self, plans, out_dir, overrides=None):
             raise PortError("scantailor exploded")
 
-    discovered.adapters.cleaner = Broken()
+    discovered.engines.cleaner = Broken()                         # scan-service fails
     discovered.execute(RunKind.FULL)
     run = discovered.session().query(Run).one()
     assert run.status == RunStatus.FAILED and "scantailor exploded" in (run.error or "")

@@ -1,4 +1,10 @@
-"""``studio.render``: metadata lookup + IA item files + Renderer outputs (access leaves only).
+"""Stage render, the orchestrator's half: ``prepare`` before render-service, ``finish`` after.
+
+* ``render/prepare`` (in-process, :func:`prepare`): metadata lookup, the item's text documents
+  (whole-book hOCR, plain text, regions) and the request render-service renders from;
+* ``render/book`` (``evilflowers_render.book``): the media (PDF, PDF/A-2b, EPUB, JP2 package);
+* applying ``book`` moves the media into the IA item layout and calls :func:`finish`
+  (the rows and the IA XML documents).
 
 Metadata is looked up here, after OCR, because two providers need the text
 (ISBN from the colophon). Operator edits win: the stored record is merged *over*
@@ -9,24 +15,23 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from evilflowers_books_digitalizer.db.models import Book, Page, Run
 from evilflowers_books_digitalizer.studio.adapters.ia import IaItemExporter
+from evilflowers_books_digitalizer.studio.adapters.registry import output_dpi
 from evilflowers_books_digitalizer.studio.application.pages import PDF_PAGES_STAT
 from evilflowers_books_digitalizer.studio.metadata import ItemMetadata
 from evilflowers_books_digitalizer.studio.orchestration.contract import Storage
-from evilflowers_books_digitalizer.studio.ports import PortError, RenderRequest, ScannedBook
+from evilflowers_books_digitalizer.studio.ports import PortError, ScannedBook
 from evilflowers_books_digitalizer.studio.workers import runs
 from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
-from evilflowers_books_digitalizer.studio.adapters.registry import output_dpi
 from evilflowers_books_digitalizer.studio.workers.stages import common, item_files
 from evilflowers_books_digitalizer.studio.workers.stages.item_files import LeafFiles
 
-#: Renderer formats the studio knows (``ProjectConfig.outputs``)
+#: formats render-service makes (``ProjectConfig.outputs``)
 FORMATS = ("pdf", "pdfa", "epub")
 
 
@@ -74,20 +79,6 @@ def complete_metadata(ctx: WorkerContext, job: RenderJob) -> ItemMetadata:
     return meta
 
 
-def _place(produced: dict[str, Path], ctx: WorkerContext, job: RenderJob) -> dict[str, Path]:
-    """Move renderer outputs to their artifact-store names (a renderer that ignores
-    ``extra["targets"]``, e.g. a test fake; a no-op for the studio renderer)."""
-    store = ctx.adapters(job.project).artifacts
-    placed = {}
-    for fmt, src in produced.items():
-        dst = store.path(job.item_id, fmt)
-        if src.resolve() != dst.resolve():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(src, dst)
-        placed[fmt] = dst
-    return placed
-
-
 def check_access_leaves(item: str, access: list[LeafFiles]) -> None:
     """Refuse to render rather than ship a PDF without pages or without a text layer.
 
@@ -115,30 +106,6 @@ def text_files(ctx: WorkerContext, job: RenderJob, meta: ItemMetadata) -> dict[s
     }
 
 
-def write_item(ctx: WorkerContext, job: RenderJob, meta: ItemMetadata) -> dict[str, Path]:
-    store = ctx.adapters(job.project).artifacts
-    item = job.item_id
-    access = [lf for lf in job.leaves if lf.in_access]
-    files = text_files(ctx, job, meta)
-    if ctx.project(job.project).pipeline.get("jp2_images", True):
-        package = item_files.write_jp2_zip(job.leaves, store.path(item, "images"), item,
-                                           cache_dir=ctx.work_dir(job.project, item) / "jp2")
-        if package is not None:
-            files["images"] = package
-    hocr = item_files.write_hocr(job.leaves, ctx.work_dir(job.project, item) / "access_hocr.html",
-                                 access_only=True, title=meta.title)
-    formats = [f for f in ctx.project(job.project).outputs if f in FORMATS]
-    # check_access_leaves guarantees an image per access leaf: pages[i] <-> regions[i]
-    request = RenderRequest(item, [lf.image for lf in access if lf.image], hocr, meta, formats,
-                            {"out_dir": store.item_dir(item),
-                             "targets": {fmt: store.path(item, fmt) for fmt in formats},
-                             "dpi": output_dpi(ctx.project(job.project)),
-                             # the operator's region decisions steer the EPUB
-                             "regions": [lf.regions for lf in access]})
-    produced = ctx.adapters(job.project).renderer.render(request)
-    return {**files, **_place(produced, ctx, job)}
-
-
 def _store_metadata(book: Book, meta: ItemMetadata) -> None:
     book.item_metadata = meta.as_dict()
     book.title = meta.title or book.title
@@ -146,7 +113,7 @@ def _store_metadata(book: Book, meta: ItemMetadata) -> None:
 
 def finish(uow: Uow, ctx: WorkerContext, run: Run, files: dict[str, Path],
            access_leaves: list[int], n_leaves: int) -> None:
-    """The rows and the IA documents after the media exist (in-process and service alike)."""
+    """The rows and the IA documents once render-service's media are in the item."""
     book: Book = run.book
     project, item = runs.project_of(book), common.item_id(book)
     store = ctx.adapters(project).artifacts
@@ -161,19 +128,6 @@ def finish(uow: Uow, ctx: WorkerContext, run: Run, files: dict[str, Path],
     book.artifacts = {**book.artifacts, **{k: str(v) for k, v in ia_docs.items()}}
     runs.advance(uow, run)
     runs.log(uow, run, "rendered " + ", ".join(sorted({*book.artifacts})))
-
-
-def render(ctx: WorkerContext, run_id: int) -> None:
-    job = _job(ctx, run_id)
-    if job is None:
-        return
-    meta = complete_metadata(ctx, job)
-    files = write_item(ctx, job, meta)
-    with ctx.uow() as uow:
-        run = runs.load_run(uow, run_id)
-        _store_metadata(run.book, meta)
-        finish(uow, ctx, run, files, [lf.leaf for lf in job.leaves if lf.in_access],
-               len(job.leaves))
 
 
 # ---------------------------------------------------------------- render on a service

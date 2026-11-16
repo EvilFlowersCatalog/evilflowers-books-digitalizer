@@ -1,57 +1,24 @@
-"""Stage clean (``digitalizer.local.clean``): planned leaves -> cleaned pages -> previews/tiles.
+"""Stage clean, the orchestrator's half: a cleaned page from scan-service into its row.
 
-Idempotent: only leaves still ``pending`` in this run are cleaned (the run start
-resets the leaves it covers), so a redelivered chunk does no double work. The slow
-part runs outside any transaction; rows are updated in one short unit afterwards.
-Every actual clean bumps ``pages.version`` — the SPA swaps tiles on that.
+``evilflowers_scan.clean`` cleans the leaves (ScanTailor, DocRes) and writes each page with
+its preview and tiles into the attempt dir; ``appliers.apply_clean`` points the page at them
+with :func:`apply_cleaned`. Every new image bumps ``pages.version`` — the SPA swaps tiles on it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from evilflowers_books_digitalizer.db.models import Page, Region
-from evilflowers_books_digitalizer.studio.domain import PageOverride, PageStatus, RegionStatus
+from evilflowers_books_digitalizer.studio.domain import PageStatus, RegionStatus
 from evilflowers_books_digitalizer.studio.events import EventType
-from evilflowers_books_digitalizer.studio.ports import CleanedPage, LeafPlan
+from evilflowers_books_digitalizer.studio.ports import CleanedPage
 from evilflowers_books_digitalizer.studio.workers import runs
-from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
-from evilflowers_books_digitalizer.studio.workers.stages import common
+from evilflowers_books_digitalizer.studio.workers.context import Uow
 
-PREVIEW_PX = 1600
 #: deskew differences below this move content by under a pixel on a page edge
 SKEW_TOLERANCE_DEG = 0.05
 MOVED_REASON = "page geometry changed by a re-run: check the box and decide again"
-
-
-@dataclass(frozen=True, slots=True)
-class CleanJob:
-    project: str
-    item_id: str
-    plans: list[LeafPlan]
-    overrides: dict[int, PageOverride]
-
-
-def _job(ctx: WorkerContext, run_id: int, page_indices: list[int]) -> CleanJob | None:
-    with ctx.uow() as uow:
-        run = runs.load_run(uow, run_id)
-        book = run.book
-        pages = [p for p in common.selected(book.pages, page_indices)
-                 if p.status == PageStatus.PENDING]
-        runs.enter_stage(uow, run, "clean", len(run.pages or book.pages))
-        if not pages:
-            return None
-        overrides = {p.index: o for p in pages if (o := common.override(p)) is not None}
-        return CleanJob(runs.project_of(book), common.item_id(book),
-                        [common.leaf_plan(p) for p in pages], overrides)
-
-
-def refresh_previews(ctx: WorkerContext, project: str, item: str, image: Path) -> Path:
-    """Browser preview + DZI for one cleaned page; returns the .dzi."""
-    adapters = ctx.adapters(project)
-    return adapters.image_ops.previews(image, common.studio_path(adapters.artifacts, item),
-                                       max_px=PREVIEW_PX)
 
 
 def geometry_changed(page: Page, cleaned: CleanedPage) -> bool:
@@ -96,7 +63,7 @@ def apply_cleaned(uow: Uow, page: Page, cleaned: CleanedPage, dzi: Path, webp: P
     page.width, page.height, page.dpi = cleaned.width, cleaned.height, cleaned.dpi
     page.skew_angle = cleaned.skew_deg
     page.status = PageStatus.CLEANED
-    page.marks = None       # a new cleaned image: the service path sets its own marks after
+    page.marks = None       # a new cleaned image: the applier sets the outcome's marks after
     replace_image(uow, page, cleaned.image, dzi, webp)
 
 
@@ -108,20 +75,3 @@ def replace_image(uow: Uow, page: Page, image: Path, dzi: Path, webp: Path) -> N
     page.version = (page.version or 0) + 1
     uow.emit(EventType.PAGE_UPDATED, runs.project_of(page.book), page.book_pk, page_id=page.id,
              index=page.index, version=page.version, status=page.status)
-
-
-def clean(ctx: WorkerContext, run_id: int, page_indices: list[int]) -> None:
-    job = _job(ctx, run_id, page_indices)
-    if job is None:
-        return
-    adapters = ctx.adapters(job.project)
-    out_dir = ctx.work_dir(job.project, job.item_id) / "clean"
-    cleaned = adapters.cleaner.clean(job.plans, out_dir, job.overrides)
-    dzis = {c.leaf_num: refresh_previews(ctx, job.project, job.item_id, c.image) for c in cleaned}
-    with ctx.uow() as uow:
-        run = runs.load_run(uow, run_id)
-        by_index = {p.index: p for p in run.book.pages}
-        for c in cleaned:
-            webp = adapters.artifacts.path(job.item_id, "leaf_webp", leaf=c.leaf_num)
-            apply_cleaned(uow, by_index[c.leaf_num], c, dzis[c.leaf_num], webp)
-        runs.advance(uow, run, len(cleaned))

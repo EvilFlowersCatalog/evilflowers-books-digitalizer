@@ -173,6 +173,86 @@
   color: var(--text-faint);
 }
 
+/* title page (#15) */
+.titleFields {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+/* scan-mark groups (#14) */
+.marks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mark {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.mark:last-child {
+  border-bottom: 0;
+}
+
+.markThumb {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.markThumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.markInfo {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.markLeaves {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.markActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.splitBox {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.splitLeaves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
 .note {
   padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border);

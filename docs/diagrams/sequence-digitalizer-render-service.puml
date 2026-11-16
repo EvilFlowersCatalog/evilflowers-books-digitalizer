@@ -6,7 +6,7 @@
 '       file on the shared storage) and then render-service's book job (the
 '       media); applying the book renames the media into the IA item layout
 '       and writes the rows and the IA XML documents with the same code as
-'       the in-process render.
+'       the orchestrator's render.finish.
 ' Kind: UML sequence diagram, one book, as implemented on the orchestrator
 '       side; render-service is proposed (evilflowers-render-service#1).
 '       Omitted: pump admission (render is an off-peak stage), reconcile, SSE.
@@ -24,7 +24,7 @@ queue "Valkey db 8" as redis
 participant "render-service\nevilflowers_render.book" as rs <<proposed>>
 collections "Shared storage\n{storage_root}" as fs
 
-orch -> orch : formulas applied: plan render/prepare\n(in-process, portal queue)
+orch -> orch : formulas applied: plan render/prepare\n(the orchestrator's own job, portal queue)
 orch -> opac : metadata lookup (OCR text: ISBN)
 orch -> fs : _hocr.html, _djvu.txt, regions.json;\nrender/request-<run>.json + access hOCR
 orch -> orch : prepare applied: plan render/book

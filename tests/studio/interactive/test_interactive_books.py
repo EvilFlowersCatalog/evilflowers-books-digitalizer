@@ -24,7 +24,11 @@ def test_projects_count_books_per_collection(client, services, tmp_path, seeded)
 
 def test_project_config_is_read_only_and_secret_free(client):
     cfg = client.get("/api/v1/projects/stu/config").json()
-    assert cfg["slug"] == "stu" and cfg["layout_detectors"] == ["heuristic"]
+    assert cfg["slug"] == "stu" and "layout_detectors" not in cfg
+    assert cfg["services"]["clean"] == "evilflowers_scan.clean"     # where each stage runs (#6)
+    assert cfg["services"]["analyze"] == ("evilflowers_ocr_worker.standalone.hocr, "
+                                          "evilflowers_analyzer.standalone.layout, "
+                                          "evilflowers_scan.erase")
     assert cfg["publish"]["api_key_env"] == "EVILFLOWERS_API_KEY"     # the name, never a value
     assert client.get("/api/v1/projects/nope/config").status_code == 404
 

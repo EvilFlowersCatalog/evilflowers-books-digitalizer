@@ -9,6 +9,11 @@ threshold maps one to one onto a caller's answer:
   section A then section B, in the sweep's orientation)
 * ``subject``: EvilFlowersCatalog#191, a choice among the catalog's own categories; the label is
   the category id (the set differs per catalog, so it is not fixed here)
+* ``scan_mark``: the studio's own book-wide mark groups (#14, decider-vision question
+  ``scan_mark``, scan-service#2): one crop per group, not one per occurrence
+* ``title_page``: the title-page prefill (#15). Not labelled on a screen: every metadata form an
+  operator confirms is a labelled case per field (accepted / changed / none), exported in the
+  same JSONL
 
 Every task also accepts :data:`SKIP`: stored, never exported as a label.
 No I/O here; the application layer (``studio.application.labelling``) stores and serves.
@@ -34,6 +39,12 @@ class ItemKind(StrEnum):
     TABLE = "table"
     SECTION_PAIR = "section_pair"
     ENTRY = "entry"
+    MARK_GROUP = "mark_group"          # a studio book's mark group (studio DB, not the catalog)
+    BOOK = "book"                      # a studio book's confirmed metadata form
+
+
+#: item kinds sampled from the studio's own database (the rest come from the catalog)
+STUDIO_KINDS = (ItemKind.MARK_GROUP,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +58,8 @@ class LabelTask:
     title: str
     #: answered on the screen of another task (same item), never asked alone first
     companion_of: str | None = None
+    #: labelled by hand on an item (False: collected elsewhere, e.g. the metadata form)
+    by_hand: bool = True
 
     def accepts(self, value: str, options: Iterable[str] = ()) -> bool:
         return value == SKIP or value in (self.labels or tuple(options))
@@ -63,7 +76,15 @@ TASKS: dict[str, LabelTask] = {t.name: t for t in (
     LabelTask("section_relation", ItemKind.SECTION_PAIR, ("same", "pre", "example", "loose", "none"),
               200, "How is section B related to section A?"),
     LabelTask("subject", ItemKind.ENTRY, (), 200, "Which subject (UDC category) is this book?"),
+    LabelTask("scan_mark", ItemKind.MARK_GROUP,
+              ("stamp", "sticker", "bleed_through", "edge", "content"), 200,
+              "Is this mark part of the printed page, or something added to or around it?"),
+    LabelTask("title_page", ItemKind.BOOK, ("accepted", "changed", "none"), 200,
+              "Did the title-page suggestion hold (per field, from confirmed metadata forms)?",
+              by_hand=False),
 )}
+#: tasks a person answers on an item (SPA, CLI, MCP); ``sample-labels`` / ``label`` take these
+SAMPLED_TASKS: dict[str, LabelTask] = {k: t for k, t in TASKS.items() if t.by_hand}
 
 #: what each label means, as the callers' question criteria word it
 LABEL_HINTS: dict[str, str] = {
@@ -71,6 +92,8 @@ LABEL_HINTS: dict[str, str] = {
     "no": "ToC, form or page layout", "minor_errors": "a few wrong cells", "broken": "unusable",
     "same": "explains the same idea", "pre": "A is a prerequisite of B", "example": "B is an example of A",
     "loose": "loosely related", "none": "unrelated",
+    "sticker": "sticker or label: call number, barcode", "bleed_through": "shows through from the other side",
+    "edge": "scan edge, finger, shadow", "content": "part of the printed page",
 }
 
 

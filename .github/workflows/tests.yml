@@ -13,8 +13,8 @@ concurrency:
 jobs:
   frontend-image:
     name: SPA image stage
-    # The Dockerfile's frontend stage alone (minutes, not the full tooling image), so a
-    # broken pnpm install fails in review instead of on master (#10).
+    # The Dockerfile's frontend stage alone, so a broken pnpm install fails in review
+    # instead of on master (#10).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

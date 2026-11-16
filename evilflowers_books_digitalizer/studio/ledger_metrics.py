@@ -15,19 +15,26 @@ names follow the observability contract (``<service>_…``, base units, ``_secon
 * ``digitalizer_scheduler_capacity{lane}``          jobs admitted in flight now
 * ``digitalizer_scheduler_mode{mode}``              1 for the current mode (normal/peak/contended/paused)
 * ``digitalizer_ledger_scrape_ok``                  0 when the ledger could not be read (logged)
+* ``digitalizer_marks{band}``                       scan marks on the books' pages (#14)
+* ``digitalizer_mark_groups{source,band}``          book-wide mark groups and who decided them
+* ``digitalizer_mark_decider_calls_saved``          decider-vision calls the grouping saved:
+  occurrences of rule- and decider-judged groups, minus one call per decider-judged group
+* ``digitalizer_title_page_fields{field,outcome}``  title-page suggestions the operators
+  confirmed: accepted / changed / none (#15); ``outcome="pending"`` = suggested, not confirmed
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 
-from evilflowers_books_digitalizer.db.models import Book, Job, Run, utcnow
+from evilflowers_books_digitalizer.db.models import Book, Job, MarkGroup, Page, Run, utcnow
 from evilflowers_books_digitalizer.studio.application.uow import SessionFactory, UnitOfWork
 from evilflowers_books_digitalizer.studio.domain import JobStatus, Lane, RunStatus
 from evilflowers_books_digitalizer.studio.orchestration.scheduling import Admission, Mode
@@ -85,7 +92,51 @@ class LedgerCollector:
             since = waiting.get(str(lane))
             oldest.add_metric([str(lane)], (now - since).total_seconds() if since else 0.0)
         yield from (jobs, oldest, run_g, books)
+        yield from self._decisions()
         yield from self._scheduler()
+
+    def _decisions(self) -> Iterator[Any]:
+        """Scan-mark grouping (#14) and title-page prefill (#15), from their rows."""
+        from prometheus_client.core import GaugeMetricFamily
+
+        marks = GaugeMetricFamily("digitalizer_marks", "Scan marks on the books' pages",
+                                  labels=["band"])
+        groups = GaugeMetricFamily("digitalizer_mark_groups", "Book-wide scan-mark groups",
+                                   labels=["source", "band"])
+        saved = GaugeMetricFamily("digitalizer_mark_decider_calls_saved",
+                                  "decider-vision calls the book-wide grouping saved")
+        fields = GaugeMetricFamily("digitalizer_title_page_fields",
+                                   "Title-page suggestions by confirmation outcome",
+                                   labels=["field", "outcome"])
+        bands: Counter[str] = Counter()
+        outcomes: Counter[tuple[str, str]] = Counter()
+        n_saved = 0
+        with UnitOfWork(self._sessions) as uow:
+            s = uow.session
+            for (rows,) in s.execute(select(Page.marks).where(Page.marks.is_not(None))):
+                bands.update(str(r.get("band", "review")) for r in rows or [])
+            for source, band, n, members in s.execute(
+                    select(MarkGroup.source, MarkGroup.band, func.count(),
+                           func.sum(MarkGroup.members))
+                    .group_by(MarkGroup.source, MarkGroup.band)):
+                groups.add_metric([source, band], n)
+                if source in ("rule", "decider"):
+                    n_saved += int(members or 0) - (n if source == "decider" else 0)
+            for suggested, confirmed in s.execute(
+                    select(Book.metadata_suggestions, Book.metadata_confirmed)
+                    .where(Book.metadata_suggestions.is_not(None))):
+                cases = (confirmed or {}).get("fields") or {}
+                for name in ("title", "authors", "publisher", "year"):
+                    if name in cases:
+                        outcomes[(name, str(cases[name].get("outcome")))] += 1
+                    elif isinstance((suggested or {}).get(name), dict):
+                        outcomes[(name, "pending")] += 1
+        for band, n in sorted(bands.items()):
+            marks.add_metric([band], n)
+        saved.add_metric([], n_saved)
+        for (name, outcome), n in sorted(outcomes.items()):
+            fields.add_metric([name, outcome], n)
+        yield from (marks, groups, saved, fields)
 
     def _scheduler(self) -> Iterator[Any]:
         from prometheus_client.core import GaugeMetricFamily

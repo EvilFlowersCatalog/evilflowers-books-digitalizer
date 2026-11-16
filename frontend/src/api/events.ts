@@ -89,7 +89,9 @@ export function planEvent(event: StudioEvent): EventPlan {
     case "book.queued":
       return { invalidate: [...runKey, ...bookFamily(event.book_id)] };
     case "run.finished": {
-      const pages = event.book_id !== null ? [qk.pages(event.book_id)] : [];
+      // a run (re)writes the leaves, the title-page suggestions (#15) and the scan-mark groups (#14)
+      const pages =
+        event.book_id !== null ? [qk.pages(event.book_id), qk.titlePage(event.book_id), qk.markGroups(event.book_id)] : [];
       return { invalidate: [...runKey, ...bookFamily(event.book_id), ...pages] };
     }
     case "page.updated":

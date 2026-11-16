@@ -20,13 +20,13 @@ replacements:
       # the delimiter is the mount's own suffix: everything before it is the root
       - select:
           kind: Deployment
-          labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)
+          labelSelector: app.kubernetes.io/component in (api,orchestrator)
         fieldPaths:
           - spec.template.spec.containers.[name=studio].volumeMounts.[name=raw-scans].mountPath
         options: { delimiter: /raw-scans, index: 0 }
       - select:
           kind: Deployment
-          labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)
+          labelSelector: app.kubernetes.io/component in (api,orchestrator)
         fieldPaths:
           - spec.template.spec.containers.[name=studio].volumeMounts.[name=digitized].mountPath
         options: { delimiter: /digitized, index: 0 }

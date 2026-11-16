@@ -42,6 +42,7 @@ loop each batch (KEDA scales on queue depth)
   redis -[$accent_msg()]> orch : <b>job_done: read outcome,</b>\n<b>check token, promote</b>
 end
 orch -> api : run.progress (SSE)
+orch -> orch : clean/marks: marks grouped across the book,\ndecider-vision once per uncertain group (#14)
 
 par analyze, same loop as clean
   orch -> redis : …ocr_worker.standalone.hocr ×N
@@ -53,6 +54,7 @@ else
   more -> redis : link: job_done
 end
 redis -> orch : job_done ×N (ledger counts)
+orch -> orch : analyze/title_page: decider suggests\ntitle · authors · publisher · year (#15)
 
 orch -> redis : …equation.standalone.formulas
 redis -> more : deliver

@@ -1,18 +1,15 @@
 """Celery application of the digitalizer: ``evilflowers_books_digitalizer.studio.workers.app:celery``.
 
-Queues (``studio.config``) and who consumes them::
+One queue (``studio.config.PORTAL_QUEUE``), consumed by the orchestrator::
 
-    digitalizer.portal       orchestrator: runs, job_done/job_failed callbacks, pump,
-                             reconcile, discover, gate, publish   (+ beat, one replica,
-                             + the ledger's /metrics on $DIGITALIZER_METRICS_PORT)
-    digitalizer.cpu          in-process clean / render            (until scan/render services)
-    digitalizer.ai           in-process layout / formulas         (until analyzer/equation tasks)
-    digitalizer.interactive  in-process operator re-runs          (one replica, always on)
+    digitalizer.portal       runs, job_done/job_failed callbacks, pump, reconcile, discover,
+                             clean_marks, title_page, render_prepare, gate, publish
+                             (+ beat, one replica, + the ledger's /metrics on
+                             $DIGITALIZER_METRICS_PORT)
 
     celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.portal -B
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.cpu
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.ai -c 1
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.interactive
+
+Every pixel and model job runs on a service's own queue (evilflowers-books-digitalizer#6).
 
 No result backend: a job's result returns as a ``link`` callback (studio.orchestration).
 ``acks_late`` + ``reject_on_worker_lost`` + prefetch 1: a job is acknowledged only when
@@ -35,7 +32,7 @@ from celery.signals import setup_logging, worker_process_init, worker_ready
 from kombu import Exchange, Queue
 
 from evilflowers_books_digitalizer.studio.adapters.queue import QUEUES, TRANSPORT_OPTIONS
-from evilflowers_books_digitalizer.studio.config import AI_QUEUE, CPU_QUEUE, PORTAL_QUEUE
+from evilflowers_books_digitalizer.studio.config import PORTAL_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +49,8 @@ ROUTES: dict[str, dict[str, str]] = {
     "digitalizer.reconcile": {"queue": PORTAL_QUEUE},
     "digitalizer.discover": {"queue": PORTAL_QUEUE},
     "digitalizer.export_training": {"queue": PORTAL_QUEUE},
-    "digitalizer.local.clean": {"queue": CPU_QUEUE},
-    "digitalizer.local.analyze": {"queue": AI_QUEUE},
-    "digitalizer.local.formulas": {"queue": AI_QUEUE},
-    "digitalizer.local.render": {"queue": CPU_QUEUE},
+    "digitalizer.local.clean_marks": {"queue": PORTAL_QUEUE},
+    "digitalizer.local.title_page": {"queue": PORTAL_QUEUE},
     "digitalizer.local.render_prepare": {"queue": PORTAL_QUEUE},
     "digitalizer.local.gate": {"queue": PORTAL_QUEUE},
     "digitalizer.local.publish": {"queue": PORTAL_QUEUE},

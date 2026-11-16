@@ -12,6 +12,7 @@ CREDENTIALS.md
 output/
 output_local/
 data/
+.data/
 # Generated catalog draft (regenerate with notebook 10)
 configs/catalog_template.xlsx
 

@@ -24,7 +24,6 @@ STAGES: dict[RunKind, tuple[str, ...]] = {
     RunKind.RENDER: ("render",),
     RunKind.PUBLISH: ("publish",),
 }
-DEFAULT_CHUNK = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,12 +31,11 @@ class WorkPlan:
     run_id: int
     stages: tuple[str, ...]
     pages: tuple[int, ...]          # leaf numbers the page stages work on
-    chunk: int                      # leaves per clean task
     interactive: bool
 
-    def chunks(self, size: int | None = None) -> list[list[int]]:
-        """The leaves in batches of ``size`` (default: the project's chunk size)."""
-        n = max(1, size or self.chunk)
+    def chunks(self, size: int) -> list[list[int]]:
+        """The leaves in batches of ``size`` (the stage route's batch for the lane)."""
+        n = max(1, size)
         return [list(self.pages[i:i + n]) for i in range(0, len(self.pages), n)]
 
 
@@ -51,9 +49,9 @@ class LeafLayout:
 
 def plan_leaves(ctx: WorkerContext, project: str, collection: str, external_id: str
                 ) -> LeafLayout:
-    """PageCleaner.plan over the book's frames (reads every frame: no transaction open)."""
+    """LeafPlanner.plan over the book's frames (reads every frame: no transaction open)."""
     scanned = ctx.adapters(project).scans.book(collection, external_id)
-    plans = ctx.adapters(project).cleaner.plan(scanned.frames)
+    plans = ctx.adapters(project).planner.plan(scanned.frames)
     if not plans:
         raise PortError(f"no readable frames for {collection}/{external_id}")
     return LeafLayout(scanned.frames, plans)
@@ -119,9 +117,7 @@ def work_plan(ctx: WorkerContext, run: Run) -> WorkPlan:
     kind = RunKind(run.kind)
     indices = (list(run.pages) if run.pages is not None and kind == RunKind.RERUN
                else [p.index for p in book.pages])
-    chunk = int(ctx.project(runs.project_of(book)).pipeline.get("chunk_size", DEFAULT_CHUNK))
-    return WorkPlan(run.id, STAGES[kind], tuple(sorted(indices)), max(1, chunk),
-                    run.interactive)
+    return WorkPlan(run.id, STAGES[kind], tuple(sorted(indices)), run.interactive)
 
 
 def orchestrate(ctx: WorkerContext, run_id: int) -> WorkPlan | None:

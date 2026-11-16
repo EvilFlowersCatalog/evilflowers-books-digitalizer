@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from batch_harness import PROJECT, Studio, make_studio
+from batch_harness import CLEAN, PROJECT, SERVICES, Studio, make_studio
 
 from evilflowers_books_digitalizer.db.models import Book, Job, Run, utcnow
 from evilflowers_books_digitalizer.studio.config import (
@@ -89,14 +89,37 @@ def _started_full(studio: Studio) -> int:
     return run_id
 
 
+def _local_dispatched(studio: Studio) -> tuple[int, ledger.Dispatch]:
+    """A render run whose first job, the orchestrator's own ``render/prepare``, is in flight."""
+    studio.execute(RunKind.FULL)
+    run_id = studio.new_run(RunKind.RENDER)
+    assert ledger.start_run(_ctx(), run_id) == "started"
+    transport = RecordingTransport()
+    _pump(transport)
+    (d,) = transport.sent
+    assert (d.task, d.queue) == ("digitalizer.local.render_prepare", "digitalizer.portal")
+    return run_id, d
+
+
 # ---------------------------------------------------------------- planning
 def test_full_run_plans_its_first_stage_once(discovered: Studio) -> None:
     run_id = _started_full(discovered)
     assert ledger.start_run(_ctx(), run_id) == "skipped"         # a duplicate digitalizer.run
-    jobs = _jobs(discovered, run_id)                               # 2 spreads = 4 leaves, chunk 3
-    assert [(j.stage, j.status, j.lane) for j in jobs] == [("clean", "planned", "bulk")] * 2
-    assert [j.params for j in jobs] == [{"pages": [0, 1, 2]}, {"pages": [3]}]
-    assert jobs[0].task == "digitalizer.local.clean"
+    jobs = _jobs(discovered, run_id)                               # 2 spreads = 4 leaves, batch 32
+    assert [(j.stage, j.status, j.lane, j.backend) for j in jobs] == [
+        ("clean", "planned", "bulk", "service")]
+    assert jobs[0].params == {"pages": [0, 1, 2, 3]}
+    assert (jobs[0].task, jobs[0].queue) == (CLEAN, "evilflowers_scan.standalone")
+
+
+def test_a_book_is_split_into_batches_of_the_route(tmp_path: Path) -> None:
+    from evilflowers_books_digitalizer.studio.config import _orchestration
+
+    studio = make_studio(tmp_path, orchestration=_orchestration(
+        {"stages": {"clean": {"batch": 3}}}))
+    tasks.discover.delay(PROJECT)
+    run_id = _started_full(studio)
+    assert [j.params for j in _jobs(studio, run_id)] == [{"pages": [0, 1, 2]}, {"pages": [3]}]
 
 
 def test_interactive_rerun_plans_on_the_interactive_lane_and_queue(discovered: Studio) -> None:
@@ -104,8 +127,8 @@ def test_interactive_rerun_plans_on_the_interactive_lane_and_queue(discovered: S
     run_id = discovered.new_run(RunKind.RERUN, pages=[1], interactive=True)
     ledger.start_run(_ctx(), run_id)
     job = _jobs(discovered, run_id)[0]
-    assert (job.lane, job.queue, job.params) == ("interactive", "digitalizer.interactive",
-                                                {"pages": [1]})
+    assert (job.lane, job.queue, job.params) == (
+        "interactive", "evilflowers_scan.standalone.interactive", {"pages": [1]})
 
 
 # ---------------------------------------------------------------- dispatch and settle
@@ -113,27 +136,29 @@ def test_pump_claims_with_a_fresh_token_and_settle_advances_the_stage(discovered
     run_id = _started_full(discovered)
     transport = RecordingTransport()
     _pump(transport)
-    first, second = transport.sent
+    (first,) = transport.sent
     job = discovered.session().get(Job, first.job_id)
     assert job.status == JobStatus.DISPATCHED and job.attempt == 1
-    assert first.kwargs == {"job_id": job.id, "token": job.token, "pages": [0, 1, 2]}
-    assert first.task_id == job.task_id and first.queue == "digitalizer.cpu"
+    assert first.kwargs["token"] == job.token and first.kwargs["job"] == "clean-0000-a1"
+    assert first.task_id == job.task_id and first.queue == "evilflowers_scan.standalone"
 
-    for d in (first, second):
-        tasks.clean.run(**d.kwargs)                                 # the worker, inline
-    assert not ledger.settle(_ctx(), first.job_id, first.task_id, {}).run_finished
-    assert [j.stage for j in _jobs(discovered, run_id)] == ["clean"] * 2   # stage still open
-    assert ledger.settle(_ctx(), second.job_id, second.task_id, {}).applied
-    stages = [j.stage for j in _jobs(discovered, run_id)]
-    assert stages == ["clean"] * 2 + ["analyze"] * 4                # one analyze job per leaf
+    SERVICES[CLEAN](**first.kwargs)                                 # the service, inline
+    assert ledger.settle(_ctx(), first.job_id, first.task_id, {}).applied
+    jobs = _jobs(discovered, run_id)
+    assert [(j.stage, contract.part(j), j.backend) for j in jobs] == [
+        ("clean", None, "service"), ("clean", "marks", "local")]   # the book-wide tail (#14)
+    _pump(transport)
+    marks = transport.sent[-1]
+    assert marks.kwargs == {"job_id": jobs[1].id, "token": marks.kwargs["token"], "part": "marks"}
+    tasks.clean_marks.run(**marks.kwargs)
+    assert ledger.settle(_ctx(), marks.job_id, marks.task_id, {}).applied
+    stages = [(j.stage, contract.part(j)) for j in _jobs(discovered, run_id)]
+    assert stages[2:] == [("analyze", "hocr"), ("analyze", "layout")]   # one batch, two parts
 
 
 def test_a_stale_attempt_is_refused_by_token_and_by_task_id(discovered: Studio) -> None:
-    _started_full(discovered)
-    transport = RecordingTransport()
-    _pump(transport)
-    d = transport.sent[0]
-    out = tasks.clean.run(job_id=d.job_id, token="not-the-token", pages=[0, 1])
+    _, d = _local_dispatched(discovered)
+    out = tasks.render_prepare.run(job_id=d.job_id, token="not-the-token")
     assert out["skipped"] is True                                   # the body never ran
     assert ledger.settle(_ctx(), d.job_id, "another-attempt", {}).applied is False
     assert ledger.fail(_ctx(), d.job_id, "another-attempt") == []
@@ -161,7 +186,7 @@ def test_failed_job_fails_the_run_and_revokes_its_siblings(discovered: Studio) -
     assert [j.status for j in _jobs(discovered, run_id)] == ["failed", "revoked"]
 
 
-def test_failed_local_task_marks_run_and_book(discovered: Studio) -> None:
+def test_a_failed_service_job_marks_run_and_book(discovered: Studio) -> None:
     from evilflowers_books_digitalizer.studio.ports import PortError
     from evilflowers_books_digitalizer.studio.testing import fakes
 
@@ -169,7 +194,7 @@ def test_failed_local_task_marks_run_and_book(discovered: Studio) -> None:
         def clean(self, plans, out_dir, overrides=None):
             raise PortError("scantailor exploded")
 
-    discovered.adapters.cleaner = Broken()
+    discovered.engines.cleaner = Broken()
     run = discovered.execute(RunKind.FULL)                          # eager: errback fails it
     assert run.status == RunStatus.FAILED and "scantailor exploded" in (run.error or "")
     assert discovered.book().status == BookStatus.ERROR
@@ -238,8 +263,8 @@ def test_publish_held_behind_a_render_publishes_after_it_end_to_end(discovered: 
 
 # ---------------------------------------------------------------- reconcile
 def _dispatched(studio: Studio) -> tuple[int, ledger.Dispatch]:
-    """A full run whose single clean job (2 leaves, chunk 3 -> one chunk) is in flight."""
-    studio.adapters.cleaner = _one_leaf_per_frame()
+    """A full run whose single clean job (2 leaves, one batch) is in flight on scan-service."""
+    studio.adapters.planner = _one_leaf_per_frame()
     run_id = _started_full(studio)
     transport = RecordingTransport()
     _pump(transport)
@@ -257,9 +282,9 @@ def _one_leaf_per_frame():
     return Whole(dpi=300)
 
 
-def test_a_silent_started_job_is_resent_with_a_new_token(discovered: Studio) -> None:
-    """The worker died (or its pod was preempted) mid-job: no heartbeat, re-sent."""
-    run_id, d = _dispatched(discovered)
+def test_a_silent_started_local_job_is_resent_with_a_new_token(discovered: Studio) -> None:
+    """The orchestrator died (or its pod was preempted) mid-job: no heartbeat, re-sent."""
+    _, d = _local_dispatched(discovered)
     assert ledger.begin(_ctx(), d.job_id, d.kwargs["token"]) is not None
     later = utcnow() + timedelta(seconds=OrchestrationConfig().stale_after_seconds + 5)
     report = ledger.reconcile(_ctx(), RecordingTransport(), now=later)
@@ -269,7 +294,7 @@ def test_a_silent_started_job_is_resent_with_a_new_token(discovered: Studio) -> 
     transport = RecordingTransport()
     _pump(transport)
     assert transport.sent[0].kwargs["token"] != d.kwargs["token"]
-    assert tasks.clean.run(**d.kwargs)["skipped"] is True           # the old message, redelivered
+    assert tasks.render_prepare.run(**d.kwargs)["skipped"] is True  # the old message, redelivered
 
 
 def test_a_dispatched_job_never_picked_up_is_resent_after_its_deadline(discovered: Studio) -> None:
@@ -285,7 +310,7 @@ def test_a_dispatched_job_never_picked_up_is_resent_after_its_deadline(discovere
 
 
 def test_a_long_job_with_a_fresh_heartbeat_is_left_alone(discovered: Studio) -> None:
-    _, d = _dispatched(discovered)
+    _, d = _local_dispatched(discovered)
     ledger.begin(_ctx(), d.job_id, d.kwargs["token"])
     soon = utcnow() + timedelta(seconds=30)
     assert ledger.reconcile(_ctx(), RecordingTransport(), now=soon) == \
@@ -374,12 +399,13 @@ def test_at_peak_bulk_waits_while_an_operator_rerun_goes_first(discovered: Studi
 def test_queue_caps_and_off_peak_stages(discovered: Studio) -> None:
     run_id = _started_full(discovered)
     s = discovered.session()
-    s.add(Job(run_pk=run_id, stage="clean", seq=1, lane="bulk", backend="local",
-              task="digitalizer.local.clean", queue="digitalizer.cpu", params={"pages": [1]},
+    s.add(Job(run_pk=run_id, stage="clean", seq=1, lane="bulk", backend="service",
+              task=CLEAN, queue="evilflowers_scan.standalone", params={"pages": [1]},
               status="planned"))
     s.commit()
     transport = RecordingTransport()
-    _pump(transport, Admission(_policy(queue_inflight={"digitalizer.cpu": 1})), now=NIGHT)
+    _pump(transport, Admission(_policy(queue_inflight={"evilflowers_scan.standalone": 1})),
+          now=NIGHT)
     assert len(transport.sent) == 1
     held = Admission(_policy(off_peak_stages=("clean",), bulk_inflight_peak=8))
     transport = RecordingTransport()
@@ -401,13 +427,8 @@ def test_redis_queue_depth_reports_only_sources_over_their_limit() -> None:
 
 # ---------------------------------------------------------------- a service-backed stage
 def _service_studio(tmp_path: Path) -> Studio:
-    routes = dict(OrchestrationConfig().routes)
-    routes["clean"] = StageRoute("service", "evilflowers_scan.clean",
-                                 "evilflowers_scan.standalone",
-                                 "evilflowers_scan.standalone.interactive", 3600)
-    studio = make_studio(tmp_path, orchestration=OrchestrationConfig(routes=routes),
-                         storage_root=tmp_path)
-    studio.adapters.cleaner = _one_leaf_per_frame()               # one clean job
+    studio = make_studio(tmp_path)
+    studio.adapters.planner = _one_leaf_per_frame()               # two leaves, one clean job
     tasks.discover.delay(PROJECT)
     return studio
 
@@ -472,9 +493,7 @@ def test_reconcile_applies_an_outcome_whose_callback_was_lost(tmp_path: Path) ->
 
 
 def test_service_stage_without_storage_root_fails_the_run_at_dispatch(tmp_path: Path) -> None:
-    routes = dict(OrchestrationConfig().routes)
-    routes["clean"] = StageRoute("service", "evilflowers_scan.clean", "q", "q", 60)
-    studio = make_studio(tmp_path, orchestration=OrchestrationConfig(routes=routes))
+    studio = make_studio(tmp_path, storage_root=None)          # load_config refuses this
     tasks.discover.delay(PROJECT)
     run_id = _started_full(studio)
     _pump(RecordingTransport())

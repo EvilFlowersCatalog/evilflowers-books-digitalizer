@@ -18,7 +18,7 @@ def item_id(book: Book) -> str:
 
 
 def leaf_plan(page: Page) -> LeafPlan:
-    """The persisted plan of a leaf (what :meth:`PageCleaner.plan` decided once)."""
+    """The persisted plan of a leaf (what :meth:`LeafPlanner.plan` decided once)."""
     if not page.source_path or not page.crop_box:
         raise PortError(f"leaf {page.index} of book {page.book_pk} was never planned")
     return LeafPlan(page.index, Path(page.source_path), page.side, BBox.from_xywh(page.crop_box),
@@ -51,7 +51,7 @@ def scanned_book(book: Book) -> ScannedBook:
 
 
 def studio_path(store: ArtifactStore, item: str) -> Path:
-    """``<id>_studio`` — where ImageOps writes previews and tiles."""
+    """``<id>_studio`` — the studio's working files of an item (requests, attempt dirs)."""
     return studio_dir(store.item_dir(item), item)
 
 

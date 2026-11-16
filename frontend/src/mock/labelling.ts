@@ -11,7 +11,8 @@ import type {
   LabelTaskOut,
 } from "../api/types";
 
-const CROP = (text: string) =>
+/** A placeholder crop as a data URI: an `<img src>` never goes through the mock transport. */
+export const CROP = (text: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="240"><rect width="100%" height="100%" fill="#f8fafc" stroke="#94a3b8"/><text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#334155">${text}</text></svg>`,
   )}`;
@@ -26,7 +27,15 @@ const TASKS: Omit<LabelTaskOut, "items" | "labelled" | "skipped" | "double" | "m
   { name: "section_relation", title: "How is section B related to section A?", item_kind: "section_pair", companion_of: null, target: 200,
     labels: [["same", "explains the same idea"], ["pre", "A is a prerequisite of B"], ["example", "B is an example of A"], ["loose", "loosely related"], ["none", "unrelated"]].map(([key, hint]) => ({ key: key!, hint: hint! })) },
   { name: "subject", title: "Which subject (UDC category) is this book?", item_kind: "entry", companion_of: null, target: 200, labels: [] },
+  { name: "scan_mark", title: "Is this mark part of the printed page, or something added to or around it?", item_kind: "mark_group", companion_of: null, target: 200,
+    labels: [["stamp", "stamp, signature or logo"], ["sticker", "sticker or label: call number, barcode"], ["bleed_through", "shows through from the other side"],
+             ["edge", "scan edge, finger, shadow"], ["content", "part of the printed page"]].map(([key, hint]) => ({ key: key!, hint: hint! })) },
+  { name: "title_page", title: "Did the title-page suggestion hold (per field, from confirmed metadata forms)?", item_kind: "book", companion_of: null, target: 200,
+    labels: ["accepted", "changed", "none"].map((key) => ({ key, hint: null })) },
 ];
+
+/** Tasks collected outside this screen (title_page): `next` and `samples` answer 400. */
+export const FORM_TASKS: ReadonlySet<LabelTaskName> = new Set(["title_page"]);
 
 const OPTIONS = [
   { id: "cat-004", term: "004.8", label: "Umelá inteligencia" },
@@ -53,6 +62,12 @@ const ITEMS: LabelItemOut[] = [
   { id: 30, kind: "entry", key: "entry:e1", language: "sk", ref: { entry_id: "e1", catalog_id: "c1" },
     payload: { title: "Vektorová analýza", summary: "Učebnica pre študentov FEI.", table_of_contents: ["1 Úvod", "2 Gradient", "3 Divergencia"], options: OPTIONS },
     image_url: null, mine: {} },
+  ...[["stamp", 2, 5, 6], ["sticker", 1, 2, 2], ["bleed", 6, 2, 3]].map(([text, leaf, leaves, occurrences], i) => ({
+    id: 40 + i, kind: "mark_group" as const, key: `mark_group:${700 + i}`, language: "sk",
+    ref: { book_id: "1", group_id: String(700 + i), leaf: String(leaf) },
+    payload: { title: "Fyzika I — vektory a sily", leaf: Number(leaf), leaves: Number(leaves), occurrences: Number(occurrences) },
+    image_url: CROP(`${text} (leaf ${leaf})`), mine: {},
+  })),
 ];
 
 interface MockLabel extends LabelAnswer {
@@ -64,12 +79,19 @@ interface MockLabel extends LabelAnswer {
 export class MockLabelling {
   private labels: MockLabel[] = [];
 
+  /** `formCases`: title_page progress, read from the mock books' confirmed title-page forms. */
+  constructor(private readonly formCases: () => { books: number; cases: number } = () => ({ books: 0, cases: 0 })) {}
+
   private kindOf(task: LabelTaskName) {
     return TASKS.find((t) => t.name === task)!.item_kind;
   }
 
   tasks(op: string): LabelTaskOut[] {
     return TASKS.map((t) => {
+      if (FORM_TASKS.has(t.name)) {
+        const { books, cases } = this.formCases();
+        return { ...t, items: books, labelled: cases, skipped: 0, double: 0, mine: 0, left_for_me: 0 };
+      }
       const rows = this.labels.filter((l) => l.task === t.name);
       const answered = rows.filter((l) => l.value !== "skip");
       const per = new Map<number, number>();

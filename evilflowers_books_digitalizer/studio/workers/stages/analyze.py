@@ -1,10 +1,12 @@
-"""``studio.analyze``: one cleaned page -> OCR + layout detectors -> ``fuse()`` -> regions.
+"""Stage analyze, the orchestrator's half: OCR + layout from the services -> ``fuse()`` -> regions.
 
-Operator decisions survive re-runs:
+ocr-service (hOCR) and analyzer-service (Docling layout) each read a leaf batch; the second
+of the two to be applied fuses the batch here (``appliers.fuse_batch``). Operator decisions
+survive re-runs:
 
-* confirmed regions with action ``remove`` are erased from the page image itself
-  (it feeds OCR, previews and every rendition) before anything reads it;
-* confirmed ``as_image`` regions are erased only from the copy Tesseract reads;
+* confirmed regions with action ``remove`` are sent as masks to both services, then erased
+  from the page image itself by scan-service (``evilflowers_scan.erase``);
+* confirmed ``as_image`` regions are masked only for OCR;
 * confirmed and rejected regions are kept as rows and enter ``fuse`` as operator
   proposals, so a detector's overlapping guess is absorbed by the operator's
   decision instead of re-appearing (a rejected stamp stays rejected).
@@ -35,11 +37,9 @@ from evilflowers_books_digitalizer.studio.domain import (
     fuse,
 )
 from evilflowers_books_digitalizer.studio.events import EventType
-from evilflowers_books_digitalizer.studio.ports import OcrPage
 from evilflowers_books_digitalizer.studio.workers import runs
 from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
 from evilflowers_books_digitalizer.studio.workers.stages import common
-from evilflowers_books_digitalizer.studio.workers.stages.clean import refresh_previews
 
 #: region statuses that are an operator's decision (kept across re-runs)
 DECIDED = (RegionStatus.CONFIRMED, RegionStatus.REJECTED)
@@ -51,22 +51,6 @@ class Decided:
     bbox: BBox
     status: RegionStatus
     action: RegionAction
-
-
-@dataclass(frozen=True, slots=True)
-class AnalyzeJob:
-    project: str
-    item_id: str
-    leaf: int
-    image: Path
-    language: str
-    dpi: int
-    decided: list[Decided]
-    marks: tuple[RegionProposal, ...] = ()    # scan-service's candidates (clean outcome)
-
-    def boxes(self, action: RegionAction) -> list[BBox]:
-        return [d.bbox for d in self.decided
-                if d.status == RegionStatus.CONFIRMED and d.action == action]
 
 
 def decided_of(page: Page) -> list[Decided]:
@@ -119,45 +103,11 @@ def ocr_language(ctx: WorkerContext, project: str, page: Page) -> str:
             else ctx.project(project).ocr_language)
 
 
-def _job(ctx: WorkerContext, run_id: int, page_index: int) -> AnalyzeJob | None:
-    with ctx.uow() as uow:
-        run = runs.load_run(uow, run_id)
-        book = run.book
-        runs.enter_stage(uow, run, "analyze", len(run.pages or book.pages))
-        page = next((p for p in book.pages if p.index == page_index), None)
-        if page is None or page.status != PageStatus.CLEANED or not page.clean_path:
-            return None             # not cleaned, or already analyzed in this run
-        project = runs.project_of(book)
-        return AnalyzeJob(project, common.item_id(book), page.index, Path(page.clean_path),
-                          ocr_language(ctx, project, page), page.dpi or 300, decided_of(page),
-                          tuple(mark_proposals(page)))
-
-
-def _ocr_input(ctx: WorkerContext, job: AnalyzeJob) -> Path:
-    ops = ctx.adapters(job.project).image_ops
-    removed = job.boxes(RegionAction.REMOVE)
-    if removed:
-        ops.erase(job.image, removed, job.image)
-        refresh_previews(ctx, job.project, job.item_id, job.image)
-    pictures = job.boxes(RegionAction.AS_IMAGE)
-    if not pictures:
-        return job.image
-    ocr_copy = ctx.work_dir(job.project, job.item_id) / "ocr" / job.image.name
-    return ops.erase(job.image, pictures, ocr_copy)
-
-
 def fuse_with(decided: list[Decided], proposals: list[RegionProposal]) -> list[FusedRegion]:
     """Detector proposals fused with the operator's decisions; only the machine rows return
     (the operator's own rows stay as they are)."""
     operator = [RegionProposal(d.kind, d.bbox, RegionSource.OPERATOR) for d in decided]
     return [f for f in fuse(operator + proposals) if f.source != RegionSource.OPERATOR]
-
-
-def detect(ctx: WorkerContext, job: AnalyzeJob) -> tuple[OcrPage, list[FusedRegion]]:
-    adapters = ctx.adapters(job.project)
-    ocr = adapters.ocr.recognize(_ocr_input(ctx, job), language=job.language, dpi=job.dpi)
-    proposals = [p for d in adapters.detectors for p in d.detect(job.image, ocr=ocr)]
-    return ocr, fuse_with(job.decided, proposals + list(job.marks))
 
 
 def _region(f: FusedRegion) -> Region:
@@ -185,7 +135,7 @@ def _replace_undecided(session: Session, page_pk: int) -> None:
 
 def store(uow: Uow, run: Run, page: Page, *, text: str, mean_conf: float, hocr_path: Path,
           fused: list[FusedRegion]) -> None:
-    """One page's analysis into its rows (in-process and service path alike)."""
+    """One page's analysis (the fused services' results) into its rows."""
     _replace_undecided(uow.session, page.id)
     uow.session.expire(page, ["regions"])
     page.regions.extend(_region(f) for f in fused)
@@ -197,19 +147,3 @@ def store(uow: Uow, run: Run, page: Page, *, text: str, mean_conf: float, hocr_p
              index=page.index, disputed=disputed)
     uow.emit(EventType.PAGE_UPDATED, project, page.book_pk, page_id=page.id,
              index=page.index, version=page.version, status=page.status)
-
-
-def analyze(ctx: WorkerContext, run_id: int, page_index: int) -> None:
-    job = _job(ctx, run_id, page_index)
-    if job is None:
-        return
-    ocr, fused = detect(ctx, job)
-    hocr_path = ctx.work_dir(job.project, job.item_id) / "hocr" / f"{job.leaf:04d}.html"
-    hocr_path.parent.mkdir(parents=True, exist_ok=True)
-    hocr_path.write_text(ocr.hocr, encoding="utf-8")
-    with ctx.uow() as uow:
-        run = runs.load_run(uow, run_id)
-        page = next(p for p in run.book.pages if p.index == page_index)
-        store(uow, run, page, text=ocr.text, mean_conf=ocr.mean_conf, hocr_path=hocr_path,
-              fused=fused)
-        runs.advance(uow, run)

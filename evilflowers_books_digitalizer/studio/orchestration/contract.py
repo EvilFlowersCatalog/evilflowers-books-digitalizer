@@ -68,6 +68,9 @@ class Mark(BaseModel):
     band: Literal["keep", "review", "hide"] = "review"
     model: str | None = None          # "signals", or the decider's model@revision
     reason: str | None = None
+    #: the detector's evidence: ``dhash`` (64-bit hex), ``aspect``, ``position``, ``repeats``…
+    #: The book-wide grouping (#14) reads ``dhash`` and ``aspect``.
+    signals: dict[str, Any] = {}
 
 
 class CleanedLeaf(BaseModel):
@@ -137,6 +140,9 @@ class FormulaAnswer(BaseModel):
     key: str                    # the region key the message gave (``region-<id>``)
     text: str | None = None     # LaTeX (task formula) or text with inline math (task ocr)
     model: str | None = None    # provenance, e.g. "paddleocr-vl:<revision>"
+    #: the service's own check doubts the answer (repetition, render SSIM, onnx cross-check)
+    disputed: bool = False
+    reason: str | None = None
 
 
 class FormulasOutcome(Outcome):

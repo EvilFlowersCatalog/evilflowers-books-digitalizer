@@ -12,6 +12,9 @@ export const qk = {
   books: (query: BookQuery) => ["books", query] as const,
   book: (id: number) => ["book", id] as const,
   pages: (bookId: number) => ["pages", bookId] as const,
+  /** top-level (not under `["book", id]`): a book refetch must not reset the operator's draft */
+  titlePage: (bookId: number) => ["titlePage", bookId] as const,
+  markGroups: (bookId: number) => ["markGroups", bookId] as const,
   page: (id: number) => ["page", id] as const,
   run: (id: number) => ["run", id] as const,
   labelTasks: () => ["labelling", "tasks"] as const,

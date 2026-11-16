@@ -1,41 +1,40 @@
-"""Batch adapters in isolation (no external tools, no network, no model weights)."""
+"""The orchestrator's adapters: scans, artifacts, leaf planning, hOCR, metadata, decider, registry."""
 
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+import httpx
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from evilflowers_books_digitalizer.studio import ports
+from evilflowers_books_digitalizer.studio.adapters import registry
 from evilflowers_books_digitalizer.studio.adapters.artifacts import IaArtifactStore
-from evilflowers_books_digitalizer.studio.adapters.formula import NoFormula, VlmSidecar
-from evilflowers_books_digitalizer.studio.adapters.imaging import PillowImageOps, ScanTailorCleaner
-from evilflowers_books_digitalizer.studio.adapters.imaging.scantailor import cut_leaf, leaf_crop
-from evilflowers_books_digitalizer.studio.adapters.layout import HeuristicLayout, OnnxLayout
+from evilflowers_books_digitalizer.studio.adapters.decider import HttpDecider
+from evilflowers_books_digitalizer.studio.adapters.imaging import SpreadPlanner
+from evilflowers_books_digitalizer.studio.adapters.imaging.crops import crop_png
 from evilflowers_books_digitalizer.studio.adapters.metadata import (
     CompositeMetadata,
     ExcelMetadata,
     OcrExtractMetadata,
     OpacMetadata,
 )
-from evilflowers_books_digitalizer.studio.adapters.ocr import TesseractOcr
-from evilflowers_books_digitalizer.studio.adapters.ocr.hocr import (
-    empty_page,
-    hocr_document,
-    page_text,
-    relabel_page,
-)
-from evilflowers_books_digitalizer.studio.adapters.render import StudioRenderer, stage_pages
 from evilflowers_books_digitalizer.studio.adapters.scans import FilesystemScanStore
 from evilflowers_books_digitalizer.studio.config import ProjectConfig, StudioConfig
-from evilflowers_books_digitalizer.studio.domain import BBox, PageOverride, RegionKind
+from evilflowers_books_digitalizer.studio.domain import BBox
+from evilflowers_books_digitalizer.studio.hocr import (
+    empty_page,
+    hocr_document,
+    parse_pages,
+    relabel_page,
+)
 from evilflowers_books_digitalizer.studio.metadata import ItemMetadata
-from evilflowers_books_digitalizer.studio.ports import FormulaJob, LeafPlan, PortError, ScannedBook
+from evilflowers_books_digitalizer.studio.ports import PortError, ScannedBook
 from evilflowers_books_digitalizer.studio.testing import fakes
-from evilflowers_books_digitalizer.studio.adapters import registry
 
 
 def _project(tmp_path: Path, **kw: Any) -> ProjectConfig:
@@ -48,13 +47,8 @@ def test_adapters_satisfy_ports(tmp_path: Path) -> None:
     pairs = [
         (FilesystemScanStore(tmp_path), ports.ScanStore),
         (IaArtifactStore(tmp_path, "stu"), ports.ArtifactStore),
-        (ScanTailorCleaner(), ports.PageCleaner),
-        (PillowImageOps(), ports.ImageOps),
-        (TesseractOcr(), ports.OcrEngine),
-        (HeuristicLayout(), ports.LayoutDetector),
-        (OnnxLayout(tmp_path / "m.onnx"), ports.LayoutDetector),
-        (NoFormula(), ports.FormulaRecognizer),
-        (StudioRenderer(), ports.Renderer),
+        (SpreadPlanner(), ports.LeafPlanner),
+        (HttpDecider("http://decider"), ports.Decider),
         (CompositeMetadata(project, []), ports.MetadataProvider),
         (OcrExtractMetadata(project), ports.MetadataProvider),
     ]
@@ -98,150 +92,94 @@ def test_ia_artifact_store_layout(tmp_path: Path) -> None:
         store.path(item, "bogus")
 
 
-# ---------------------------------------------------------------- imaging
-def test_erase_keeps_mode_and_previews_write_dzi(tmp_path: Path) -> None:
-    page = tmp_path / "0002.tif"
-    Image.new("1", (600, 400), 0).save(page)
-    ops = PillowImageOps()
-    out = ops.erase(page, [BBox(10, 10, 50, 30)], tmp_path / "erased.tif")
-    with Image.open(out) as im:
-        assert im.mode == "1" and im.getpixel((20, 20)) == 255 and im.getpixel((60, 60)) == 0
-    dzi = ops.previews(page, tmp_path / "item_studio", max_px=200)
-    assert dzi == tmp_path / "item_studio" / "dzi" / "0002.dzi"
-    assert 'Width="600" Height="400"' in dzi.read_text()
-    levels = sorted(int(p.name) for p in (dzi.parent / "0002_files").iterdir())
-    assert levels == list(range(11))                      # ceil(log2(600)) = 10
-    assert (dzi.parent / "0002_files" / "10" / "2_1.jpg").exists()
-    with Image.open(tmp_path / "item_studio" / "leaves" / "0002.webp") as im:
-        assert max(im.size) == 200
-
-
-def test_cleaner_plans_spreads_and_single_pages(tmp_path: Path) -> None:
+# ---------------------------------------------------------------- leaf planning
+def test_planner_plans_spreads_and_single_pages(tmp_path: Path) -> None:
     spreads = fakes.make_frames(tmp_path / "spreads", 2)
-    plans = ScanTailorCleaner().plan(spreads)
+    plans = SpreadPlanner().plan(spreads)
     assert [(p.leaf_num, p.side, p.hand_side) for p in plans] == [
         (0, 0, "LEFT"), (1, 1, "RIGHT"), (2, 0, "LEFT"), (3, 1, "RIGHT")]
     assert plans[0].crop.x1 == plans[1].crop.x0 and plans[1].crop.x1 == 400
 
     singles = fakes.make_frames(tmp_path / "singles", 3, spread=False, size=(300, 400))
-    plans = ScanTailorCleaner().plan(singles)
+    plans = SpreadPlanner().plan(singles)
     assert [(p.leaf_num, p.side, p.hand_side) for p in plans] == [
         (0, None, "RIGHT"), (1, None, "LEFT"), (2, None, "RIGHT")]
     assert plans[0].crop == BBox(0, 0, 300, 400)
-    assert ScanTailorCleaner(split=False).plan(spreads)[1].frame == spreads[1]
+    assert SpreadPlanner(split=False).plan(spreads)[1].frame == spreads[1]
 
 
-def test_cut_leaf_rotates_crops_and_deskews(tmp_path: Path) -> None:
+def test_planner_skips_unreadable_frames(tmp_path: Path) -> None:
     frames = fakes.make_frames(tmp_path, 1)
-
-    frame = np.zeros((300, 400, 3), np.uint8)
-    frame[:, 200:] = 255
-    plan = LeafPlan(0, frames[0], 1, BBox(200, 0, 400, 300), 0, "RIGHT")
-    assert cut_leaf(frame, plan, None).shape[:2] == (300, 200)
-    assert cut_leaf(frame, plan, PageOverride(crop=BBox(10, 20, 110, 220))).shape[:2] == (200, 100)
-    rotated = LeafPlan(0, frames[0], None, BBox(0, 0, 300, 400), 90)
-    assert cut_leaf(frame, rotated, None).shape[:2] == (400, 300)      # crop after rotation
-    with pytest.raises(PortError):
-        cut_leaf(frame, plan, PageOverride(crop=BBox(900, 900, 950, 950)))
+    junk = tmp_path / "junk.tif"
+    junk.write_bytes(b"not an image")
+    assert [p.frame for p in SpreadPlanner().plan([junk, *frames])] == [frames[0], frames[0]]
 
 
-def test_split_x_moves_the_gutter_edge_of_a_spread_half(tmp_path: Path) -> None:
-    """As evilflowers-scan-service applies it: side 0 ends, side 1 starts at ``split_x``;
-    an explicit ``crop`` wins, and a whole frame ignores it."""
-    frames = fakes.make_frames(tmp_path, 1)
-    frame = np.zeros((300, 400, 3), np.uint8)
-    left = LeafPlan(0, frames[0], 0, BBox(0, 0, 200, 300), 0, "LEFT")
-    right = LeafPlan(1, frames[0], 1, BBox(200, 0, 400, 300), 0, "RIGHT")
-    whole = LeafPlan(0, frames[0], None, BBox(0, 0, 400, 300), 0, "RIGHT")
-    split = PageOverride(split_x=180)
-    assert leaf_crop(left, split) == BBox(0, 0, 180, 300)
-    assert leaf_crop(right, split) == BBox(180, 0, 400, 300)
-    assert leaf_crop(whole, split) == whole.crop
-    assert leaf_crop(right, PageOverride(split_x=180, crop=BBox(1, 2, 3, 4))) == BBox(1, 2, 3, 4)
-    assert cut_leaf(frame, right, split).shape[:2] == (300, 220)
-
-
-def test_cleaner_reads_pipeline_settings() -> None:
-    cleaner = ScanTailorCleaner.from_settings({"color_mode": "color_grayscale", "dpi": 300,
-                                               "output_dpi": 600, "unknown": 1})
-    assert (cleaner.color_mode, cleaner.output_dpi) == ("color_grayscale", 600)
-    assert cleaner._group_key(PageOverride(despeckle="off")) == ("color_grayscale", "off")
+def test_crop_png_pads_and_bounds(tmp_path: Path) -> None:
+    page = tmp_path / "p.tif"
+    Image.new("L", (2000, 3000), 255).save(page)
+    with Image.open(__import__("io").BytesIO(crop_png(page, (100, 100, 300, 200)))) as im:
+        assert im.size == (300, 150)                       # 200x100 + a quarter on each side
+    with Image.open(__import__("io").BytesIO(crop_png(page, (0, 0, 2000, 3000)))) as im:
+        assert max(im.size) == 448
 
 
 # ---------------------------------------------------------------- hOCR
-def test_hocr_relabel_and_document(tmp_path: Path) -> None:
+def test_hocr_relabel_document_and_parse(tmp_path: Path) -> None:
     page = fakes.FakeOcr(text="Ahoj svet").recognize(
         fakes.make_frames(tmp_path, 1)[0], language="slk", dpi=300).hocr
-    text, conf = page_text(page)
-    assert text == "Ahoj svet" and conf == 92.0
+    (parsed,) = parse_pages(page)
+    assert [ln.text for ln in parsed.lines] == ["Ahoj svet"] and parsed.lines[0].size == 20
     relabelled = relabel_page(page.replace("class='ocr_line'", "class='ocr_line' id='line_1_4'"), 5)
     assert "id=\"page_000005\"" in relabelled and "line_000005_4" in relabelled
     assert "ppageno 5" in relabelled
     doc = hocr_document([relabelled, empty_page(6, 10, 20)], title="T")
-    from evilflowers_books_digitalizer.reflow.model import parse_pages
-
     pages = parse_pages(doc)
     assert len(pages) == 2 and pages[1].width == 10 and not pages[1].pars
+    assert parse_pages("") == []
 
 
-# ---------------------------------------------------------------- layout
-def _page_with_stamp(path: Path) -> Path:
-    im = Image.new("RGB", (800, 1000), "white")
-    d = ImageDraw.Draw(im)
-    d.ellipse((500, 700, 700, 900), fill=(70, 60, 200))   # saturated violet: a library stamp
-    im.save(path)
-    return path
+# ---------------------------------------------------------------- decider
+def _decider(handler: Any, **kw: Any) -> HttpDecider:
+    return HttpDecider("http://decider/v1/systemone", client=httpx.Client(
+        transport=httpx.MockTransport(handler)), **kw)
 
 
-def _prose_ocr(width: int, height: int, *, conf: int) -> ports.OcrPage:
-    """A paragraph of six full-width lines of plausible Slovak words."""
-    lines = []
-    for row in range(6):
-        y0 = 200 + row * 40
-        words = "".join(
-            f"<span class='ocrx_word' title='bbox {100 + i * 70} {y0} {160 + i * 70} {y0 + 25}; "
-            f"x_wconf {conf}'>slovo</span> " for i in range(9))
-        lines.append(f"<span class='ocr_line' title='bbox 100 {y0} 720 {y0 + 25}; x_size 25'>"
-                     f"{words}</span>")
-    hocr = (f"<div class='ocr_page' title='bbox 0 0 {width} {height}'>"
-            f"<p class='ocr_par' title='bbox 100 200 720 445'>{''.join(lines)}</p></div>")
-    return ports.OcrPage(hocr, "slovo " * 54, float(conf))
-
-
-def test_heuristic_layout_proposes_stamps_and_text(tmp_path: Path) -> None:
-    image = _page_with_stamp(tmp_path / "0000.tif")
-    layout = HeuristicLayout()
-    stamps = layout.detect(image)
-    assert [p.kind for p in stamps] == [RegionKind.STAMP]
-    assert stamps[0].bbox.x0 >= 495 and stamps[0].bbox.x1 <= 705
-
-    found = layout.detect(image, ocr=_prose_ocr(800, 1000, conf=91))
-    text = [p for p in found if p.kind == RegionKind.TEXT]
-    assert text and text[0].confidence == pytest.approx(0.91) and "slovo" in (text[0].text or "")
-
-
-# DocLayout-YOLO (ONNX): tests/studio/batch/test_layout_onnx.py
-
-
-# ---------------------------------------------------------------- formulas
-def test_vlm_sidecar_translates_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from evilflowers_books_digitalizer.reflow import VlmSettings, vlm
-
+def test_decider_sends_the_keyed_question_and_reads_the_choice() -> None:
     seen: dict[str, Any] = {}
 
-    def fake_run_jobs(jobs: list[vlm.Job], cache: Path, settings: VlmSettings) -> dict[str, str]:
-        seen["jobs"], seen["cache"] = jobs, cache
-        return {jobs[0].key: "x^2"}
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "laya-multilingual@0.4.34",
+            "answers": {"q": {"choice": "b", "probabilities": {"a": 0.2, "b": 0.8},
+                              "confidence": 0.8}}})
 
-    monkeypatch.setattr(vlm, "run_jobs", fake_run_jobs)
-    image = tmp_path / "book" / "clean" / "0007.tif"
-    sidecar = VlmSidecar(VlmSettings(python=tmp_path / "py", model=tmp_path / "m"))
-    out = sidecar.recognize([FormulaJob("region-1", image, BBox(1, 2, 3, 4), "formula"),
-                             FormulaJob("region-2", image, BBox(5, 6, 7, 8), "ocr")])
-    assert out == {"region-1": "x^2"}
-    assert seen["cache"] == tmp_path / "book" / "vlm_cache.json"
-    assert seen["jobs"][0].key == "p0007_formula_1_2_3_4"
-    assert NoFormula().recognize([FormulaJob("k", image, BBox(0, 0, 1, 1), "formula")]) == {}
+    d = _decider(handler, model="multilingual").choose(
+        "q", "Which?", {"a": "A", "b": "B"}, state={"body": "text"}, images=[b"\x89PNG"])
+    assert (d.choice, d.p, d.model) == ("b", 0.8, "laya-multilingual@0.4.34")
+    assert seen["model"] == "multilingual" and seen["state"] == {"body": "text"}
+    assert seen["questions"] == {"q": {"type": "choice", "instructions": "Which?",
+                                       "criteria": {"a": "A", "b": "B"}}}
+    assert base64.b64decode(seen["images"][0]) == b"\x89PNG"
+
+
+@pytest.mark.parametrize("response", [
+    httpx.Response(503, text="loading"),
+    httpx.Response(200, json={"answers": {"q": {"choice": "zzz"}}}),
+    httpx.Response(200, text="not json"),
+])
+def test_decider_failures_are_port_errors(response: httpx.Response) -> None:
+    with pytest.raises(PortError):
+        _decider(lambda r: response).choose("q", "?", {"a": "A"})
+
+
+def test_decider_unreachable_is_a_port_error() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(PortError, match="ConnectError"):
+        _decider(refuse).choose("q", "?", {"a": "A"})
 
 
 # ---------------------------------------------------------------- metadata
@@ -291,38 +229,23 @@ def test_excel_metadata_and_composite_priority(tmp_path: Path) -> None:
     assert CompositeMetadata(project, []).lookup(BOOK).language == ["slo"]
 
 
-# ---------------------------------------------------------------- render
-def test_stage_pages_isolates_access_leaves(tmp_path: Path) -> None:
-    pages = [tmp_path / f"{i:04d}.tif" for i in range(3)]
-    for p in pages:
-        Image.new("L", (10, 10)).save(p)
-    staged = stage_pages([pages[0], pages[2]], tmp_path / "stage")
-    assert [p.name for p in staged] == ["0000.tif", "0001.tif"]
-    assert sorted(p.name for p in (tmp_path / "stage").iterdir()) == ["0000.tif", "0001.tif"]
-    with pytest.raises(PortError):
-        stage_pages([], tmp_path / "empty")
-
-
 # ---------------------------------------------------------------- registry
 def test_registry_builds_adapters_by_name(tmp_path: Path) -> None:
-    project = _project(tmp_path, layout_detectors=("heuristic",), formula_recognizer="none")
+    project = _project(tmp_path, metadata={"providers": ["ocr"]},
+                       pipeline={"scantailor": {"split": False}})
     cfg = StudioConfig("sqlite://", "memory://", tmp_path / "a", tmp_path / "c", {"stu": project})
     built = registry.build_adapters(cfg, project)
-    assert [d.name for d in built.detectors] == ["heuristic"]
-    assert isinstance(built.formulas, NoFormula) and built.publisher is None
-    assert isinstance(built.artifacts, IaArtifactStore)
+    assert isinstance(built.planner, SpreadPlanner) and built.planner.split is False
+    assert built.publisher is None and isinstance(built.artifacts, IaArtifactStore)
+    with pytest.raises(PortError, match="unknown metadata adapter"):
+        registry.build_adapters(cfg, _project(tmp_path, metadata={"providers": ["magic"]}))
 
-    with pytest.raises(PortError, match="unknown layout adapter"):
-        registry.build_adapters(cfg, _project(tmp_path, layout_detectors=("magic",)))
-    lazy = registry.build_adapters(cfg, _project(tmp_path, layout_detectors=("yolo",)))
-    assert [d.name for d in lazy.detectors] == ["doclayout"]     # model checked on detect
-
-    registry.register("layout", "fake", lambda c, p: fakes.FakeLayout())
+    registry.register("metadata", "fake", lambda c, p: fakes.FakeMetadataProvider())
     try:
-        custom = registry.build_adapters(cfg, _project(tmp_path, layout_detectors=("fake",)))
-        assert custom.detectors[0].name == "fake"
+        custom = registry.build_adapters(cfg, _project(tmp_path, metadata={"providers": ["fake"]}))
+        assert custom.metadata.lookup(BOOK).title == "Testovacia kniha"
     finally:
-        del registry.LAYOUT_DETECTORS["fake"]
+        del registry.METADATA_PROVIDERS["fake"]
 
 
 def test_registry_builds_the_evilflowers_publisher(tmp_path: Path) -> None:

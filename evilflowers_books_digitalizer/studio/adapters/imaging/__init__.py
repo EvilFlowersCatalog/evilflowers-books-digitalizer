@@ -1,6 +1,8 @@
-"""Imaging adapters: PageCleaner (ScanTailor) and ImageOps (Pillow)."""
+"""Imaging adapters: leaf planning (spread detection) and the API's renditions (DZI, PDF pages).
 
-from evilflowers_books_digitalizer.studio.adapters.imaging.pillow_ops import PillowImageOps
-from evilflowers_books_digitalizer.studio.adapters.imaging.scantailor import ScanTailorCleaner
+Cleaning, erasing and the page previews are evilflowers-scan-service's (#6).
+"""
 
-__all__ = ["PillowImageOps", "ScanTailorCleaner"]
+from evilflowers_books_digitalizer.studio.adapters.imaging.spreads import SpreadPlanner
+
+__all__ = ["SpreadPlanner"]

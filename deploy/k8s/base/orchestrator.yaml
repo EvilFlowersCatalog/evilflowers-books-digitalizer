@@ -1,0 +1,81 @@
+# The orchestrator: the job ledger's Celery worker on digitalizer.portal, with beat (pump,
+# reconcile) and the ledger's /metrics. The same image as the portal; the command decides.
+# Pod template defaults (security, telemetry, secrets, mounts): pod-defaults.yaml.
+#
+# Every pixel and model job runs on a service worker on Valkey db 8 (scan, ocr, analyzer,
+# equation, render: second Deployments of their images, KEDA 0..N per queue, under the
+# PriorityClass `digitalizer-batch`; knowledge#66). The orchestrator only plans, admits,
+# applies outcomes and runs its own light steps (leaf planning, clean/marks, title_page,
+# render/prepare, gate, publish).
+#
+# Who yields to whom (docs/design/target-architecture.md §2): the pump sends bulk jobs only
+# within the current capacity (peak hours narrow it, the catalog's backlog on Redis db 7 holds
+# it, an operator can pause it); operator re-runs (interactive lane) are never held.
+#
+# Liveness: `celery inspect ping` against the worker's own node name. A prefork worker
+# answers from its main process while every child is busy; a wedged broker does not.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  labels:
+    app.kubernetes.io/name: digitalizer-orchestrator
+    app.kubernetes.io/component: orchestrator
+spec:
+  # beat runs embedded (-B): exactly one replica, Recreate, or the pump and reconcile
+  # would be scheduled twice (both are safe to overlap, but twice is waste)
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: digitalizer-orchestrator }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: digitalizer-orchestrator
+        app.kubernetes.io/component: orchestrator
+      annotations:
+        # Deploy-a-Service §3: the ledger gauges (studio/ledger_metrics.py), served here
+        # because the orchestrator owns the ledger and outlives a portal outage (#13)
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portName: metrics
+        k8s.grafana.com/metrics.path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: studio
+          # runs, job_done/job_failed callbacks, pump, reconcile, discover, the local steps:
+          # light and mostly waiting on Postgres / NFS / the catalog API / the deciders
+          command:
+            - celery
+            - -A
+            - evilflowers_books_digitalizer.studio.workers.app:celery
+            - worker
+            - --beat
+            - --schedule=/tmp/celerybeat-schedule
+            - -Q
+            - digitalizer.portal
+            - -n
+            - orchestrator@%h
+            - --concurrency=4
+            - --prefetch-multiplier=1
+            - -O
+            - fair
+            - --loglevel=INFO
+          env:
+            - { name: DIGITALIZER_PUMP_INTERVAL_SECONDS, value: "15" }
+            - { name: DIGITALIZER_RECONCILE_INTERVAL_SECONDS, value: "60" }
+            - { name: DIGITALIZER_METRICS_PORT, value: "9464" }   # only this worker serves them
+            # DECIDER_URL / DECIDER_VISION_URL / DECIDER_TIMEOUT: set by the Ansible role
+            # (knowledge#77); without them [decider] in studio.toml applies
+          ports:
+            - { name: metrics, containerPort: 9464 }
+          livenessProbe:
+            exec:
+              command: [sh, -c, 'celery -A evilflowers_books_digitalizer.studio.workers.app:celery inspect ping -d "orchestrator@$HOSTNAME" --timeout 10 >/dev/null']
+            initialDelaySeconds: 60
+            periodSeconds: 120
+            timeoutSeconds: 45
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 200m, memory: 768Mi }
+            limits: { cpu: "1", memory: 2Gi }

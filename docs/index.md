@@ -1,81 +1,72 @@
-# EvilFlowers Books Digitalizer
+# EvilFlowers Restoration Studio
 
-!!! tip "Restoration Studio"
-    The project now also ships the **EvilFlowers Restoration Studio**: a web app plus
-    Celery workers where operators review and correct what the pipeline produced (regions,
-    crops, page types, formulas) and every book becomes an Internet Archive compatible
-    item. Start with the [operator guide](studio.md) and the [Studio UI](web_ui.md).
-    The batch CLI described below keeps working unchanged.
-
-    ![Page studio](screenshots/page-studio.png)
-
-Digitalization pipeline for scanned books. It turns raw flatbed **TIFF scans**
-into two compact PDFs per book — a fast **distribution** copy and a
-**PDF/A-2b archival** master — with Slovak OCR, bibliographic metadata and a
-cover thumbnail, then imports them into the
+This repository is the **portal, the orchestrator and the lab** of the EvilFlowers book
+digitalizer. It turns a tree of scanned TIFF frames into one Internet Archive "texts" item per
+book (cleaned pages, hOCR, a distribution PDF, a PDF/A-2b master, an EPUB and the IA metadata
+files). Operators review in the browser only what the machine was unsure about. A book can
+then be published to the
 [EvilFlowers Catalog](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
 
-It is built entirely on open-source tooling (Tesseract, ScanTailor,
-archive-pdf-tools, pikepdf) and runs as a plain long-running process —
-no orchestrator, server or database — so it can chew through multi-TB corpora
-unattended on a remote VM, fully resumable.
+![Page studio](screenshots/page-studio.png)
 
-## How it works
+It does not process pixels or run models itself. Each stage is a task on a standalone service
+worker. This repository plans the jobs, sends them, applies the results and serves the review
+UI.
 
+!!! note "The batch pipeline is retired"
+    The unattended batch pipeline and its CLI (`run-book`, `run-corpus`, `monitor`) were
+    removed in evilflowers-books-digitalizer#6. The last commit that has them is `c94a858`.
+    The pages that describe them are kept under [Archive](archive/digitalization_pipeline_report.md).
+
+## How a book is processed
+
+```mermaid
+flowchart LR
+    scans[("scans<br/>TIFF frames")] --> plan["plan leaves<br/>(orchestrator)"]
+    plan --> clean["clean<br/>scan-service"]
+    clean --> marks["clean/marks<br/>(orchestrator)"]
+    marks --> analyze["analyze<br/>ocr + analyzer services"]
+    analyze --> tp["analyze/title_page<br/>(orchestrator)"]
+    tp --> formulas["formulas<br/>equation-service"]
+    formulas --> prep["render/prepare<br/>(orchestrator)"]
+    prep --> render["render<br/>render-service"]
+    render --> gate{"quality gate"}
+    gate -->|pass| approved["approved"]
+    gate -->|flags| review["review queue"]
+    review -->|operator approves| approved
+    approved -.->|optional| publish["publish to catalog"]
 ```
-source (TIFF frames per book)
-        │
-        ▼
-  DownloadBook ─► [AttachMetadata] ─► ScanTailorScans ─► [DocResEnhance]
-  (stage to        (Excel catalog)     (split gutter,     (optional AI
-   local cache)                         deskew, margins)   appearance)
-        │
-        ▼
-  [DetectLanguage] ─► OcrPages ─► RenderPdf ─► EnrichPdfMetadata
-   (langdetect)       (Tesseract)  (recode_pdf  (XMP)
-        │                          MRC)
-        ▼
-  GenerateCover ─► Finalize ─► WriteCatalogManifest ─► publish-catalog
-   (OPAC / styled)  (PDF/A)     (*.entry.json)         (REST import)
-```
 
-Each book runs in its own OS process (`recode_pdf`/OCRmyPDF are not
-thread-safe), fanned out across a process pool — which also bounds memory over a
-long batch and makes every book independently resumable.
+Every service job is recorded in a job ledger and reported back through Celery callbacks.
+A reconcile task re-sends lost jobs. The default task names and queues are in
+`evilflowers_books_digitalizer/studio/config.py` (`DEFAULT_ROUTES`).
 
 ## Quick start
 
 ```bash
 poetry install
-
-# fast checks — no network, seconds
-poetry run pytest -q
-
-# one book, end to end
-poetry run python -m evilflowers_books_digitalizer \
-  run-book svf <BOOK_ID> --config configs/pipeline.local.toml
-
-# a small batch + the live dashboard
-poetry run python -m evilflowers_books_digitalizer run-source svf --limit 3 \
-  --config configs/pipeline.local.toml
-poetry run python -m evilflowers_books_digitalizer monitor \
-  --config configs/pipeline.local.toml
+docker compose -f deploy/dev/compose.yml up -d
+export STUDIO_CONFIG=$PWD/configs/studio.dev.toml
+evilflowers-digitalizer studio migrate
+evilflowers-digitalizer studio serve --port 8000
+evilflowers-digitalizer studio worker -- -B     # the orchestrator, with beat
 ```
 
-The engine shells out to `scantailor-deviant-cli`, `tesseract`, `recode_pdf`
-and `jbig2enc`. Install them natively (see [Run & operate › Testing](testing.md))
-or use the project Docker image, which bakes them all in.
+Run the service workers you need from their own repositories on the same Redis. The full
+steps are in [Testing & local run](testing.md) and in the
+[dev stack README](https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer/blob/master/deploy/dev/README.md).
 
 ## Where to go next
 
-| If you want to… | Read |
-| --- | --- |
+| If you want to... | Read |
+|---|---|
 | Review and correct books in the web studio | [Restoration Studio guide](studio.md) |
-| Implement against the studio's contract | [Studio spec](design/studio-spec.md) |
-| Understand the layers and the engine choice | [Architecture](architecture.md) |
-| See the full engine evaluation & measurements | [Pipeline report](digitalization_pipeline_report.md) |
-| Configure the catalog match & cover generation | [Metadata & covers](metadata_and_covers.md) |
-| Publish produced books into the catalog | [Catalog import](catalog_import.md) |
-| Prove it locally, then go live | [Testing & go-live](testing.md) |
-| Set up the production VM | [Deployment](deployment.md) |
-| Monitor, resume, tune & troubleshoot a run | [Operations runbook](operations.md) |
+| See the screens and keyboard shortcuts | [Studio UI](web_ui.md) |
+| Understand the parts and the data flow | [Architecture](architecture.md) |
+| See the design and its status | [Target architecture](design/target-architecture.md) |
+| Implement against the API, data model or IA rules | [Studio spec](design/studio-spec.md) |
+| Configure metadata sources (Excel, OPAC, OCR) | [Metadata](metadata.md) |
+| Run it locally and check it | [Testing & local run](testing.md) |
+| Deploy it and know its runtime contract | [Deployment](deployment.md) |
+| Operate it: monitoring, resuming, troubleshooting | [Operations](operations.md) |
+| Read about the retired batch pipeline | [Archive](archive/digitalization_pipeline_report.md) |

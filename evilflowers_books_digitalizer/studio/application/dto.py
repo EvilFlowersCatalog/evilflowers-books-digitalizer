@@ -248,8 +248,7 @@ class ProjectConfigOut(BaseModel):
     item_id: str
     language: str
     ocr_language: str
-    layout_detectors: list[str]
-    formula_recognizer: str
+    services: dict[str, str]          # stage -> service task(s) (#6: no in-process engines)
     outputs: list[str]
     auto_publish: str
     quality: dict[str, Any]

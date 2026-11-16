@@ -1,14 +1,16 @@
-"""The digitalizer's Celery tasks: orchestration (``digitalizer.*``) and in-process stages.
+"""The digitalizer's Celery tasks: orchestration (``digitalizer.*``) on ``digitalizer.portal``.
 
-Orchestration lives in :mod:`studio.orchestration.ledger`; these are thin shells.
+Orchestration lives in :mod:`studio.orchestration.ledger`; these are thin shells. Every pixel
+and model job is a service task (scan, ocr, analyzer, equation, render); the local jobs below
+are the orchestrator's own light steps.
 
 * ``digitalizer.run``            start a queued run: plan its first stage, then pump
 * ``digitalizer.pump``           admit planned jobs (beat, and after every state change)
 * ``digitalizer.job_done``       ``link`` callback of every job: settle, plan the next stage
 * ``digitalizer.job_failed``     ``link_error`` callback (``bind=True``, see transport)
 * ``digitalizer.reconcile``      beat: lost outcomes, dead workers, deadlines
-* ``digitalizer.local.<stage>``  a stage body run in this application, as a ledger job;
-                                 a service-backed stage sends the service's task instead
+* ``digitalizer.local.<step>``   ``clean_marks`` (#14), ``title_page`` (#15),
+                                 ``render_prepare``, ``gate``, ``publish``: ledger jobs too
 
 A local stage task starts only if its token is the job's current one (a redelivered or
 superseded message does nothing), beats while its body runs (``reconcile`` reads the
@@ -33,30 +35,13 @@ from evilflowers_books_digitalizer.studio.orchestration.transport import CeleryT
 from evilflowers_books_digitalizer.studio.workers import context
 from evilflowers_books_digitalizer.studio.workers.app import celery
 from evilflowers_books_digitalizer.studio.workers.context import WorkerContext
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    analyze as analyze_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    clean as clean_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    discover as discover_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    export as export_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    formulas as formulas_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    gate as gate_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    publish as publish_stage,
-)
-from evilflowers_books_digitalizer.studio.workers.stages import (
-    render as render_stage,
-)
+from evilflowers_books_digitalizer.studio.workers.stages import discover as discover_stage
+from evilflowers_books_digitalizer.studio.workers.stages import export as export_stage
+from evilflowers_books_digitalizer.studio.workers.stages import gate as gate_stage
+from evilflowers_books_digitalizer.studio.workers.stages import marks as marks_stage
+from evilflowers_books_digitalizer.studio.workers.stages import publish as publish_stage
+from evilflowers_books_digitalizer.studio.workers.stages import render as render_stage
+from evilflowers_books_digitalizer.studio.workers.stages import title_page as title_page_stage
 
 #: worth a retry (DB failover, broker/network blips); everything else fails the job
 TRANSIENT: tuple[type[BaseException], ...] = (OperationalError, ConnectionError, TimeoutError)
@@ -196,28 +181,18 @@ def _local(task: Any, job_id: int, token: str, body: Body) -> dict[str, Any]:
     return {"job_id": job.id, "stage": job.stage, "follow_ups": follow_ups}
 
 
-@celery.task(name="digitalizer.local.clean", bind=True, max_retries=MAX_RETRIES)
-def clean(self: Any, job_id: int, token: str, pages: list[int], **_: Any) -> dict[str, Any]:
+@celery.task(name="digitalizer.local.clean_marks", bind=True, max_retries=MAX_RETRIES)
+def clean_marks(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
+    """After the clean stage (#14): scan marks grouped across the whole book; decider-vision
+    asked once per uncertain group."""
+    return _local(self, job_id, token, lambda ctx, job: marks_stage.group_marks(ctx, job.run_id))
+
+
+@celery.task(name="digitalizer.local.title_page", bind=True, max_retries=MAX_RETRIES)
+def title_page(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
+    """After the analyze stage (#15): title, authors, publisher, year suggested from OCR lines."""
     return _local(self, job_id, token,
-                  lambda ctx, job: clean_stage.clean(ctx, job.run_id, pages))
-
-
-@celery.task(name="digitalizer.local.analyze", bind=True, max_retries=MAX_RETRIES)
-def analyze(self: Any, job_id: int, token: str, page: int, **_: Any) -> dict[str, Any]:
-    return _local(self, job_id, token,
-                  lambda ctx, job: analyze_stage.analyze(ctx, job.run_id, page))
-
-
-@celery.task(name="digitalizer.local.formulas", bind=True, max_retries=MAX_RETRIES)
-def formulas(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
-    return _local(self, job_id, token,
-                  lambda ctx, job: formulas_stage.formulas(ctx, job.run_id))
-
-
-@celery.task(name="digitalizer.local.render", bind=True, max_retries=MAX_RETRIES)
-def render(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
-    return _local(self, job_id, token,
-                  lambda ctx, job: render_stage.render(ctx, job.run_id))
+                  lambda ctx, job: title_page_stage.prefill(ctx, job.run_id))
 
 
 @celery.task(name="digitalizer.local.render_prepare", bind=True, max_retries=MAX_RETRIES)

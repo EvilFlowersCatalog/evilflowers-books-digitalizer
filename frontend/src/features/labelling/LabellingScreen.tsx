@@ -4,7 +4,8 @@
  * Never shows the model's answer (the API does not send it). Digits pick a label, `s` skips
  * (stored, never exported). Tables answer `is_data_table` (1–2) and, optionally,
  * `table_quality` (3–5) on one screen; Enter saves. Subjects: pick the UDC top level, then
- * the category.
+ * the category. Scan marks show the group's crop. `title_page` is listed (progress, export) but
+ * not answered here: its cases come from confirmed title-page forms on the book screen.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,6 +14,7 @@ import { labelExportUrl } from "../../api/endpoints";
 import { useLabel, useLabelNext, useLabelSample, useLabelSummary, useLabelTasks } from "../../api/hooks";
 import {
   SKIP,
+  labelledHere,
   type CategoryOption,
   type LabelAnswer,
   type LabelItemOut,
@@ -29,18 +31,35 @@ import l from "./labelling.module.css";
 function TaskList({ tasks, current, onPick }: { tasks: LabelTaskOut[]; current: LabelTaskName | null; onPick: (t: LabelTaskName) => void }) {
   return (
     <ul className={l.tasks}>
-      {tasks.map((t) => (
-        <li key={t.name}>
-          <button type="button" className={`${l.task} ${t.name === current ? l.taskActive : ""}`} onClick={() => onPick(t.name)}>
-            <b className="mono">{t.name}</b>
-            {t.companion_of && <small> (on the {t.companion_of} screen)</small>}
-            <ProgressBar done={Math.min(t.labelled, t.target)} total={t.target} />
-            <small className="muted">
-              {t.labelled}/{t.target} labels · {t.items} items · mine {t.mine} · double {t.double}
-            </small>
-          </button>
-        </li>
-      ))}
+      {tasks.map((t) =>
+        labelledHere(t) ? (
+          <li key={t.name}>
+            <button type="button" className={`${l.task} ${t.name === current ? l.taskActive : ""}`} onClick={() => onPick(t.name)}>
+              <b className="mono">{t.name}</b>
+              {t.companion_of && <small> (on the {t.companion_of} screen)</small>}
+              <ProgressBar done={Math.min(t.labelled, t.target)} total={t.target} />
+              <small className="muted">
+                {t.labelled}/{t.target} labels · {t.items} items · mine {t.mine} · double {t.double}
+              </small>
+            </button>
+          </li>
+        ) : (
+          // collected elsewhere (title_page): progress and export only, nothing to answer here
+          <li key={t.name}>
+            <div className={l.task} style={{ cursor: "default" }}>
+              <b className="mono">{t.name}</b>
+              <ProgressBar done={Math.min(t.labelled, t.target)} total={t.target} />
+              <small className="muted">
+                {t.labelled}/{t.target} cases · {t.items} books
+              </small>
+              <small className="muted">Collected from confirmed title-page forms on the book screen.</small>
+              <a href={labelExportUrl(t.name)} download>
+                Export {t.name}.jsonl
+              </a>
+            </div>
+          </li>
+        ),
+      )}
     </ul>
   );
 }
@@ -67,7 +86,21 @@ function Choices({ choices, picked, offset = 0, onPick }: { choices: Choice[]; p
 
 function Crop({ item }: { item: LabelItemOut }) {
   if (!item.image_url) return null;
-  return <img className={l.crop} src={item.image_url} alt={`region ${item.payload.region ?? ""}`} />;
+  const alt = item.kind === "mark_group" ? `scan mark on leaf ${item.payload.leaf ?? "?"}` : `region ${item.payload.region ?? ""}`;
+  return <img className={l.crop} src={item.image_url} alt={alt} />;
+}
+
+/** `scan_mark`: one crop per book-wide mark group, and how far the mark spreads. */
+function MarkContext({ item }: { item: LabelItemOut }) {
+  const p = item.payload;
+  return (
+    <div className={l.context}>
+      <h3>{p.title || <i>untitled book</i>}</h3>
+      <div className="muted">
+        crop from leaf {p.leaf ?? "?"} · on {p.leaves ?? "?"} leaves · {p.occurrences ?? "?"} occurrences
+      </div>
+    </div>
+  );
 }
 
 function Context({ item }: { item: LabelItemOut }) {
@@ -123,7 +156,8 @@ function groupsOf(options: CategoryOption[]): [string, CategoryOption[]][] {
 export function LabellingScreen() {
   const { operator } = useSession();
   const tasks = useLabelTasks();
-  const visible = useMemo(() => (tasks.data ?? []).filter((t) => !t.companion_of), [tasks.data]);
+  // tasks answered on this screen (companions ride on their main task; title_page is collected elsewhere)
+  const visible = useMemo(() => (tasks.data ?? []).filter((t) => !t.companion_of && labelledHere(t)), [tasks.data]);
   const [current, setCurrent] = useState<LabelTaskName | null>(null);
   const task = current ?? visible[0]?.name ?? null;
   const meta = visible.find((t) => t.name === task);
@@ -242,6 +276,11 @@ export function LabellingScreen() {
                 <SectionPair item={item} />
               ) : item.kind === "entry" ? (
                 <EntryCard item={item} />
+              ) : item.kind === "mark_group" ? (
+                <div className={l.figure}>
+                  <Crop item={item} />
+                  <MarkContext item={item} />
+                </div>
               ) : (
                 <div className={l.figure}>
                   <Crop item={item} />

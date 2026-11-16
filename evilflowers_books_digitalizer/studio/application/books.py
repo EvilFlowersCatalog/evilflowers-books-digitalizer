@@ -67,6 +67,18 @@ def _project_out(svc: Services, slug: str, counts: dict[str, dict[str, int]]) ->
                           counts=dict(totals))
 
 
+def _services(svc: Services) -> dict[str, str]:
+    """Stage -> the service task(s) that run it (the orchestrator's own steps left out)."""
+    out = {}
+    for stage, route in svc.config.orchestration.routes.items():
+        tasks = [p.task for p in route.parts.values() if p.backend == "service"]
+        if route.task and route.backend == "service":
+            tasks.insert(0, route.task)
+        if tasks:
+            out[stage] = ", ".join(tasks)
+    return out
+
+
 def project_config(svc: Services, slug: str) -> dto.ProjectConfigOut:
     """The read-only preset; secrets never leave the server (only the env var's name)."""
     cfg = svc.project(slug)
@@ -78,8 +90,7 @@ def project_config(svc: Services, slug: str) -> dto.ProjectConfigOut:
     return dto.ProjectConfigOut(
         slug=cfg.slug, name=cfg.name, book_pattern=cfg.book_pattern, frames_glob=cfg.frames_glob,
         item_id=cfg.item_id, language=cfg.language, ocr_language=cfg.ocr_language,
-        layout_detectors=list(cfg.layout_detectors), formula_recognizer=cfg.formula_recognizer,
-        outputs=list(cfg.outputs), auto_publish=cfg.auto_publish, quality=asdict(cfg.quality),
+        services=_services(svc), outputs=list(cfg.outputs), auto_publish=cfg.auto_publish, quality=asdict(cfg.quality),
         publish=publish, metadata={k: v for k, v in cfg.metadata.items() if k != "columns"})
 
 

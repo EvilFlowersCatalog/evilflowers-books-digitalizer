@@ -23,6 +23,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from evilflowers_books_digitalizer.db.models import Job, Page, Run
+from evilflowers_books_digitalizer.studio import marks as book_marks
 from evilflowers_books_digitalizer.studio.config import SPLIT_STAGES
 from evilflowers_books_digitalizer.studio.domain import (
     BBox,
@@ -75,10 +76,13 @@ def apply_clean(uow: Uow, ctx: WorkerContext, run: Run, job: Job,
         cleaned = CleanedPage(leaf.leaf, storage.abs(leaf.image), leaf.width, leaf.height,
                               leaf.dpi, leaf.skew_deg)
         webp = storage.abs(leaf.preview) if leaf.preview else storage.abs(leaf.image)
+        old_marks = list(page.marks or [])
         apply_cleaned(uow, page, cleaned, storage.abs(leaf.dzi), webp)
         if leaf.crop_box is not None:    # what was cut (clamped, split_x, override crop)
             page.crop_box = list(leaf.crop_box)
-        page.marks = [m.model_dump(mode="json") for m in leaf.marks]
+        # the book-wide groups (#14) follow a re-cleaned mark: clean/marks regroups after
+        page.marks = book_marks.carry_groups(
+            old_marks, [m.model_dump(mode="json") for m in leaf.marks], ctx.config.marks)
         for warning in leaf.warnings:
             runs.log(uow, run, f"leaf {leaf.leaf}: {warning}", "warning")
     runs.advance(uow, run, len(outcome.leaves))
@@ -217,7 +221,8 @@ def apply_formulas(uow: Uow, ctx: WorkerContext, run: Run, job: Job,
     if unknown:
         raise contract.OutcomeError(f"job {job.id}: answers for regions it was not asked: "
                                     f"{unknown[:5]}")
-    formulas.apply_answers(uow, run, asked, {a.key: a.text for a in answers if a.text})
+    formulas.apply_answers(uow, run, asked, {a.key: a.text for a in answers if a.text},
+                           {a.key: a.reason or "" for a in answers if a.disputed and a.text})
     runs.advance(uow, run, len(job.params.get("pages") or []))
     # the answers now live in the rows: the attempt dir is consumed (deleted after the commit)
     return [storage.abs(job.params["output_dir"])]

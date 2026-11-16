@@ -1,6 +1,6 @@
-# Shared pod template for every Deployment that runs the digitalizer image (portal,
-# orchestrator, workers). Applied by kustomization.yaml as a patch on
-# `app.kubernetes.io/component in (api,orchestrator,worker)`, so the manifests stay short
+# Shared pod template for both Deployments that run the digitalizer image (portal,
+# orchestrator). Applied by kustomization.yaml as a patch on
+# `app.kubernetes.io/component in (api,orchestrator)`, so the manifests stay short
 # and cannot drift apart (one place for security, telemetry, config, secrets and mounts).
 # Each target names its container "studio".
 #
@@ -32,8 +32,8 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         seccompProfile: { type: RuntimeDefault }
-      # Every pod migrates before it starts: a worker of a new image must never run against
-      # an older schema (e.g. 0004 jobs, the ledger every task reads and writes).
+      # Every pod migrates before it starts: an orchestrator of a new image must never run
+      # against an older schema (e.g. 0007 mark_groups, which the clean/marks step writes).
       # An init container, not a pre-sync Job: k3s applies the manifests directory with no
       # hook ordering, and a Job's pod template is immutable (a new image tag would fail to
       # apply). `alembic upgrade head` is a no-op when current. Pods starting together may

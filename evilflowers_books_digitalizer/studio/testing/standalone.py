@@ -23,8 +23,8 @@ They are the executable form of the contract in
 * every message is first checked as the kit's ``evilflowers_worker.contract.StandaloneJob``
   validates it (:func:`accept`), so a message a real service would refuse fails here too.
 
-Not shipped to a service: it imports the digitalizer's ports. The service ports the
-behaviour, not the module.
+Not shipped to a service: the engines are the test doubles of :mod:`.engines`. The service
+ports the behaviour, not the module.
 """
 
 from __future__ import annotations
@@ -50,12 +50,12 @@ from evilflowers_books_digitalizer.studio.orchestration.contract import (
     LayoutOutcome,
     RenderOutcome,
 )
-from evilflowers_books_digitalizer.studio.ports import (
+from evilflowers_books_digitalizer.studio.ports import LeafPlan
+from evilflowers_books_digitalizer.studio.testing.engines import (
     FormulaJob,
     FormulaRecognizer,
     ImageOps,
     LayoutDetector,
-    LeafPlan,
     OcrEngine,
     PageCleaner,
     Renderer,
@@ -238,7 +238,11 @@ def equation_formulas(storage_root: Path, recognizer: FormulaRecognizer,
     except Exception as exc:
         _failing(message, root, exc)
         raise
-    rows = [{"key": j.key, "text": answers.get(j.key), "model": "reference"} for j in jobs]
+    # a fake's stand-in for the service's own checks (render SSIM, onnx cross-check)
+    doubt = getattr(recognizer, "dispute", None)
+    rows = [{"key": j.key, "text": answers.get(j.key), "model": "reference",
+             **({"disputed": True, "reason": doubt} if doubt and answers.get(j.key) else {})}
+            for j in jobs]
     formulas = out / "formulas.json"
     formulas.write_text(json.dumps(rows), encoding="utf-8")
     outcome = {"run_id": message["run_id"], "token": message["token"], "status": "done",

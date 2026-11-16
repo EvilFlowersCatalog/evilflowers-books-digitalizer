@@ -23,6 +23,7 @@ from evilflowers_books_digitalizer.db.models import (
     Book,
     Label,
     LabelItem,
+    MarkGroup,
     Note,
     Page,
     Publication,
@@ -35,9 +36,9 @@ from evilflowers_books_digitalizer.studio.events import Event
 from evilflowers_books_digitalizer.studio.ports import EventBus
 
 #: the query vocabulary use cases may use (re-exported so SQLAlchemy enters only here)
-__all__ = ["Book", "ColumnElement", "Label", "LabelItem", "Note", "Page", "Publication", "Region", "Review", "Run",
-           "Session", "SessionFactory", "UnaryExpression", "UnitOfWork", "func", "or_", "select",
-           "utcnow"]
+__all__ = ["Book", "ColumnElement", "Label", "LabelItem", "MarkGroup", "Note", "Page",
+           "Publication", "Region", "Review", "Run", "Session", "SessionFactory",
+           "UnaryExpression", "UnitOfWork", "func", "or_", "select", "utcnow"]
 
 type SessionFactory = Callable[[], Session]
 

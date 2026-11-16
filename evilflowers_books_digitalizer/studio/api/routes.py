@@ -12,17 +12,20 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Body, Query, Response
 
 from evilflowers_books_digitalizer.studio.api.deps import Operator, Svc
-from evilflowers_books_digitalizer.studio.application.errors import Unavailable
+from evilflowers_books_digitalizer.studio.application.errors import BadRequest, Unavailable
 from evilflowers_books_digitalizer.studio.application import (
     books,
     dto,
     labelling,
+    marks,
     pages,
     regions,
     review,
     runs,
     scheduler,
+    title_page,
 )
+from evilflowers_books_digitalizer.studio.labelling import STUDIO_KINDS
 from evilflowers_books_digitalizer.studio.domain import BookStatus
 
 router = APIRouter()
@@ -65,6 +68,43 @@ def get_book(svc: Svc, book_id: int) -> dto.BookDetail:
 def update_metadata(svc: Svc, book_id: int, patch: Annotated[dict[str, Any], Body()]
                     ) -> dict[str, Any]:
     return books.update_item_metadata(svc, book_id, patch)
+
+
+@router.get("/books/{book_id}/title-page", response_model=title_page.TitlePageOut)
+def get_title_page(svc: Svc, book_id: int) -> title_page.TitlePageOut:
+    """The decider's title / authors / publisher / year suggestions (#15), never imported."""
+    return title_page.get(svc, book_id)
+
+
+@router.post("/books/{book_id}/title-page/confirm", response_model=title_page.TitlePageOut)
+def confirm_title_page(svc: Svc, who: Operator, book_id: int,
+                       body: title_page.ConfirmIn) -> title_page.TitlePageOut:
+    """The operator's final values become the metadata; the comparison a labelled case (#7)."""
+    return title_page.confirm(svc, book_id, body, who)
+
+
+# ---------------------------------------------------------------- scan marks (#14)
+@router.get("/books/{book_id}/mark-groups", response_model=list[marks.MarkGroupOut])
+def list_mark_groups(svc: Svc, book_id: int) -> list[marks.MarkGroupOut]:
+    return marks.list_groups(svc, book_id)
+
+
+@router.patch("/mark-groups/{group_id}", response_model=marks.MarkGroupOut)
+def decide_mark_group(svc: Svc, who: Operator, group_id: int,
+                      body: marks.MarkGroupPatch) -> marks.MarkGroupOut:
+    return marks.decide(svc, group_id, body, who)
+
+
+@router.post("/mark-groups/{group_id}/split", status_code=201, response_model=marks.MarkGroupOut)
+def split_mark_group(svc: Svc, who: Operator, group_id: int,
+                     body: marks.MarkGroupSplit) -> marks.MarkGroupOut:
+    return marks.split(svc, group_id, body, who)
+
+
+@router.get("/mark-groups/{group_id}/image")
+def mark_group_image(svc: Svc, group_id: int) -> Response:
+    return Response(marks.image(svc, group_id), media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=300"})
 
 
 # ---------------------------------------------------------------- runs
@@ -151,8 +191,10 @@ def labelling_sample(svc: Svc, task: str, background: BackgroundTasks,
                      n: Annotated[int, Query(ge=1, le=2000)] = 100) -> dict[str, Any]:
     """Add up to ``n`` items in the background (the catalog fan-out takes minutes); the task
     list's ``items`` count grows when it is done. Re-running only adds new items."""
-    labelling.task_or_404(task)
-    if not svc.config.labelling.enabled:
+    t = labelling.task_or_404(task)
+    if not t.by_hand:
+        raise BadRequest(f"{t.name} is not sampled: its cases come from confirmed metadata forms")
+    if t.item_kind not in STUDIO_KINDS and not svc.config.labelling.enabled:
         raise Unavailable("labelling is not configured ([labelling] base_url)")
     background.add_task(labelling.sample_quietly, svc, task, n)
     return {"task": task, "n": n, "status": "sampling"}

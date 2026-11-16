@@ -11,6 +11,7 @@ import type {
   BookOut,
   BookStatus,
   ItemMetadata,
+  MarkGroupOut,
   NoteOut,
   PageOut,
   PageOverride,
@@ -22,8 +23,10 @@ import type {
   RegionStatus,
   ReviewOut,
   RunOut,
+  TitlePageOut,
 } from "../api/types";
 import { defaultAction } from "../lib/regions";
+import { CROP } from "./labelling";
 
 export const PAGE_W = 2480;
 export const PAGE_H = 3508;
@@ -55,7 +58,16 @@ export interface MockDb {
   notes: NoteOut[];
   reviews: ReviewOut[];
   publications: (PublicationOut & { book_id: number })[];
+  /** book id -> title-page suggestions (#15); books without an entry have none */
+  titlePages: Record<number, TitlePageOut>;
+  markGroups: MockMarkGroup[];
   seq: number;
+}
+
+/** A mark group plus what the mock needs to split it: occurrences per leaf. */
+export interface MockMarkGroup extends Omit<MarkGroupOut, "on_leaves" | "leaves" | "members"> {
+  book_id: number;
+  per_leaf: Record<number, number>;
 }
 
 function emptyMetadata(identifier: string, title: string): ItemMetadata {
@@ -439,6 +451,73 @@ function makeRuns(): RunOut[] {
   ];
 }
 
+// ------------------------------------------------------------------ title page (#15)
+const DECIDER = "qwen3-8b-decider@2026-11";
+
+function makeTitlePages(): Record<number, TitlePageOut> {
+  return {
+    // the detailed book: open suggestions, one field the decider found nothing for
+    1: {
+      suggestions: [
+        { field: "title", metadata_field: "title", value: "Fyzika I", p: 0.91, line: "FYZIKA I", leaf: 2 },
+        { field: "authors", metadata_field: "creator", value: ["Vladimír Hajko", "Július Krempaský"], p: 0.84, line: "Vladimír Hajko · Július Krempaský", leaf: 2 },
+        { field: "publisher", metadata_field: "publisher", value: "Alfa", p: 0.58, line: "ALFA, BRATISLAVA", leaf: 2 },
+        { field: "year", metadata_field: "date", value: null, p: null, line: null, leaf: null },
+      ],
+      decider_model: DECIDER,
+      suggested_at: iso(260),
+      confirmed: null,
+    },
+    // a published book whose form was confirmed already
+    5: {
+      suggestions: [
+        { field: "title", metadata_field: "title", value: "Signály a sústavy", p: 0.95, line: "SIGNÁLY A SÚSTAVY", leaf: 2 },
+        { field: "authors", metadata_field: "creator", value: ["J. Novák"], p: 0.66, line: "Ing. J. Novák, CSc.", leaf: 2 },
+        { field: "year", metadata_field: "date", value: "1991", p: 0.49, line: "© 1991", leaf: 3 },
+      ],
+      decider_model: DECIDER,
+      suggested_at: iso(1000),
+      confirmed: {
+        fields: {
+          title: { suggested: "Signály a sústavy", line: "SIGNÁLY A SÚSTAVY", leaf: 2, p: 0.95, final: "Signály a sústavy", outcome: "accepted" },
+          authors: { suggested: ["J. Novák"], line: "Ing. J. Novák, CSc.", leaf: 2, p: 0.66, final: ["Novák, Ján"], outcome: "changed" },
+          year: { suggested: "1991", line: "© 1991", leaf: 3, p: 0.49, final: null, outcome: "none" },
+        },
+        labeller: "jana",
+        at: iso(950),
+        decider_model: DECIDER,
+      },
+    },
+  };
+}
+
+// ------------------------------------------------------------------ scan-mark groups (#14)
+function makeMarkGroups(): MockMarkGroup[] {
+  const group = (id: number, book_id: number, category: string, extra: Partial<MockMarkGroup>, per_leaf: Record<number, number>): MockMarkGroup => ({
+    id,
+    book_id,
+    category,
+    band: "review",
+    decision: null,
+    p: null,
+    source: "signals",
+    decider_model: null,
+    crop_leaf: Number(Object.keys(per_leaf)[0]),
+    crop_bbox: [1500, 2350, 2050, 2900],
+    image_url: CROP(`${category} #${id}`),
+    split_from: null,
+    per_leaf,
+    ...extra,
+  });
+  return [
+    group(701, 1, "stamp", { source: "decider", decision: "stamp", p: 0.62, decider_model: DECIDER }, { 2: 1, 3: 1, 5: 1, 7: 2, 9: 1 }),
+    group(702, 1, "sticker", { band: "hide", source: "rule", decision: "sticker" }, { 1: 1, 10: 1 }),
+    group(703, 1, "bleed_through", { band: "keep", source: "decider", decision: "content", p: 0.81, decider_model: DECIDER }, { 6: 2, 7: 1 }),
+    group(704, 1, "edge", {}, { 11: 1 }),
+    group(705, 3, "stamp", { band: "hide", source: "operator", decision: "stamp", decider_model: "operator:jana" }, { 0: 1, 4: 1, 8: 1 }),
+  ];
+}
+
 export function createDb(): MockDb {
   const books = CATALOG.map((_, i) => makeBook(i));
   const pages: MockPage[] = [];
@@ -462,7 +541,7 @@ export function createDb(): MockDb {
   const publications: MockDb["publications"] = [
     { id: 1, book_id: 5, target: "evilflowers", entry_id: "8c1f2e9a-5b7d-4c1e-9f3a-2d4b6e8a0c11", version: 2, url: "https://dev.evilflowers.elvira.stuba.sk/entries/8c1f2e9a", author: "jana", published_at: iso(880) },
   ];
-  return { books, pages, regions, runs: makeRuns(), notes, reviews, publications, seq: 9000 };
+  return { books, pages, regions, runs: makeRuns(), notes, reviews, publications, titlePages: makeTitlePages(), markGroups: makeMarkGroups(), seq: 9000 };
 }
 
 export const PROJECT = {

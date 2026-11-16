@@ -52,6 +52,6 @@ opt a leaf has confirmed "remove" boxes
 end
 orch -> orch : every analyze job applied -> plan formulas
 
-caption The services only read the cleaned page; a mask is applied to their private copy. The layout attempt dir is deleted once\nfused; the hOCR dir stays while a page points into it. Stamp and sticker proposals (the in-process heuristic) are not produced on this path.
+caption The services only read the cleaned page; a mask is applied to their private copy. The layout attempt dir is deleted once\nfused; the hOCR dir stays while a page points into it. Stamp and sticker proposals come from scan-service's marks, grouped across the book (#14).
 footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-analyze-service.puml
 @enduml

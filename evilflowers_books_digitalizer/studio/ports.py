@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from evilflowers_books_digitalizer.studio.domain import BBox, PageOverride, RegionProposal
+from evilflowers_books_digitalizer.studio.domain import BBox
 from evilflowers_books_digitalizer.studio.events import Event
 from evilflowers_books_digitalizer.studio.metadata import ItemMetadata, Leaf
 
@@ -76,12 +76,12 @@ class MetadataProvider(Protocol):
     def lookup(self, book: ScannedBook, *, ocr_text: str | None = None) -> ItemMetadata: ...
 
 
-# ---------------------------------------------------------------- imaging
+# ---------------------------------------------------------------- leaves
 @dataclass(frozen=True, slots=True)
 class LeafPlan:
     """Where one leaf comes from — decided ONCE per full run, before any cleaning.
 
-    ``digitalizer.run`` of a full run calls :meth:`PageCleaner.plan` and
+    ``digitalizer.run`` of a full run calls :meth:`LeafPlanner.plan` and
     persists one ``pages`` row per plan (leaf_num = index, crop_box, hand_side,
     rotate_degree, source_path). Every later clean (chunks, re-runs) works from the
     persisted rows, so leaf numbers are stable and overrides can be keyed by them.
@@ -98,6 +98,8 @@ class LeafPlan:
 
 @dataclass(frozen=True, slots=True)
 class CleanedPage:
+    """A cleaned page as scan-service reports it (``CleanedLeaf``), in the orchestrator's paths."""
+
     leaf_num: int
     image: Path               # cleaned page image (600 dpi bitonal/mixed TIFF)
     width: int
@@ -107,81 +109,15 @@ class CleanedPage:
 
 
 @runtime_checkable
-class PageCleaner(Protocol):
-    """Split, deskew, dewarp, crop, binarize (ScanTailor + OpenCV)."""
+class LeafPlanner(Protocol):
+    """Spread detection: which leaves a book's frames hold, decided once per full run.
+
+    The only pixel work left in the orchestrator (one small read per frame, OpenCV): the leaf
+    numbers must be fixed before the clean jobs fan out (evilflowers-books-digitalizer#6).
+    Cleaning itself (ScanTailor, DocRes) runs on evilflowers-scan-service."""
 
     def plan(self, frames: Sequence[Path]) -> list[LeafPlan]:
         """Spread detection -> leaves in capture order (leaf_num 0..n-1)."""
-        ...
-
-    def clean(self, plans: Sequence[LeafPlan], out_dir: Path,
-              overrides: dict[int, PageOverride] | None = None) -> list[CleanedPage]:
-        """Clean the given leaves; ``overrides`` keyed by ``leaf_num``."""
-        ...
-
-
-@runtime_checkable
-class ImageOps(Protocol):
-    """Pixel operations the operator can ask for (restoration)."""
-
-    def erase(self, image: Path, boxes: Sequence[BBox], out: Path) -> Path: ...
-    def previews(self, image: Path, out_dir: Path, *, max_px: int) -> Path:
-        """Write a browser preview + deep-zoom tiles (DZI) for one page; returns the .dzi."""
-        ...
-
-
-# ---------------------------------------------------------------- recognition
-@dataclass(frozen=True, slots=True)
-class OcrPage:
-    hocr: str                 # one ocr_page element (hOCR, UTF-8)
-    text: str
-    mean_conf: float          # 0..100 over words
-
-
-@runtime_checkable
-class OcrEngine(Protocol):
-    def recognize(self, image: Path, *, language: str, dpi: int) -> OcrPage: ...
-
-
-@runtime_checkable
-class LayoutDetector(Protocol):
-    """Region proposals for one cleaned page (page pixel space)."""
-
-    name: str
-
-    def detect(self, image: Path, *, ocr: OcrPage | None = None) -> list[RegionProposal]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class FormulaJob:
-    key: str                  # content-addressed (page + bbox + task)
-    image: Path
-    bbox: BBox
-    task: str                 # "formula" | "ocr"
-
-
-@runtime_checkable
-class FormulaRecognizer(Protocol):
-    """Math (and mixed math+prose lines) -> LaTeX. Returns ``{job.key: text}``; failed jobs are absent."""
-
-    def recognize(self, jobs: Sequence[FormulaJob]) -> dict[str, str]: ...
-
-
-# ---------------------------------------------------------------- outputs
-@dataclass(frozen=True, slots=True)
-class RenderRequest:
-    item_id: str
-    pages: Sequence[Path]             # cleaned page images, leaf order, access pages only
-    hocr: Path                        # multi-page hOCR in the same order
-    metadata: ItemMetadata
-    formats: Sequence[str]            # subset of {"pdf", "pdfa", "epub"}
-    extra: dict[str, object] = field(default_factory=dict)
-
-
-@runtime_checkable
-class Renderer(Protocol):
-    def render(self, req: RenderRequest) -> dict[str, Path]:
-        """Returns ``{format: path}`` for every produced file."""
         ...
 
 
@@ -231,6 +167,29 @@ class TaskQueue(Protocol):
     def enqueue_discover(self, project: str, collection: str | None = None) -> str: ...
     def enqueue_export(self, project: str) -> str: ...
     def revoke(self, task_id: str) -> None: ...
+
+
+# ---------------------------------------------------------------- decision services
+@dataclass(frozen=True, slots=True)
+class Decision:
+    """A decision service's answer to one ``choice`` question (knowledge Decision-Models)."""
+
+    choice: str
+    p: float                                   # probability of ``choice``
+    probabilities: dict[str, float]
+    model: str                                 # what callers store as ``decider_model``
+
+
+@runtime_checkable
+class Decider(Protocol):
+    """``POST /v1/systemone`` of ``decider`` (Laya, text) or ``decider-vision`` (Strands, images).
+
+    Raises :class:`PortError` when the service is unreachable, times out or answers without
+    the question: callers fall back (a mark stays ``review``, no metadata is prefilled)."""
+
+    def choose(self, question: str, instructions: str, criteria: Mapping[str, str], *,
+               state: str | Mapping[str, object] = "",
+               images: Sequence[bytes] = ()) -> Decision: ...
 
 
 # ---------------------------------------------------------------- labelling (catalog, read-only)

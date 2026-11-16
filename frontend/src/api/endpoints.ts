@@ -14,6 +14,8 @@ import type {
   LabelSummaryOut,
   LabelTaskName,
   LabelTaskOut,
+  MarkBand,
+  MarkGroupOut,
   NoteCreate,
   NoteOut,
   Page,
@@ -30,6 +32,8 @@ import type {
   RunCreate,
   RunOut,
   TaskAccepted,
+  TitleConfirmIn,
+  TitlePageOut,
 } from "./types";
 
 export const api = {
@@ -49,6 +53,19 @@ export const api = {
   /** Requested contract: OPAC lookup returns a partial ItemMetadata (nothing is saved). */
   lookupMetadata: (id: number, provider = "opac") =>
     request<Partial<ItemMetadata>>("GET", `/books/${id}/metadata/lookup`, { query: { provider } }),
+
+  /** Title-page suggestions (#15): nothing reaches the metadata until `confirmTitlePage`. */
+  titlePage: (bookId: number) => request<TitlePageOut>("GET", `/books/${bookId}/title-page`),
+  confirmTitlePage: (bookId: number, body: TitleConfirmIn) =>
+    request<TitlePageOut>("POST", `/books/${bookId}/title-page/confirm`, { body }),
+
+  /** Book-wide scan-mark groups (#14), most leaves first. */
+  markGroups: (bookId: number) => request<MarkGroupOut[]>("GET", `/books/${bookId}/mark-groups`),
+  patchMarkGroup: (id: number, band: MarkBand) =>
+    request<MarkGroupOut>("PATCH", `/mark-groups/${id}`, { body: { band } }),
+  /** 201: the new group; 400 when no leaf matches or the split would empty the group. */
+  splitMarkGroup: (id: number, leaves: number[]) =>
+    request<MarkGroupOut>("POST", `/mark-groups/${id}/split`, { body: { leaves } }),
 
   createRun: (bookId: number, body: RunCreate) => request<RunOut>("POST", `/books/${bookId}/runs`, { body }),
   run: (id: number) => request<RunOut>("GET", `/runs/${id}`),

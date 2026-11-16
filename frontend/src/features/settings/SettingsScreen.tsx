@@ -46,6 +46,44 @@ function renderValue(value: unknown): string {
   return String(value ?? "—");
 }
 
+/** Stage -> the service task(s) that run it; several tasks come comma-separated. */
+function ServicesTable({ services }: { services: Record<string, string> }) {
+  const rows = Object.entries(services);
+  return (
+    <>
+      <h3 style={{ margin: "16px 0 6px", fontSize: 13 }}>Where each stage runs</h3>
+      {rows.length === 0 ? (
+        <span className="faint">No stage is routed to a service.</span>
+      ) : (
+        <table className={s.table}>
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Service task(s)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([stage, tasks]) => (
+              <tr key={stage}>
+                <td className="mono">{stage}</td>
+                <td className="mono">
+                  {tasks
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean)
+                    .map((t) => (
+                      <div key={t}>{t}</div>
+                    ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
 function ProjectPreset() {
   const { project } = useSession();
   const { data, isLoading, error } = useProjectConfig(project?.slug);
@@ -62,14 +100,17 @@ function ProjectPreset() {
       {error && !missing ? <ErrorNote error={error} /> : null}
       {data && (
         <dl className={s.dl}>
-          {Object.entries(data).map(([k, v]) => (
-            <div key={k} style={{ display: "contents" }}>
-              <dt>{k}</dt>
-              <dd className="mono">{renderValue(v)}</dd>
-            </div>
-          ))}
+          {Object.entries(data)
+            .filter(([k]) => k !== "services")
+            .map(([k, v]) => (
+              <div key={k} style={{ display: "contents" }}>
+                <dt>{k}</dt>
+                <dd className="mono">{renderValue(v)}</dd>
+              </div>
+            ))}
         </dl>
       )}
+      {data?.services && <ServicesTable services={data.services} />}
       {project && (
         <>
           <h3 style={{ margin: "16px 0 6px", fontSize: 13 }}>Collections</h3>

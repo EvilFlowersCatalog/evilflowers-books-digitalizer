@@ -1,7 +1,7 @@
 """TaskQueue adapters: Celery by task *name* (no import of task functions) and an inline recorder.
 
-Keeping the API process free of worker imports (ScanTailor, onnxruntime, …) is the
-point: ``send_task("digitalizer.run", …)`` only needs the broker URL.
+Keeping the API process free of worker imports is the point: ``send_task("digitalizer.run",
+…)`` only needs the broker URL.
 
 Broker contract (shared with every worker on the digitalizer's Redis db, kit services
 included, evilflowers-worker#5):
@@ -20,15 +20,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from evilflowers_books_digitalizer.studio.config import (
-    AI_QUEUE,
-    CPU_QUEUE,
-    INTERACTIVE_QUEUE,
-    PORTAL_QUEUE,
-)
+from evilflowers_books_digitalizer.studio.config import PORTAL_QUEUE
 
 #: every queue this application consumes
-QUEUES = (PORTAL_QUEUE, CPU_QUEUE, AI_QUEUE, INTERACTIVE_QUEUE)
+QUEUES = (PORTAL_QUEUE,)
 VISIBILITY_TIMEOUT = 12 * 3600
 TRANSPORT_OPTIONS: dict[str, Any] = {"visibility_timeout": VISIBILITY_TIMEOUT}
 

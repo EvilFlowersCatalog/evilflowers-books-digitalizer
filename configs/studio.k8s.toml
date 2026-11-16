@@ -8,7 +8,7 @@
 # default /data; kustomize derives the mount paths from it):
 #   {storage_root}/raw-scans   NFS gateway:/mnt/digital-library/raw-scans   read-only (export ro)
 #   {storage_root}/digitized   NFS gateway:/mnt/digital-library/digitized   rw
-#   /scratch                   local-path PVC on the workload node          rw (cleaned TIFFs, tiles cache)
+#   /scratch                   local-path PVC on the workload node          rw (renditions cache)
 #
 # Secrets come from the environment, never from this file:
 #   STUDIO_DATABASE_URL  postgresql+psycopg://digitalizer:…@postgres.shared.svc.cluster.local:5432/digitalizer
@@ -33,47 +33,35 @@ cache_dir = "/scratch/cache"
 [orchestration]
 budget = 2                             # re-sends of a lost job before its run fails
 stale_after_seconds = 600              # a local job silent this long: its worker is gone
-# Every stage runs in-process (digitalizer.local.<stage>) until its service ships; switch
-# one at a time (docs/design/target-architecture.md §3), e.g. once evilflowers-scan-service
-# is deployed on Redis db 8:
-# [orchestration.stages.clean]
-# backend = "service"
-# task = "evilflowers_scan.clean"
-# queue = "evilflowers_scan.standalone"
-# interactive_queue = "evilflowers_scan.standalone.interactive"
-# batch = 32                           # leaves per bulk job (the service default)
-# interactive_batch = 1                # an operator re-run: one job per page
-# deadline_seconds = 3600              # no outcome by then: reconcile re-sends (new token)
-#
-# Analyze runs as two services per leaf batch, fused here (never one in-process part and one
-# service part); confirmed "remove" boxes then go to scan-service (evilflowers_scan.erase,
-# the default of the optional [….analyze.erase]). Docling only: no stamp/sticker proposals.
-# [orchestration.stages.analyze]
-# backend = "service"
-# deadline_seconds = 3600              # also erase's: scan-service's hard limit is 3300 s
-# [orchestration.stages.analyze.hocr]
-# task = "evilflowers_ocr_worker.standalone.hocr"
-# queue = "evilflowers_ocr_worker.standalone"
-# interactive_queue = "evilflowers_ocr_worker.standalone.interactive"
-# [orchestration.stages.analyze.layout]
-# task = "evilflowers_analyzer.standalone.layout"
-# queue = "evilflowers_analyzer.standalone"
-# interactive_queue = "evilflowers_analyzer.standalone.interactive"
-#
-# Formulas: only leaf batches with regions to re-read are sent; answers are judged here.
-# [orchestration.stages.formulas]
-# backend = "service"
-# task = "evilflowers_equation.standalone.formulas"
-# queue = "evilflowers_equation.standalone"
-# interactive_queue = "evilflowers_equation.standalone.interactive"
-# deadline_seconds = 14400               # a page of formulas can take minutes on CPU
-#
-# Render: prepare here (metadata, text documents, request), media on render-service.
-# [orchestration.stages.render]
-# backend = "service"
-# task = "evilflowers_render.book"
-# queue = "evilflowers_render.standalone"
-# deadline_seconds = 28800               # a long book; render is an off-peak stage anyway
+# Every digitalization stage runs on a service on Valkey db 8 (evilflowers-books-digitalizer#6;
+# knowledge#66 deploys them). The defaults (studio.config DEFAULT_ROUTES) are the services'
+# own task names and queues; a table below overrides single fields:
+#   clean     evilflowers_scan.clean                        evilflowers_scan.standalone[.interactive]
+#   analyze   evilflowers_ocr_worker.standalone.hocr        evilflowers_ocr_worker.standalone[.interactive]
+#           ∥ evilflowers_analyzer.standalone.layout        evilflowers_analyzer.standalone[.interactive]
+#           + evilflowers_scan.erase (confirmed "remove" boxes only)
+#   formulas  evilflowers_equation.standalone.formulas      evilflowers_equation.standalone[.interactive]
+#   render    evilflowers_render.book                       evilflowers_render.standalone
+# Batches: 32 leaves per bulk job, 1 per operator re-run job.
+[orchestration.stages.analyze]
+deadline_seconds = 3600                # also erase's: scan-service's hard limit is 3300 s
+[orchestration.stages.formulas]
+deadline_seconds = 14400               # a page of formulas can take minutes on CPU
+[orchestration.stages.render]
+deadline_seconds = 28800               # a long book; render is an off-peak stage anyway
+
+[decider]
+# knowledge#77 admits namespace digitalizer and sets DECIDER_URL / DECIDER_VISION_URL /
+# DECIDER_TIMEOUT on the orchestrator (they win over these). Until it is applied the calls time
+# out and both uses fall back: marks stay "review" (#14), no title-page prefill (#15).
+url = "http://decider.shared.svc.cluster.local/v1/systemone"
+vision_url = "http://decider-vision.shared.svc.cluster.local/v1/systemone"
+timeout = 60
+
+[marks]                                # scan marks grouped across a book (#14)
+min_leaves = 3                         # = scan-service artefact_min_repeats
+hash_distance = 6                      # = scan-service artefact_hash_distance
+# hide_above / keep_above: none until knowledge#65 calibrates scan_mark
 
 [scheduling]
 # Book digitalization is background work: full width at night and at weekends, narrow during
@@ -88,7 +76,6 @@ bulk_inflight_contended = 0
 interactive_inflight = 4
 off_peak_stages = ["render"]
 [scheduling.queue_inflight]
-"digitalizer.ai" = 1                   # = worker-ai's KEDA maximum (one model in memory)
 # = render-service's replica maximum (one book per pod). A render job's deadline runs from
 # dispatch, so a book left waiting in the queue would use up its 8 h before a worker starts it.
 "evilflowers_render.standalone" = 1
@@ -110,12 +97,8 @@ book_pattern = "{collection}/*-skeny/{book}"
 frames_glob = "stream_pages_tif/*.tif"
 item_id = "stu-{collection}-{book}"
 language = "slk"                       # MARC code (IA `language`)
-ocr_language = "slk+eng"
-layout_detectors = ["heuristic", "doclayout"]   # doclayout: ONNX model baked into the image
-# PaddleOCR-VL is the shared vlm in namespace shared (evilflowers-vlm-service, knowledge#67).
-# Until it is deployed, set "none" to keep formulas as image crops.
-formula_recognizer = "paddleocr-vl-http"
-outputs = ["pdf", "pdfa", "epub"]
+ocr_language = "slk+eng"               # sent to ocr-service with every leaf
+outputs = ["pdf", "pdfa", "epub"]      # what render-service makes
 auto_publish = "review"                # real corpus: a human approves before anything goes public
 
 [projects.stu.collections]
@@ -145,25 +128,8 @@ catalog = "{collection}"               # one catalog per faculty: fad fei mtf sj
 [projects.stu.quality]
 min_ocr_conf = 80.0
 
-[projects.stu.pipeline.scantailor]
+[projects.stu.pipeline.scantailor]    # sent to scan-service with every clean job (scan-service#3)
 color_mode = "mixed"
 margins_mm = 8.0
 dpi = 300
 output_dpi = 600
-
-[projects.stu.pipeline.layout]
-# DocLayout-YOLO DocStructBench ONNX, downloaded and sha256-checked at image build (Dockerfile)
-model = "/opt/evilflowers-tools/models/doclayout-yolo/doclayout_yolo_docstructbench_imgsz1024.onnx"
-# onnxruntime threads; 0 would use every HOST core and ignore the pod's cgroup limit.
-# 2 = worker-ai's cpu limit (and OMP_NUM_THREADS) in deploy/k8s/base/workers.yaml.
-threads = 2
-
-[projects.stu.pipeline.vlm]
-# HttpFormulaRecognizer -> the shared vlm (Service vlm.shared :80 -> :8000, knowledge#67)
-url = "http://vlm.shared.svc.cluster.local"
-# One batch request: batch_size crops, each ~5-30 s on 4 CPU cores (up to ~2 min for a
-# page-wide line), plus time queued behind other requests.
-batch_size = 4
-timeout_s = 900
-# 503 (busy / still loading the model) and connection errors: retried with backoff
-attempts = 6

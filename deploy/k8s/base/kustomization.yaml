@@ -3,9 +3,11 @@
 # Render (the config lives in configs/, outside this directory, hence the flag):
 #   kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
 #
+# Two Deployments of one image: portal (API + SPA) and orchestrator (job ledger + beat).
 # Prerequisites (not created here, knowledge#66): Secret studio-secrets
 # (secret.example.yaml), Secret ghcr-pull, the gateway NFS exports, the `shared`
-# postgres/redis Services, KEDA, and the shared vlm (knowledge#67).
+# postgres/valkey Services, and the service workers on Valkey db 8 (scan, ocr, analyzer,
+# equation, render; their KEDA objects and the PriorityClass digitalizer-batch live with them).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -21,10 +23,9 @@ labels:
 
 resources:
   - namespace.yaml
-  - priorityclasses.yaml            # cluster-scoped (see the file)
   - storage.yaml
   - portal.yaml
-  - workers.yaml
+  - orchestrator.yaml
   - nfs-server.yaml                 # local-config: not rendered, feeds `replacements`
 
 # The NFS server address is set in one place (nfs-server.yaml) and copied into each PV.
@@ -53,4 +54,4 @@ patches:
   - path: pod-defaults.yaml
     target:
       kind: Deployment
-      labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)
+      labelSelector: app.kubernetes.io/component in (api,orchestrator)

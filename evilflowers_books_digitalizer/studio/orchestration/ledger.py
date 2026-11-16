@@ -39,6 +39,7 @@ from evilflowers_books_digitalizer.studio.config import (
     CHAINED_STAGES,
     PORTAL_QUEUE,
     SPLIT_STAGES,
+    TAIL_PARTS,
     StageRoute,
 )
 from evilflowers_books_digitalizer.studio.domain import JobStatus, Lane, RunStatus
@@ -56,10 +57,9 @@ from evilflowers_books_digitalizer.studio.workers.stages.orchestrate import (
 
 logger = logging.getLogger(__name__)
 
-#: stages that fan out one job per leaf chunk / per leaf; the rest are one job per run
-CHUNKED, PER_PAGE = "clean", "analyze"
-#: stages that fan out per leaf batch when a service runs them (in-process: one job per run)
-SERVICE_CHUNKED = ("clean", "formulas")
+#: stages that fan out one job per leaf batch (analyze: one per batch and part); the rest are
+#: one job per run (render's parts one after another)
+LEAF_BATCHED = ("clean", "analyze", "formulas")
 OPEN = [str(s) for s in JobStatus if s.open]
 IN_FLIGHT = [str(JobStatus.DISPATCHED), str(JobStatus.STARTED)]
 ACTIVE_RUNS = [str(RunStatus.QUEUED), str(RunStatus.RUNNING)]
@@ -108,16 +108,14 @@ def _units(stage: str, plan: WorkPlan, route: StageRoute, batch: int
            ) -> list[tuple[int, dict[str, Any]]]:
     """``(seq, params)`` per job. A split stage sends every batch to each of its parts,
     under one ``seq``: the batch's jobs are fused once all of them are applied."""
-    if route.parts and stage in CHAINED_STAGES:
+    if stage in CHAINED_STAGES:
         return [(0, {"part": CHAINED_STAGES[stage][0]})]   # the rest follow one by one
-    if route.parts:
+    if stage in SPLIT_STAGES:
         return [(seq, {"pages": chunk, "part": name})
                 for seq, chunk in enumerate(plan.chunks(batch))
                 for name in SPLIT_STAGES[stage]]
-    if stage == CHUNKED or (route.backend == "service" and stage in SERVICE_CHUNKED):
+    if stage in LEAF_BATCHED:
         return list(enumerate({"pages": chunk} for chunk in plan.chunks(batch)))
-    if stage == PER_PAGE:
-        return list(enumerate({"page": index} for index in plan.pages))
     return [(0, {})]
 
 
@@ -139,8 +137,8 @@ def add_job(uow: Uow, ctx: WorkerContext, run: Run, stage: str, seq: int,
 
 
 def _with_work(run: Run, stage: str, plan: WorkPlan) -> WorkPlan:
-    """A service stage gets only the leaves that have work for it (formulas: leaves with
-    regions to re-read); a stage left with none is skipped."""
+    """A stage gets only the leaves that have work for it (formulas: leaves with regions to
+    re-read); a stage left with none is skipped."""
     if stage != "formulas":
         return plan
     wanted = {p.index for p in run.book.pages if formulas.to_read(p)}
@@ -153,16 +151,14 @@ def _plan_from(uow: Uow, ctx: WorkerContext, run: Run, start: int) -> bool:
     interactive = bool(run.interactive)
     for stage in base.stages[start:]:
         route = ctx.config.orchestration.route(stage)
-        plan = _with_work(run, stage, base) if route.backend == "service" else base
-        units = _units(stage, plan, route, route.batch_size(interactive=interactive,
-                                                            project_default=plan.chunk))
+        plan = _with_work(run, stage, base)
+        units = _units(stage, plan, route, route.batch_size(interactive=interactive))
         if not units:
             continue
         for seq, params in units:
             add_job(uow, ctx, run, stage, seq, params)
         if route.backend == "service":
-            per_leaf = stage in (CHUNKED, PER_PAGE, *SERVICE_CHUNKED)
-            runs.enter_stage(uow, run, stage, len(plan.pages) if per_leaf else 1)
+            runs.enter_stage(uow, run, stage, len(plan.pages) if stage in LEAF_BATCHED else 1)
         tasks = ", ".join(sorted({p.task for p in route.parts.values()})) or route.task
         runs.log(uow, run, f"stage {stage}: {len(units)} job(s) on {route.backend} {tasks}")
         return True
@@ -397,15 +393,17 @@ APPLIERS: dict[str, Applier] = {}
 
 
 def _next_part(uow: Uow, ctx: WorkerContext, run: Run, stage: str, same: list[Job]) -> bool:
-    """A chained stage: plan its next part once the previous one is applied (True = planned)."""
-    chain = CHAINED_STAGES.get(stage)
-    if not chain or not ctx.config.orchestration.route(stage).parts:
-        return False
+    """Plan a stage's next part once everything before it is applied (True = planned): a
+    chained stage's next part, then the stage's tail step (``TAIL_PARTS``)."""
     done = {contract.part(j) for j in same}
-    upcoming = [p for p in chain if p not in done]
-    if not upcoming:
+    upcoming = [p for p in CHAINED_STAGES.get(stage, ()) if p not in done]
+    if upcoming:
+        add_job(uow, ctx, run, stage, 0, {"part": upcoming[0]})
+        return True
+    tail = TAIL_PARTS.get(stage)
+    if tail is None or tail in done or tail not in ctx.config.orchestration.route(stage).parts:
         return False
-    add_job(uow, ctx, run, stage, 0, {"part": upcoming[0]})
+    add_job(uow, ctx, run, stage, max((j.seq for j in same), default=-1) + 1, {"part": tail})
     return True
 
 

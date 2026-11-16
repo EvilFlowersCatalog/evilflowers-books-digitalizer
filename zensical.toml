@@ -6,8 +6,9 @@
 [project]
 site_name = "EvilFlowers Books Digitalizer"
 site_description = """\
-Digitalization pipeline for scanned books: TIFF scans to searchable, \
-archival PDF/A — with Slovak OCR, metadata, covers and catalog import."""
+Portal and orchestrator for digitalizing scanned books: TIFF scans to Internet Archive \
+compatible items (searchable PDF, PDF/A, EPUB), reviewed in a web studio, with optional \
+catalog publishing."""
 site_author = "Jakub Dubec"
 site_url = "https://evilflowerscatalog.github.io/evilflowers-books-digitalizer/"
 copyright = "&copy; EvilFlowers Catalog"
@@ -24,19 +25,25 @@ nav = [
   { "Restoration Studio" = [
     "studio.md",
     "web_ui.md",
-    "design/studio-spec.md",
+    "metadata.md",
   ] },
-  { "Architecture" = "architecture.md" },
-  { "Pipeline" = [
-    "digitalization_pipeline_report.md",
-    "reflow_edition.md",
-    "metadata_and_covers.md",
-    "catalog_import.md",
+  { "Architecture & design" = [
+    "architecture.md",
+    "design/target-architecture.md",
+    "design/studio-spec.md",
+    "design/catalog-protocol-requests.md",
+    "design/catalog-labelling-requests.md",
   ] },
   { "Run & operate" = [
     "testing.md",
     "deployment.md",
     "operations.md",
+  ] },
+  { "Archive" = [
+    "archive/digitalization_pipeline_report.md",
+    "archive/reflow_edition.md",
+    "archive/metadata_and_covers.md",
+    "archive/catalog_import.md",
   ] },
 ]
 

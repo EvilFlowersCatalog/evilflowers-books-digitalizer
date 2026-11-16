@@ -19,10 +19,8 @@ name so new ones need configuration, not code (open/closed principle)::
     frames_glob = "stream_pages_tif/*.tif"      # inside the book dir (falls back to *.tif)
     item_id = "stu-{collection}-{book}"         # IA-compatible identifier template
     language = "slk"                            # MARC language code (IA `language`)
-    ocr_language = "slk+eng"
-    layout_detectors = ["heuristic"]            # + "yolo" once its weights are available
-    formula_recognizer = "none"                 # or "paddleocr-vl"
-    outputs = ["pdf", "pdfa", "epub"]
+    ocr_language = "slk+eng"                    # sent to the OCR service per leaf
+    outputs = ["pdf", "pdfa", "epub"]           # what render-service makes
     auto_publish = "gate"                       # never | gate (publish when the quality gate passes) | review
     [projects.stu.collections]
     fei = "Fakulta elektrotechniky a informatiky STU"
@@ -41,15 +39,27 @@ name so new ones need configuration, not code (open/closed principle)::
     [orchestration]                             # the job ledger (studio.orchestration)
     budget = 2                                  # re-sends of a lost job before the run fails
     stale_after_seconds = 600                   # a local job with no heartbeat this long is lost
-    [orchestration.stages.clean]                # where a stage runs: in-process or a service
-    backend = "service"                         # local (default) | service
-    task = "evilflowers_scan.clean"
+    [orchestration.stages.clean]                # optional: every stage has a default route
+    task = "evilflowers_scan.clean"             # (DEFAULT_ROUTES); a table overrides fields
     queue = "evilflowers_scan.standalone"
     interactive_queue = "evilflowers_scan.standalone.interactive"
     deadline_seconds = 3600
-    batch = 32                                  # leaves per bulk job (service default 32;
-                                                # local default [pipeline] chunk_size)
+    batch = 32                                  # leaves per bulk job
     interactive_batch = 1                       # leaves per operator re-run job
+
+    [decider]                                   # the shared decision services (knowledge#77)
+    url = "http://decider.shared.svc.cluster.local/v1/systemone"          # or $DECIDER_URL
+    vision_url = "http://decider-vision.shared.svc.cluster.local/v1/systemone"  # $DECIDER_VISION_URL
+    timeout = 60                                # or $DECIDER_TIMEOUT; empty url = that use is off
+
+    [marks]                                     # scan marks across the book (#14)
+    min_leaves = 3                              # a group on this many leaves is furniture: hide
+    hash_distance = 6                           # dHash bits (scan-service's artefact_hash_distance)
+    aspect_tolerance = 0.25                     # relative aspect-ratio difference within a group
+
+    [title_page]                                # metadata prefill from the title page (#15)
+    first_leaves = 4                            # title page and its verso
+    last_leaves = 2                             # colophon
 
     [scheduling]                              # admission: digitalization yields at peak
     timezone = "Europe/Bratislava"
@@ -102,11 +112,9 @@ _IDENT_OK = re.compile(r"[^A-Za-z0-9._-]+")
 type AutoPublish = Literal["never", "gate", "review"]
 type Backend = Literal["local", "service"]
 
-#: queues of this application (``digitalizer.*``); services bring their own
-PORTAL_QUEUE = "digitalizer.portal"            # orchestration: runs, callbacks, pump, gate, publish
-CPU_QUEUE = "digitalizer.cpu"                  # in-process clean / render (until the services take them)
-AI_QUEUE = "digitalizer.ai"                    # in-process layout / formulas
-INTERACTIVE_QUEUE = "digitalizer.interactive"  # in-process operator re-runs
+#: the one queue of this application: orchestration (runs, callbacks, pump, gate, publish and the
+#: orchestrator's own light steps). Every pixel and model job runs on a service's queue.
+PORTAL_QUEUE = "digitalizer.portal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,8 +136,8 @@ class PublishConfig:
 class RoutePart:
     """One task of a stage that runs as several (analyze: hocr ∥ layout; render: prepare → book).
 
-    A part is a service task, except the orchestrator's own steps around a service (render's
-    ``prepare``: metadata lookup, text files, the request), which stay in-process.
+    A part is a service task, except the orchestrator's own light steps around the services
+    (``backend = "local"``: render's ``prepare``, clean's ``marks``, analyze's ``title_page``).
     """
 
     task: str
@@ -140,25 +148,25 @@ class RoutePart:
 
 @dataclass(frozen=True, slots=True)
 class StageRoute:
-    """Where one stage's jobs run: this app's ``digitalizer.local.<stage>`` task or a service task."""
+    """Where one stage's jobs run: a service task (clean, analyze, formulas, render) or this
+    application's ``digitalizer.local.<stage>`` (gate, publish: no pixels, no models)."""
 
     backend: Backend
     task: str
     queue: str
     interactive_queue: str
     deadline_seconds: int
-    #: leaves per bulk job of a chunked stage (clean); None = the project's
-    #: ``[pipeline] chunk_size``. A service route defaults to :data:`SERVICE_BATCH`.
-    batch: int | None = None
+    #: leaves per bulk job of a leaf-batched stage (evilflowers-books-digitalizer#4)
+    batch: int = 32
     #: leaves per interactive job: 1 = every re-run page is its own job, so an operator
     #: sees each page as soon as it is done and pages run in parallel
     interactive_batch: int = 1
-    #: a stage that runs as several tasks (``SPLIT_STAGES`` / ``CHAINED_STAGES``): one route per part
+    #: a stage that runs as several tasks (``SPLIT_STAGES`` / ``CHAINED_STAGES``) or has a
+    #: ``TAIL_PARTS`` step: one route per part
     parts: dict[str, RoutePart] = field(default_factory=dict)
 
-    def batch_size(self, *, interactive: bool, project_default: int) -> int:
-        size = self.interactive_batch if interactive else (self.batch or project_default)
-        return max(1, size)
+    def batch_size(self, *, interactive: bool) -> int:
+        return max(1, self.interactive_batch if interactive else self.batch)
 
     def part(self, name: str) -> RoutePart:
         try:
@@ -167,32 +175,62 @@ class StageRoute:
             raise KeyError(f"route {self.task or '(split)'} has no part {name!r}") from None
 
 
-#: leaves per bulk job when a chunked stage runs on a service (evilflowers-books-digitalizer#4)
+#: leaves per bulk job of a leaf-batched stage (evilflowers-books-digitalizer#4)
 SERVICE_BATCH = 32
+#: the stages services run; ``gate`` and ``publish`` are the orchestrator's own
+SERVICE_STAGES = ("clean", "analyze", "formulas", "render")
 
 #: stages a service runs as parallel parts: every leaf batch goes to each of them
 SPLIT_STAGES: dict[str, tuple[str, ...]] = {"analyze": ("hocr", "layout")}
 #: stages a service runs as parts in order, one job each (the next is planned when the
 #: previous one is applied)
 CHAINED_STAGES: dict[str, tuple[str, ...]] = {"render": ("prepare", "book")}
-#: the parts a service-backed split / chained stage must be configured with
-REQUIRED_PARTS: dict[str, tuple[str, ...]] = {"analyze": ("hocr", "layout"), "render": ("book",)}
-#: parts with a default route (overridable): planned on demand, or the orchestrator's own
+#: a local step planned once after every other job of the stage is applied: book-wide work
+#: over the stage's results (#14: scan marks grouped across the book; #15: title-page prefill)
+TAIL_PARTS: dict[str, str] = {"clean": "marks", "analyze": "title_page"}
+
+
+def _local(task: str) -> RoutePart:
+    return RoutePart(task, PORTAL_QUEUE, PORTAL_QUEUE, backend="local")
+
+
+def _service(task: str, queue: str) -> RoutePart:
+    return RoutePart(task, queue, f"{queue}.interactive")
+
+
+#: the parts of each stage (every one overridable by ``[orchestration.stages.<stage>.<part>]``)
 DEFAULT_PARTS: dict[str, dict[str, RoutePart]] = {
-    # the page image itself changes only on scan-service (confirmed "remove" boxes)
-    "analyze": {"erase": RoutePart("evilflowers_scan.erase", "evilflowers_scan.standalone",
-                                   "evilflowers_scan.standalone.interactive")},
-    # metadata lookup, item text files and the render request: light, the orchestrator's
-    "render": {"prepare": RoutePart("digitalizer.local.render_prepare", PORTAL_QUEUE,
-                                    PORTAL_QUEUE, backend="local")},
+    "clean": {"marks": _local("digitalizer.local.clean_marks")},
+    "analyze": {
+        "hocr": _service("evilflowers_ocr_worker.standalone.hocr",
+                         "evilflowers_ocr_worker.standalone"),
+        "layout": _service("evilflowers_analyzer.standalone.layout",
+                           "evilflowers_analyzer.standalone"),
+        # the page image itself changes only on scan-service (confirmed "remove" boxes)
+        "erase": _service("evilflowers_scan.erase", "evilflowers_scan.standalone"),
+        "title_page": _local("digitalizer.local.title_page"),
+    },
+    "render": {
+        # metadata lookup, item text files and the render request: light, the orchestrator's
+        "prepare": _local("digitalizer.local.render_prepare"),
+        "book": RoutePart("evilflowers_render.book", "evilflowers_render.standalone",
+                          "evilflowers_render.standalone"),
+    },
 }
 
-#: the in-process default of every stage (today's stage bodies, now ledger jobs)
+#: every stage's route: the task names and queues the services declare (their contracts:
+#: scan-service#1, ocr-service#7, analyzer#8, equation#8, render-service#1)
 DEFAULT_ROUTES: dict[str, StageRoute] = {
-    "clean": StageRoute("local", "digitalizer.local.clean", CPU_QUEUE, INTERACTIVE_QUEUE, 3600),
-    "analyze": StageRoute("local", "digitalizer.local.analyze", AI_QUEUE, INTERACTIVE_QUEUE, 1800),
-    "formulas": StageRoute("local", "digitalizer.local.formulas", AI_QUEUE, AI_QUEUE, 4 * 3600),
-    "render": StageRoute("local", "digitalizer.local.render", CPU_QUEUE, CPU_QUEUE, 8 * 3600),
+    "clean": StageRoute("service", "evilflowers_scan.clean", "evilflowers_scan.standalone",
+                        "evilflowers_scan.standalone.interactive", 3600,
+                        parts=DEFAULT_PARTS["clean"]),
+    # 3600 s also covers erase: scan-service's hard limit is 3300 s
+    "analyze": StageRoute("service", "", "", "", 3600, parts=DEFAULT_PARTS["analyze"]),
+    "formulas": StageRoute("service", "evilflowers_equation.standalone.formulas",
+                           "evilflowers_equation.standalone",
+                           "evilflowers_equation.standalone.interactive", 4 * 3600),
+    # one book per job; a long book. Render is an off-peak stage anyway
+    "render": StageRoute("service", "", "", "", 8 * 3600, parts=DEFAULT_PARTS["render"]),
     "gate": StageRoute("local", "digitalizer.local.gate", PORTAL_QUEUE, PORTAL_QUEUE, 600),
     "publish": StageRoute("local", "digitalizer.local.publish", PORTAL_QUEUE, PORTAL_QUEUE, 1800),
 }
@@ -246,14 +284,14 @@ class ProjectConfig:
     language: str = "slk"
     ocr_language: str = "slk+eng"
     collections: dict[str, str] = field(default_factory=dict)
-    layout_detectors: tuple[str, ...] = ("heuristic",)
-    formula_recognizer: str = "none"
     outputs: tuple[str, ...] = ("pdf", "pdfa", "epub")
     auto_publish: AutoPublish = "gate"
     metadata: dict[str, Any] = field(default_factory=dict)
     publish: PublishConfig = field(default_factory=PublishConfig)
     quality: QualityPolicy = field(default_factory=QualityPolicy)
-    pipeline: dict[str, Any] = field(default_factory=dict)   # ScanTailor/render knobs (pipeline.toml shape)
+    #: ``[pipeline.scantailor]`` (sent to scan-service with every clean job; ``output_dpi`` is
+    #: the item's ppi) and ``jp2_images`` (render-service builds IA's page package)
+    pipeline: dict[str, Any] = field(default_factory=dict)
 
     def item_identifier(self, collection: str, book: str) -> str:
         """IA-compatible, permanent identifier: lowercase ``[a-z0-9][a-z0-9._-]{4,79}``.
@@ -290,6 +328,47 @@ class LabellingConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DeciderConfig:
+    """``[decider]``: the shared decision services (knowledge Decision-Models, knowledge#77).
+
+    An empty URL switches its uses off: marks stay ``review`` (#14), no metadata is prefilled
+    (#15). A call that fails or times out does the same for that book; a run never fails on it.
+    """
+
+    url: str = ""                               # decider (Laya, text): POST /v1/systemone
+    vision_url: str = ""                        # decider-vision (Strands, images)
+    model: str = "multilingual"                 # Laya checkpoint (without it Laya may swap)
+    timeout: float = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class MarksConfig:
+    """``[marks]``: scan marks grouped across a whole book (evilflowers-books-digitalizer#14).
+
+    The defaults are scan-service's own (``artefact_min_repeats``, ``artefact_hash_distance``),
+    so a mark repeated within one clean job and one repeated across the book count the same.
+    """
+
+    min_leaves: int = 3
+    hash_distance: int = 6
+    aspect_tolerance: float = 0.25
+    #: the decider's p above which its verdict bands without a person: ``hide`` for an
+    #: artefact, ``keep`` for content. None until knowledge#65 calibrates ``scan_mark``: then
+    #: every verdict is ``review`` (stored with its p, never acted on)
+    hide_above: float | None = None
+    keep_above: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TitlePageConfig:
+    """``[title_page]``: title, authors, publisher and year picked from OCR lines (#15)."""
+
+    first_leaves: int = 4
+    last_leaves: int = 2
+    max_candidates: int = 12                    # criteria per question (+ "none")
+
+
+@dataclass(frozen=True, slots=True)
 class StudioConfig:
     database_url: str
     redis_url: str
@@ -300,9 +379,12 @@ class StudioConfig:
     orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
     scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
     #: the services' ``STORAGE_PATH``: one root holding the scans and ``artifacts_root``.
-    #: Paths in a service job are relative to it; needed only by service-backed stages.
+    #: Paths in a service job are relative to it (required by :func:`load_config`).
     storage_root: Path | None = None
     labelling: LabellingConfig = field(default_factory=LabellingConfig)
+    decider: DeciderConfig = field(default_factory=DeciderConfig)
+    marks: MarksConfig = field(default_factory=MarksConfig)
+    title_page: TitlePageConfig = field(default_factory=TitlePageConfig)
 
     def project(self, slug: str) -> ProjectConfig:
         try:
@@ -336,7 +418,19 @@ def _resolve(value: str | Path, base: Path) -> Path:
     return _Paths(base, None)(value)
 
 
+#: project keys of the retired in-process stages (#6): the services choose their own engines
+RETIRED_PROJECT_KEYS = ("layout_detectors", "formula_recognizer")
+RETIRED_PIPELINE_KEYS = ("tesseract", "heuristic", "layout", "vlm", "reflow", "docres",
+                         "chunk_size")
+
+
 def _project(slug: str, raw: dict[str, Any], resolve: _Paths) -> ProjectConfig:
+    retired = [k for k in RETIRED_PROJECT_KEYS if k in raw] + [
+        f"pipeline.{k}" for k in RETIRED_PIPELINE_KEYS if k in raw.get("pipeline", {})]
+    if retired:
+        raise ValueError(f"[projects.{slug}]: {', '.join(retired)} configured the in-process "
+                         "stages, which are gone (evilflowers-books-digitalizer#6): OCR, layout, "
+                         "formulas and render run on the services; remove these keys")
     publish = PublishConfig(**{k: v for k, v in raw.get("publish", {}).items()
                                if k in PublishConfig.__dataclass_fields__},
                             options={k: v for k, v in raw.get("publish", {}).items()
@@ -354,8 +448,6 @@ def _project(slug: str, raw: dict[str, Any], resolve: _Paths) -> ProjectConfig:
         language=raw.get("language", "slk"),
         ocr_language=raw.get("ocr_language", "slk+eng"),
         collections=dict(raw.get("collections", {})),
-        layout_detectors=tuple(raw.get("layout_detectors", ["heuristic"])),
-        formula_recognizer=raw.get("formula_recognizer", "none"),
         outputs=tuple(raw.get("outputs", ["pdf", "pdfa", "epub"])),
         auto_publish=raw.get("auto_publish", "gate"),
         metadata=metadata,
@@ -365,29 +457,53 @@ def _project(slug: str, raw: dict[str, Any], resolve: _Paths) -> ProjectConfig:
     )
 
 
-def _parts(stage: str, raw: dict[str, Any]) -> dict[str, RoutePart]:
-    """The parts of a split / chained stage on services: every required one configured.
+_ROUTE_KEYS = {"task", "queue", "interactive_queue"}
+_STAGE_KEYS = _ROUTE_KEYS | {"backend", "deadline_seconds", "batch", "interactive_batch"}
 
-    A chained stage's single service part may also be given as the stage's own ``task`` /
-    ``queue`` (``[orchestration.stages.render] task = "evilflowers_render.book"``).
-    """
-    required = REQUIRED_PARTS[stage]
-    if len(required) == 1 and required[0] not in raw and {"task", "queue"} <= raw.keys():
-        raw = {**raw, required[0]: {k: raw[k] for k in ("task", "queue", "interactive_queue")
-                                    if k in raw}}
-    missing = [p for p in required if not {"task", "queue"} <= set(raw.get(p, {}))]
-    if missing:
-        raise ValueError(f"[orchestration.stages.{stage}] on services needs "
-                         + ", ".join(f"[orchestration.stages.{stage}.{p}] with task and queue"
-                                     for p in missing)
-                         + " (a stage runs entirely in-process or entirely on services)")
-    parts = dict(DEFAULT_PARTS.get(stage, {}))
-    for name in (*required, *parts):
-        if name in raw:
-            p = raw[name]
-            parts[name] = RoutePart(p["task"], p["queue"], p.get("interactive_queue", p["queue"]),
-                                    backend=parts[name].backend if name in parts else "service")
-    return parts
+
+def _part(stage: str, name: str, base: RoutePart, raw: dict[str, Any]) -> RoutePart:
+    if unknown := set(raw) - _ROUTE_KEYS:
+        raise ValueError(f"[orchestration.stages.{stage}.{name}]: unknown keys {sorted(unknown)}")
+    queue = raw.get("queue", base.queue)
+    interactive = raw.get("interactive_queue",
+                          base.interactive_queue if "queue" not in raw else queue)
+    return RoutePart(raw.get("task", base.task), queue, interactive, backend=base.backend)
+
+
+def _route(stage: str, base: StageRoute, raw: dict[str, Any]) -> StageRoute:
+    """``base`` (a default route) with the fields of ``[orchestration.stages.<stage>]`` over it.
+
+    A split / chained stage takes its parts as subtables (``[….analyze.hocr]``); render's one
+    service part may also be given as the stage's own ``task`` / ``queue``."""
+    if raw.get("backend", base.backend) != base.backend:
+        raise ValueError(f"[orchestration.stages.{stage}] backend = {raw['backend']!r}: "
+                         f"{stage} runs on {base.backend} only (the in-process stages are gone, "
+                         "evilflowers-books-digitalizer#6)")
+    parts = dict(base.parts)
+    flat = {k: raw[k] for k in _ROUTE_KEYS if k in raw}
+    if stage in CHAINED_STAGES and flat:      # render: task/queue name its service part
+        raw = {**{k: v for k, v in raw.items() if k not in _ROUTE_KEYS},
+               "book": {**flat, **raw.get("book", {})}}
+        flat = {}
+    for name, value in raw.items():
+        if isinstance(value, dict):
+            if name not in parts:
+                raise ValueError(f"[orchestration.stages.{stage}.{name}]: unknown part "
+                                 f"(known: {', '.join(parts) or 'none'})")
+            parts[name] = _part(stage, name, parts[name], value)
+        elif name not in _STAGE_KEYS:
+            raise ValueError(f"[orchestration.stages.{stage}]: unknown key {name!r}")
+    if flat and (stage in SPLIT_STAGES):
+        raise ValueError(f"[orchestration.stages.{stage}] runs as parts "
+                         f"({', '.join(SPLIT_STAGES[stage])}): configure them as subtables")
+    queue = flat.get("queue", base.queue)
+    interactive = flat.get("interactive_queue",
+                           base.interactive_queue if "queue" not in flat else queue)
+    return StageRoute(base.backend, flat.get("task", base.task), queue, interactive,
+                      int(raw.get("deadline_seconds", base.deadline_seconds)),
+                      batch=int(raw.get("batch", base.batch)),
+                      interactive_batch=int(raw.get("interactive_batch", base.interactive_batch)),
+                      parts=parts)
 
 
 def _orchestration(raw: dict[str, Any]) -> OrchestrationConfig:
@@ -396,26 +512,7 @@ def _orchestration(raw: dict[str, Any]) -> OrchestrationConfig:
         if stage not in DEFAULT_ROUTES:
             raise ValueError(f"[orchestration.stages.{stage}]: unknown stage "
                              f"(known: {', '.join(DEFAULT_ROUTES)})")
-        base = routes[stage]
-        backend = override.get("backend", base.backend)
-        if backend not in ("local", "service"):
-            raise ValueError(f"[orchestration.stages.{stage}] backend must be local or service")
-        split = backend == "service" and stage in REQUIRED_PARTS
-        parts = _parts(stage, override) if split else {}
-        if backend == "service" and not split and not {"task", "queue"} <= override.keys():
-            raise ValueError(f"[orchestration.stages.{stage}] a service backend needs task and queue")
-        queue = override.get("queue", base.queue)
-        batch = override.get("batch", SERVICE_BATCH if backend == "service" else base.batch)
-        routes[stage] = StageRoute(backend, "" if split else override.get("task", base.task),
-                                   "" if split else queue,
-                                   "" if split else override.get(
-                                       "interactive_queue",
-                                       queue if backend == "service" else base.interactive_queue),
-                                   int(override.get("deadline_seconds", base.deadline_seconds)),
-                                   batch=int(batch) if batch is not None else None,
-                                   interactive_batch=int(override.get("interactive_batch",
-                                                                      base.interactive_batch)),
-                                   parts=parts)
+        routes[stage] = _route(stage, routes[stage], override)
     return OrchestrationConfig(
         budget=int(raw.get("budget", 2)),
         stale_after_seconds=int(raw.get("stale_after_seconds", 600)),
@@ -455,6 +552,28 @@ def _labelling(raw: dict[str, Any]) -> LabellingConfig:
         seed=int(raw.get("seed", d.seed)))
 
 
+def _table[T](name: str, cls: type[T], raw: dict[str, Any]) -> T:
+    """A flat config table onto its dataclass: unknown keys are an error, types from the defaults."""
+    fields = cls.__dataclass_fields__  # type: ignore[attr-defined]
+    if unknown := set(raw) - set(fields):
+        raise ValueError(f"[{name}]: unknown keys {', '.join(sorted(unknown))}")
+    return cls(**raw)
+
+
+def _decider(raw: dict[str, Any]) -> DeciderConfig:
+    """``[decider]``, then the kit's env names (``JudgeSettings``: knowledge#77 sets them on the
+    digitalizer's pods): ``DECIDER_URL``, ``DECIDER_VISION_URL``, ``DECIDER_MODEL``,
+    ``DECIDER_TIMEOUT``; ``DECIDER_ENABLED=false`` switches both off."""
+    d = _table("decider", DeciderConfig, raw)
+    env = os.environ
+    if env.get("DECIDER_ENABLED", "true").strip().lower() in ("0", "false", "no", "off"):
+        return DeciderConfig(model=d.model, timeout=d.timeout)
+    return DeciderConfig(url=env.get("DECIDER_URL") or d.url,
+                         vision_url=env.get("DECIDER_VISION_URL") or d.vision_url,
+                         model=env.get("DECIDER_MODEL") or d.model,
+                         timeout=float(env.get("DECIDER_TIMEOUT") or d.timeout))
+
+
 def load_config(path: str | Path | None = None) -> StudioConfig:
     """Read the studio config (``path`` > ``$STUDIO_CONFIG`` > ``configs/studio.toml``)."""
     from evilflowers_books_digitalizer.config import PROJECT_ROOT
@@ -479,23 +598,24 @@ def load_config(path: str | Path | None = None) -> StudioConfig:
         scheduling=_scheduling(raw.get("scheduling", {})),
         storage_root=storage_root,
         labelling=_labelling(raw.get("labelling", {})),
+        decider=_decider(raw.get("decider", {})),
+        marks=_table("marks", MarksConfig, raw.get("marks", {})),
+        title_page=_table("title_page", TitlePageConfig, raw.get("title_page", {})),
     )
     _check_shared_storage(config)
     return config
 
 
 def _check_shared_storage(config: StudioConfig) -> None:
-    """A service-backed stage exchanges paths relative to the storage root: fail at load time,
-    not on the first job, when the scans or the artifacts live outside it."""
-    if not any(r.backend == "service" for r in config.orchestration.routes.values()):
-        return
+    """The services exchange paths relative to the storage root: fail at load time, not on the
+    first job, when it is missing or the scans or the artifacts live outside it."""
     if config.storage_root is None:
-        raise ValueError("a service-backed stage needs a storage root "
+        raise ValueError("the services need the shared storage root "
                          f"([studio] storage_root or ${STORAGE_ROOT_ENV})")
     root = config.storage_root
     outside = [str(p) for p in (config.artifacts_root,
                                 *(pc.scans_root for pc in config.projects.values()))
                if not p.is_relative_to(root)]
     if outside:
-        raise ValueError(f"service-backed stages need every scan and artifact path under the "
+        raise ValueError(f"the services need every scan and artifact path under the "
                          f"storage root {root}; outside it: {', '.join(outside)}")
