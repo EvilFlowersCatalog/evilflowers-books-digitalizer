@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from evilflowers_books_digitalizer.studio.config import ProjectConfig, StudioConfig
 from evilflowers_books_digitalizer.studio.events import Event, EventType
+from evilflowers_books_digitalizer.studio.orchestration.scheduling import Admission
 from evilflowers_books_digitalizer.studio.ports import EventBus
 from evilflowers_books_digitalizer.studio.adapters.registry import Adapters, build_adapters
 
@@ -45,6 +46,12 @@ class WorkerContext:
     bus: EventBus
     adapters_factory: AdaptersFactory = build_adapters
     _adapters: dict[str, Adapters] = field(default_factory=dict)
+    #: admission policy (scheduling); in-memory pause switch and no backpressure unless wired
+    admission: Admission | None = None
+
+    def __post_init__(self) -> None:
+        if self.admission is None:
+            self.admission = Admission(self.config.scheduling)
 
     def project(self, slug: str) -> ProjectConfig:
         return self.config.project(slug)
@@ -84,6 +91,19 @@ def configure(ctx: WorkerContext | None) -> None:
     _current = ctx
 
 
+def production_admission(config: StudioConfig) -> Admission:
+    """The pause switch in Redis (shared by every orchestrator and the API) + backpressure."""
+    from evilflowers_books_digitalizer.studio.orchestration.scheduling import (
+        NoBackpressure,
+        RedisControl,
+        RedisQueueDepth,
+    )
+
+    probe = RedisQueueDepth(config.scheduling.backpressure) if config.scheduling.backpressure \
+        else NoBackpressure()
+    return Admission(config.scheduling, RedisControl(config.redis_url), probe)
+
+
 def from_config(config: StudioConfig) -> WorkerContext:
     """Production wiring: SQLAlchemy engine on ``database_url``, Redis pub/sub bus."""
     from sqlalchemy import create_engine
@@ -93,7 +113,8 @@ def from_config(config: StudioConfig) -> WorkerContext:
 
     engine = create_engine(config.database_url, pool_pre_ping=True)
     return WorkerContext(config, sessionmaker(engine, expire_on_commit=False),
-                         RedisEventBus(config.redis_url))
+                         RedisEventBus(config.redis_url),
+                         admission=production_admission(config))
 
 
 def current() -> WorkerContext:

@@ -502,8 +502,12 @@ def _add_studio_parser(sub: Any) -> None:
     q = add("serve", "REST + SSE API and the SPA", cmd_studio_serve)
     q.add_argument("--host", default="127.0.0.1", help="bind address (no auth — VPN only)")
     q.add_argument("--port", type=int, default=8000)
-    q = add("worker", "start a Celery worker (batch side)", cmd_studio_worker)
-    q.add_argument("-Q", "--queues", default="interactive,cpu,ai,io")
+    q = add("worker", "start a Celery worker (orchestrator and in-process stages)",
+            cmd_studio_worker)
+    q.add_argument("-Q", "--queues",
+                   default="digitalizer.portal,digitalizer.interactive,digitalizer.cpu,"
+                           "digitalizer.ai",
+                   help="add -- -B to the single orchestrator worker (beat: pump, reconcile)")
     q.add_argument("--concurrency", type=int)
     q.add_argument("celery_args", nargs=argparse.REMAINDER, help="passed through to celery worker")
     q = add("import", "enqueue discovery of a project's scan tree", cmd_studio_import)

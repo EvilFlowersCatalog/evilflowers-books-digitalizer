@@ -1,4 +1,5 @@
 @startuml component-restoration-studio
+' SUPERSEDED 2026-11-16 by docs/diagrams/component-digitalizer-target.puml (kept for history)
 !include ../../../tools/diagrams/elvira.iuml
 ' =============================================================================
 ' What: the digitalizer reframed as a reusable restoration studio. Clean

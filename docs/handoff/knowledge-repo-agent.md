@@ -1,5 +1,15 @@
 # Handoff: Restoration Studio infrastructure in the knowledge repo
 
+> **Superseded for deployment names (2026-11-16)**, now tracked in knowledge#66 / #67:
+>
+> * `studio-api` → `portal`;
+> * the worker Deployments are `orchestrator`, `worker-interactive` and `worker-cpu` /
+>   `worker-ai` (KEDA 0..N, PriorityClass `digitalizer-batch`);
+> * no `vlm` Deployment here (the shared vlm in namespace `shared`);
+> * read access to Redis db 7 is needed for backpressure.
+>
+> The NFS, database and secret sections still apply.
+
 For: the agent that works in `github.com/EvilFlowersCatalog/knowledge` (Ansible + Obsidian vault).
 From: the evilflowers-books-digitalizer session, 2026-11-07.
 Status of everything below: **Proposal**. Nothing here is applied. Do not apply anything

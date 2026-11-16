@@ -1,0 +1,80 @@
+@startuml state-digitalizer-run-job
+!include elvira.iuml
+' =============================================================================
+' What: a run advances stage by stage only when every job of the stage is
+'       applied; a job waits in the ledger until admission lets the pump send
+'       it, and the ledger (not the worker) decides whether its result counts:
+'       a sent job ends applied, failed or revoked, or goes back to planned
+'       with a new token until its budget is spent.
+' Kind: UML state machines, one Run and one Job of the portal's job ledger,
+'       as implemented. Omitted: per-route deadlines (configuration).
+' Source: this repo studio/orchestration/ledger.py (start_run, pump, settle,
+'         fail, reconcile), studio/orchestration/scheduling.py (Admission,
+'         Mode), studio/domain.py (JobStatus, Lane), studio/workers/stages/
+'         orchestrate.py (STAGES, blocked_by) (2026-11-16); evilflowers-worker
+'         docs/architecture.md §3.3-§3.4 @ 8fc9c20 (outcome last, token single
+'         use); Celery 5.6 calling.html (link, link_error; neither fires on
+'         retry or on a killed worker).
+' =============================================================================
+
+title Run and job state machines of the digitalizer's job ledger (2026-11-16)
+
+state "Run" as Run {
+  [*] --> r_queued
+  state "queued" as r_queued : scheduled_at set when\nthe pump sends digitalizer.run
+  state "held" as r_held : queued, scheduled_at NULL:\nPUBLISH waits for an\nearlier RENDER of the book
+  state "running" as r_running {
+    state "clean" as s_clean
+    state "analyze" as s_analyze : hocr ∥ detect
+    state "formulas" as s_formulas
+    state "render" as s_render : off-peak stage\n(held at peak)
+    state "gate" as s_gate
+    state "publish" as s_publish : only with a\npublish target
+    [*] --> s_clean : FULL / RERUN
+    [*] --> s_render : RENDER
+    [*] --> s_publish : PUBLISH
+    s_clean --> s_analyze : all clean jobs applied
+    s_analyze --> s_formulas
+    s_formulas --> s_render : FULL
+    s_render --> s_gate : FULL
+  }
+  state "done" as r_done
+  state "failed" as r_failed
+  state "cancelled" as r_cancelled : operator cancel
+  r_queued --> r_held : blocked_by
+  r_held --> r_queued : blocker finished\n(next pump)
+  r_queued --> r_running : digitalizer.run plans\nthe first stage's jobs
+  r_running --> r_done : last stage applied\n(RERUN ends after formulas)
+  r_running --> r_failed : a job failed\n(error or budget spent)
+  r_running --> r_cancelled : cancel
+  r_queued --> r_cancelled : cancel
+}
+
+state "Job" as Job {
+  [*] --> planned
+  state planned : row in the ledger,\nwaits for admission\n(lane, queue cap, mode)
+  state dispatched <<focus>> : token + task_id minted,\nsent with link / link_error,\ndeadline set
+  state started : local job: begin()\n+ heartbeat thread
+  state applied : job_done, or reconcile\nfinds the service outcome;\nnext stage planned
+  state failed : job_failed, outcome failed,\nor budget spent
+  state revoked : a sibling failed or the\nrun was cancelled;\nlate results refused
+  planned --> dispatched : pump admits\n(normal / peak / contended;\nnone while paused)
+  dispatched --> planned : broker refused the send
+  dispatched --> started : worker begins (local)
+  dispatched --> applied : job_done (service)
+  started --> applied : job_done
+  dispatched --> failed : job_failed
+  started --> failed : job_failed
+  dispatched --> planned : reconcile: past deadline,\nno outcome; budget − 1
+  started --> planned : reconcile: heartbeat stale;\nbudget − 1
+  planned --> failed : budget spent
+  planned --> revoked : run ends early
+  dispatched --> revoked : run ends early
+  started --> revoked : run ends early
+}
+
+Run -[hidden]-> Job
+
+caption A stage completes only when all of its jobs are applied; one failed job fails the run and revokes its siblings. Workers are\nat-least-once (acks_late; redelivery keeps the token), so the ledger turns duplicates and stale results into no-ops by job id, task id and token.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/state-digitalizer-run-job.puml
+@enduml

@@ -169,13 +169,13 @@ RUN pip install --no-cache-dir \
 COPY pyproject.toml README.md ./
 COPY evilflowers_books_digitalizer ./evilflowers_books_digitalizer
 COPY configs ./configs
-RUN pip install --no-cache-dir . && recode_pdf --version \
+RUN pip install --no-cache-dir ".[telemetry]" && recode_pdf --version \
  && evilflowers-digitalizer --help >/dev/null \
  && command -v pandoc && command -v potrace && command -v hunspell \
  && test -f /usr/share/hunspell/sk_SK.dic \
  && command -v uvicorn && command -v celery
 
-# the SPA bundle (served by studio-api; STUDIO_STATIC_DIR below)
+# the SPA bundle (served by the portal; STUDIO_STATIC_DIR below)
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
 
 # --- layout detection (worker-ai): DocLayout-YOLO as ONNX ---------------------
@@ -230,7 +230,7 @@ ENV EVILFLOWERS_DIGITALIZER_CONFIG=/app/configs/pipeline.toml \
     PYTHONUNBUFFERED=1
 USER 10001
 
-# studio-api listens here (workers listen on nothing)
+# the portal listens here (orchestrator and workers listen on nothing)
 EXPOSE 8000
 
 # Probes the API only when the container runs it (STUDIO_ROLE=api); a worker

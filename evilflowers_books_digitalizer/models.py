@@ -16,7 +16,7 @@ class PageScan(BaseModel):
 
 
 class BookRef(BaseModel):
-    """A book on a WebDAV share — one top-level directory of TIFF pages."""
+    """A book in a scan source — one top-level directory of TIFF pages."""
 
     source: str  # source key, e.g. "svf"
     book_id: str  # directory name on the share
@@ -32,7 +32,7 @@ class BookRef(BaseModel):
 
 
 class SourceStats(BaseModel):
-    """Aggregated content statistics for one WebDAV source."""
+    """Aggregated content statistics for one scan source."""
 
     source: str
     books: list[BookRef]

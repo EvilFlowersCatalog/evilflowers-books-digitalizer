@@ -81,7 +81,7 @@ class MetadataProvider(Protocol):
 class LeafPlan:
     """Where one leaf comes from — decided ONCE per full run, before any cleaning.
 
-    The first ``studio.clean`` of a full run calls :meth:`PageCleaner.plan` and
+    ``digitalizer.run`` of a full run calls :meth:`PageCleaner.plan` and
     persists one ``pages`` row per plan (leaf_num = index, crop_box, hand_side,
     rotate_degree, source_path). Every later clean (chunks, re-runs) works from the
     persisted rows, so leaf numbers are stable and overrides can be keyed by them.

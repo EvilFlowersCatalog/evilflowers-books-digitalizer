@@ -2,7 +2,7 @@
 
 A ``runs`` row is the only touchpoint between the interactive and the batch side
 (docs/design/studio-spec.md): the API commits the row, *then* enqueues
-``studio.run`` with its id, so a worker never receives an id it cannot read.
+``digitalizer.run`` with its id, so a worker never receives an id it cannot read.
 """
 
 from __future__ import annotations
@@ -54,6 +54,10 @@ def create_run(svc: Services, book_id: int, cmd: dto.RunIn, author: str | None) 
     spec = RunSpec(cmd.kind, cmd.pages, interactive)
     with svc.uow() as uow:
         book = get_book(uow.session, book_id)
+        cfg = svc.project(book.project)
+        if spec.kind == RunKind.PUBLISH and (cfg is None or not cfg.publish.enabled):
+            raise Invalid(f"project {book.project} has no publish target; publication is "
+                          "optional and not configured")
         check_active(uow.session, book, spec.kind, spec.pages)
         _check_pages(uow.session, book, spec)
         run = add_run(uow, book, spec, author)

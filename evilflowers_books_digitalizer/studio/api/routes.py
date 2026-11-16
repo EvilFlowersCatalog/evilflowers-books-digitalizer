@@ -18,6 +18,7 @@ from evilflowers_books_digitalizer.studio.application import (
     regions,
     review,
     runs,
+    scheduler,
 )
 from evilflowers_books_digitalizer.studio.domain import BookStatus
 
@@ -120,3 +121,20 @@ def add_note(svc: Svc, who: Operator, body: dto.NoteIn) -> dto.NoteOut:
 @router.post("/books/{book_id}/reviews", status_code=201, response_model=dto.ReviewOut)
 def submit_review(svc: Svc, who: Operator, book_id: int, body: dto.ReviewIn) -> dto.ReviewOut:
     return review.submit_review(svc, book_id, body, who)
+
+
+# ---------------------------------------------------------------- scheduler
+@router.get("/scheduler", response_model=dto.SchedulerOut)
+def scheduler_status(svc: Svc) -> dto.SchedulerOut:
+    return scheduler.status(svc)
+
+
+@router.post("/scheduler/pause", response_model=dto.SchedulerOut)
+def scheduler_pause(svc: Svc, who: Operator,
+                    body: Annotated[dto.PauseIn | None, Body()] = None) -> dto.SchedulerOut:
+    return scheduler.pause(svc, body or dto.PauseIn(), who)
+
+
+@router.post("/scheduler/resume", response_model=dto.SchedulerOut)
+def scheduler_resume(svc: Svc) -> dto.SchedulerOut:
+    return scheduler.resume(svc)

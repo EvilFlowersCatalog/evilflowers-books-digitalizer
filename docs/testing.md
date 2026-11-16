@@ -4,8 +4,8 @@ End-to-end path: prove the pipeline locally (single book → a small batch with 
 live dashboard), then deploy to the VM and start the corpus. Run the steps in
 order; each one gates the next.
 
-- **Local** uses `configs/pipeline.local.toml` (WebDAV source, `output_local/`,
-  small concurrency).
+- **Local** uses `configs/pipeline.local.toml` (a few books copied to
+  `.cache/raw-scans`, `output_local/`, small concurrency).
 - **Production** uses `configs/pipeline.toml` (the `/mnt` filesystem source).
 
 ---
@@ -17,7 +17,6 @@ order; each one gates the next.
 brew install tesseract tesseract-lang ghostscript jbig2enc
 #   scantailor-deviant-cli: build from source or use the Docker image (see README)
 poetry install                                   # installs pandas, openpyxl, rich, …
-cp credentials.example.toml credentials.toml     # fill in WebDAV creds (for the WebDAV path)
 ```
 
 Check the toolchain is visible:
@@ -27,8 +26,9 @@ for t in scantailor-deviant-cli tesseract recode_pdf; do command -v $t || echo "
 tesseract --list-langs | grep -E 'slk|ces|eng'   # language packs present
 ```
 
-WebDAV needs the **VPN** (to reach `datasilo2.schk.sk`). If you'd rather not use
-WebDAV, see *Option B* in step 3 to stage a few books to disk.
+Local scans: copy a few books off the `raw-scans` export into
+`.cache/raw-scans/<faculty>/<book>/stream_pages_tif/*.tif`. A faculty key is its
+directory name unless `[source.paths]` maps it elsewhere (as `configs/pipeline.toml` does).
 
 ---
 
@@ -47,7 +47,7 @@ Green here means the code, config and step wiring are sound.
 
 ## 2 · Prepare the metadata catalogue (recommended)
 
-Run **`notebooks/10_metadata_catalog_draft.ipynb`** (VPN on) to produce
+Run **`lab/notebooks/10_metadata_catalog_draft.ipynb`** (VPN on) to produce
 `configs/catalog_template.xlsx` — one row per book, ISBN-enriched from the STU
 catalogue. Then check it lines up with the real directories:
 
@@ -88,25 +88,8 @@ Open the PDF (searchable text layer, real margins, no bleed-through), the cover
 (real OPAC cover or generated), and confirm the cache was cleaned
 (`.cache/scans/svf/<BOOK_ID>` gone).
 
-**Option B — local filesystem instead of WebDAV.** Stage a few books to disk and
-flip the backend, to rehearse the production read path:
-
-```bash
-poetry run python - <<'PY'
-from pathlib import Path
-from evilflowers_books_digitalizer.config import load_settings
-from evilflowers_books_digitalizer.sources.webdav import BookSource
-src = BookSource(load_settings().sources["svf"])
-base = Path(".cache/raw-scans/svf/SVF-skeny")
-for bid in src.list_books()[:2]:
-    src.stage_book(bid, base / bid / "stream_pages_tif", progress=True)
-print("staged to", base)
-PY
-```
-
-Then in `configs/pipeline.local.toml` set `[source] backend = "filesystem"`,
-`root = ".cache/raw-scans"`, and `[source.paths] svf = "svf/SVF-skeny"`, and run
-`run-book` / `run-source` exactly as above — now it reads from disk like the VM.
+The local config reads `.cache/raw-scans` through the same filesystem source the
+VM uses on its mount, so this rehearses the production read path.
 
 ---
 
@@ -146,7 +129,7 @@ books whose PDF already exists return `skipped`, so it resumes cheaply.
 poetry run python -m evilflowers_books_digitalizer stats --config configs/pipeline.local.toml
 ```
 
-Or open **`notebooks/12_stats_and_results.ipynb`** for the visual dashboard:
+Or open **`lab/notebooks/12_stats_and_results.ipynb`** for the visual dashboard:
 corpus inventory, catalogue/enrichment coverage, cover sourcing, batch results
 (size distribution, throughput), and a grid of produced covers + a rendered page.
 

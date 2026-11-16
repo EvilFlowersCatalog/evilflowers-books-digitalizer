@@ -1,0 +1,153 @@
+@startuml deployment-digitalizer-dev
+!include elvira.iuml
+' =============================================================================
+' What: on dev the digitalizer is one namespace on control: the portal
+'       (API, orchestrator) plus KEDA-scaled standalone workers (two new
+'       images, and second Deployments of the ocr, analyzer, equation and image
+'       images), all on Redis db 8; state, scans and outputs stay on gateway
+'       (Postgres through the k8s-bridge, the library disk over NFS), formula
+'       and vision inference come from namespace shared on app01, and the
+'       optional publication goes to the dev catalog. Until the services take
+'       over a stage, bulk stages run in-process on low-priority workers that
+'       KEDA scales to zero at peak (admission keeps their queues short).
+' Kind: UML deployment diagram, instance level, proposal. Scope: data, command,
+'       operator, inference and publish paths. Omitted: Loki/Mimir/Tempo
+'       internals (every pod exports OTLP to its node's alloy-node), DNS, image
+'       build (GHCR, CI redeploy per Deploy-a-Service), KEDA objects.
+'       Implemented in this repo: deploy/k8s/base/{portal,workers,
+'       priorityclasses}.yaml, deploy/k8s/overlays/dev/keda.yaml (2026-11-16).
+' Source: knowledge notes NFS-Storage (written, not applied, 2026-11-12),
+'         Shared-Inference (2026-11-15), Extraction-Pipeline (2026-11-14),
+'         Books-Digitalizer (2026-11-08), app01 (2026-11-13), entity k8s-bridge
+'         (:6432 pgbouncer, :6379 redis; kernel DNAT, no relay container per
+'         STATUS 2026-11-13), entity alloy-node (OTLP/HTTP :4318);
+'         this repo docs/design/deployment-restoration-studio.puml,
+'         docs/design/studio-spec.md (2026-11-16).
+' =============================================================================
+
+title Books digitalizer on dev k3s: portal + kit workers on control,\ndata on gateway, inference on app01 (proposal, 2026-11-16)
+
+node admin <<device>> [
+**Operator laptop** · tailnet
+----
+browser: SPA (VPN only)
+]
+
+node "**gateway** · 192.168.122.227" <<virtualMachine>> as gw {
+  node nfs <<executionEnvironment>> <<proposed>> [
+**nfsd** (NFSv4.2) · /srv/nfs
+----
+raw-scans → ro
+digitized → **rw** (today: ro)
+]
+  node bridge <<OS>> [
+**k8s-bridge** · kernel DNAT (host)
+:6432 PgBouncer · :6379 Redis
+]
+  node "**Docker Engine**" <<executionEnvironment>> as docker {
+    node pg <<container>> [
+**postgresql18**
+db digitalizer «proposed»
+]
+    node redis <<container>> [
+**redis**
+db 7 catalog · db 8 «proposed»
+]
+  }
+}
+
+node "**control** · 192.168.122.60" <<virtualMachine>> as ct {
+  frame "namespace digitalizer (proposed)" as nsd {
+    node portal <<container>> <<proposed>> <<focus>> [
+**digitalizer image** · default priority
+----
+portal: FastAPI + SPA, /metrics, /scheduler
+orchestrator ×1: queue digitalizer.portal,
+job_done / job_failed + beat (pump 15 s,
+reconcile 60 s)
+worker-interactive ×1: operator re-runs
+]
+    node local <<container>> <<proposed>> [
+**bulk workers** (same image) · KEDA 0–N
+PriorityClass digitalizer-batch (−100)
+----
+worker-cpu: digitalizer.cpu (clean, render)
+worker-ai: digitalizer.ai (layout, formulas)
+]
+    node workers <<container>> <<proposed>> [
+**standalone service workers** · KEDA 0–N
+----
+new: scan-service · render-service
+same images as the catalog's, broker db 8:
+ocr · analyzer · equation · image
+]
+    artifact pv <<proposed>> [
+**PV raw-scans** (NFS, ROX)
+**PV digitized** (NFS, RWX)
+both under /data/library = STORAGE_PATH
+**PVC scratch** (local-path)
+]
+  }
+  frame "namespace evilflowers-dev" as nsdev {
+    node catdev <<container>> [
+**evilflowers** (dev catalog)
++ analyzer · text · image · equation
+]
+  }
+}
+
+node "**app01** · node IP 10.99.0.7" <<device>> as app {
+  frame "namespace shared" as nsshared {
+    node ollama <<container>> [
+**ollama** · elvira-assistant
+/api/chat (vision)
+]
+    node vlm <<container>> <<proposed>> [
+**vlm** · PaddleOCR-VL, CPU
+POST /v1/formulas
+]
+    node laya <<container>> <<proposed>> [
+**laya** · decision model
+(announced; API unknown)
+]
+  }
+}
+
+' ---- layout only ------------------------------------------------------------------
+ollama -[hidden]down- vlm
+vlm -[hidden]down- laya
+pv -[hidden]down- catdev
+pg -[hidden]down- ollama
+
+' ---- operator ---------------------------------------------------------------------
+admin --> portal : HTTP via VPN\nREST · SSE · DZI
+
+' ---- commands and state ------------------------------------------------------------
+portal -[$accent()]-> bridge : <b>Redis :6379 db 8 commands</b>\n<b>+ callbacks</b> · SQL :6432
+workers -[$accent()]-> bridge : <b>Redis :6379 db 8 consume,</b>\n<b>send job_done link</b>
+local --> bridge : Redis db 8 consume\nSQL :6432 (heartbeat)
+portal --> bridge : Redis db 7 LLEN\n(backpressure, read only)
+bridge --> pg : TCP
+bridge --> redis : TCP
+
+' ---- files -----------------------------------------------------------------------
+workers ..> pv : <<mount>> rw
+portal ..> pv : <<mount>> rw
+local ..> pv : <<mount>> rw
+local --> vlm : HTTP\nformula crops
+pv ..> nfs : NFSv4.2 :2049\nCSI on the host
+
+' ---- inference ---------------------------------------------------------------------
+workers --> vlm : HTTP\nformula crops
+workers --> laya : judges: verdicts\non uncertain items
+portal --> ollama : POST /api/chat\ntitle page
+
+' ---- publish -------------------------------------------------------------------------
+portal --> catdev : optional: HTTP REST /api/v1\nentry + acquisitions
+catdev --> bridge : Redis db 7\nanalyzer.extract
+
+$legend_live_proposed()
+
+caption Workers hold no catalog or database credential: commands and their link callbacks travel on Redis db 8 (its own\nvisibility timeout), results as files on the library export. Until gateway exports digitized read-write over NFS,\nthe only fallback is hostPath on gateway, which competes with production for its 8 cores.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/deployment-digitalizer-dev.puml
+@enduml

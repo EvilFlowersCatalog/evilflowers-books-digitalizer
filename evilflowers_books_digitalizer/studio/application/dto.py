@@ -208,10 +208,29 @@ class BookPage(BaseModel):
     total: int
 
 
+class SchedulerOut(BaseModel):
+    """``GET /scheduler``: what the orchestrator admits right now and why."""
+
+    mode: str                                  # normal | peak | contended | paused
+    reason: str                                # "" in normal mode
+    lanes: dict[str, int]                      # lane -> max jobs in flight
+    queues: dict[str, int]                     # queue -> max jobs in flight (configured caps)
+    held_stages: list[str]                     # stages whose bulk jobs wait for off-peak
+    peak_hours: list[str]
+    timezone: str
+    jobs: dict[str, int]                       # "status/lane" -> open jobs of active runs
+
+
+class PauseIn(BaseModel):
+    reason: str = Field(default="paused by an operator", max_length=200)
+
+
 class ProjectOut(BaseModel):
     slug: str
     name: str
     auto_publish: str
+    #: a publish target is configured; without one ``approved`` is a book's end state
+    publishes: bool = False
     outputs: list[str]
     collections: dict[str, str]                       # key -> human name, config order
     collection_counts: dict[str, dict[str, int]]      # key -> status -> books

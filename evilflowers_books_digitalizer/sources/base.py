@@ -1,16 +1,11 @@
 """Source abstraction: where a book's raw TIFF frames come from.
 
-Two backends implement :class:`AbstractBookSource`:
-
-* :class:`~.filesystem.FilesystemBookSource` — a local mount (production: the
-  scans are NFS/CIFS-mounted at ``/mnt/digital-library/raw-scans`` on the VM).
-* :class:`~.webdav.BookSource` — the original WebDAV backend (needs VPN; kept
-  for development and as an alternate deployment).
+The implementation is :class:`~.filesystem.FilesystemBookSource`: the scans
+are a mount (the gateway's ``raw-scans`` NFS export).
 
 A source speaks the domain vocabulary (books, pages) and knows how to *stage*
 a book's frames into a fast local working directory for processing. The shared
-listing/stats helpers are defined here in terms of the two abstract methods so
-both backends get them for free.
+listing/stats helpers are defined here in terms of the two abstract methods.
 """
 
 from __future__ import annotations

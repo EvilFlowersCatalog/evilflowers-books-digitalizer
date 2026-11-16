@@ -16,7 +16,7 @@ from evilflowers_books_digitalizer.studio.adapters.queue import RecordingTaskQue
 from evilflowers_books_digitalizer.studio.api.app import create_app
 from evilflowers_books_digitalizer.studio.adapters.ia import IaItemExporter
 from evilflowers_books_digitalizer.studio.application.services import Services
-from evilflowers_books_digitalizer.studio.config import ProjectConfig, StudioConfig
+from evilflowers_books_digitalizer.studio.config import ProjectConfig, PublishConfig, StudioConfig
 from evilflowers_books_digitalizer.studio.testing import fakes
 
 
@@ -39,13 +39,16 @@ def queue() -> RecordingTaskQueue:
 
 @pytest.fixture
 def config(tmp_path: Path) -> StudioConfig:
-    def project(slug: str, auto_publish: str) -> ProjectConfig:
+    def project(slug: str, auto_publish: str, target: str = "evilflowers") -> ProjectConfig:
         return ProjectConfig(slug=slug, name=slug.upper(), scans_root=tmp_path / "scans",
-                             collections={"fei": "FEI STU"}, auto_publish=auto_publish)  # type: ignore[arg-type]
+                             collections={"fei": "FEI STU"}, auto_publish=auto_publish,  # type: ignore[arg-type]
+                             publish=PublishConfig(target=target))
 
     return StudioConfig(database_url="sqlite://", redis_url="redis://unused",
                         artifacts_root=tmp_path / "artifacts", cache_dir=tmp_path / "cache",
-                        projects={"stu": project("stu", "review"), "quiet": project("quiet", "never")})
+                        projects={"stu": project("stu", "review"), "quiet": project("quiet", "never"),
+                                  # publication is optional: files only, no catalog
+                                  "files": project("files", "review", target="none")})
 
 
 @pytest.fixture

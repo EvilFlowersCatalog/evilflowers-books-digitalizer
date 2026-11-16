@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from batch_harness import PROJECT, Studio, make_studio
 from PIL import Image
 
-from evilflowers_books_digitalizer.db.models import Book, Note, Page, Publication, Region, Run
+from evilflowers_books_digitalizer.db.models import Book, Job, Note, Page, Publication, Region, Run
 from evilflowers_books_digitalizer.studio.domain import (
     DOCLAYNET,
     BBox,
@@ -215,13 +214,22 @@ def test_publish_records_publication_and_republishes(discovered: Studio) -> None
     assert discovered.book().status == BookStatus.PUBLISHED
 
 
+def test_gate_without_a_publish_target_ends_in_approved(tmp_path: Path) -> None:
+    """Publication is optional: a passing book is finished, no publish run is created."""
+    studio = make_studio(tmp_path, auto_publish="gate", publish_target="none")
+    tasks.discover.delay(PROJECT)
+    run = studio.execute(RunKind.FULL)
+    assert run.status == RunStatus.SUCCEEDED
+    assert studio.book().status == BookStatus.APPROVED
+    assert studio.session().query(Run).filter_by(kind="publish").count() == 0
+
+
 def test_publish_of_unreviewed_book_fails(tmp_path: Path) -> None:
     stamp = RegionProposal(RegionKind.STAMP, BBox(10, 160, 60, 200), RegionSource.HEURISTIC, 0.9)
     studio = make_studio(tmp_path, layout=fakes.FakeLayout(extra=[stamp]))
     tasks.discover.delay(PROJECT)
     studio.execute(RunKind.FULL)
-    with pytest.raises(ValueError, match="review to published"):
-        studio.execute(RunKind.PUBLISH)
+    studio.execute(RunKind.PUBLISH)                 # eager: the job's errback fails the run
     failed = studio.session().query(Run).filter_by(kind="publish").one()
     assert failed.status == RunStatus.FAILED and "review" in (failed.error or "")
     assert studio.book().status == BookStatus.REVIEW
@@ -235,8 +243,7 @@ def test_failed_task_marks_run_and_book(discovered: Studio) -> None:
             raise PortError("scantailor exploded")
 
     discovered.adapters.cleaner = Broken()
-    with pytest.raises(PortError):
-        discovered.execute(RunKind.FULL)
+    discovered.execute(RunKind.FULL)
     run = discovered.session().query(Run).one()
     assert run.status == RunStatus.FAILED and "scantailor exploded" in (run.error or "")
     assert discovered.book().status == BookStatus.ERROR
@@ -249,8 +256,8 @@ def test_render_refuses_leaves_whose_ocr_was_evicted(discovered: Studio) -> None
     pdf = Path(discovered.book().artifacts["pdf"])
     before = pdf.read_bytes()
     Path(_pages(discovered)[1].hocr_path or "").unlink()          # cache_dir is scratch
-    with pytest.raises(PortError, match="OCR"):
-        discovered.execute(RunKind.RENDER)
+    run = discovered.execute(RunKind.RENDER)
+    assert run.status == RunStatus.FAILED and "OCR" in (run.error or "")
     assert pdf.read_bytes() == before                             # previous outputs intact
     assert discovered.book().status == BookStatus.APPROVED        # a failed render is not ERROR
 
@@ -260,8 +267,8 @@ def test_inactive_runs_are_skipped(discovered: Studio) -> None:
     s = discovered.session()
     s.get(Run, run_id).status = RunStatus.CANCELLED
     s.commit()
-    assert tasks.run.delay(run_id).get()["skipped"] is True
-    assert tasks.clean.delay(run_id, [0]).get()["skipped"] is True
+    assert tasks.run.delay(run_id).get()["state"] == "skipped"
+    assert discovered.session().query(Job).count() == 0
     assert discovered.session().query(Page).count() == 0
 
 

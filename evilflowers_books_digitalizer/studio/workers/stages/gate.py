@@ -1,7 +1,8 @@
 """``studio.gate``: measured signals -> ``domain.quality_gate`` -> book ``review`` or ``approved``.
 
-With ``auto_publish = "gate"`` a passing book gets a new *publish* run, returned to
-the task shell, which enqueues it only after this run is committed as finished.
+With ``auto_publish = "gate"`` and a publish target a passing book gets a new *publish*
+run. It is returned in the job's summary, and the orchestrator starts it only after this
+run is committed as finished. Without a target, ``approved`` is the end state.
 """
 
 from __future__ import annotations
@@ -79,7 +80,8 @@ def gate(ctx: WorkerContext, run_id: int) -> list[int]:
         runs.advance(uow, run)
         runs.log(uow, run, "quality gate: " + ("passed" if report.passed else
                                                "flagged: " + "; ".join(report.flags)))
-        if not (report.passed and project.auto_publish == "gate"):
+        # publication is optional: without a target an approved book is finished
+        if not (report.passed and project.auto_publish == "gate" and project.publish.enabled):
             return []
         if (existing := _pending_publish(run)) is not None:
             return [existing]       # a retry of this gate: the follow-up exists already

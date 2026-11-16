@@ -176,13 +176,55 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
-    # ---- 0003: liveness (studio.workers.recovery) ----------------------------------
-    #: last sign of life of a task working on this run (bumped while a task body runs)
-    heartbeat_at: Mapped[datetime | None]
-    #: when the run's canvas was handed to the broker; NULL while running = never dispatched
-    dispatched_at: Mapped[datetime | None]
+    #: (0004) when ``digitalizer.run`` was last sent for this queued run; NULL = never, or
+    #: held behind an earlier run. The pump re-sends a lost or held start (studio.orchestration).
+    scheduled_at: Mapped[datetime | None]
 
     book: Mapped[Book] = relationship(back_populates="runs")
+    jobs: Mapped[list[Job]] = relationship(
+        back_populates="run", order_by="Job.id", cascade="all, delete-orphan")
+
+
+class Job(Base):
+    """One dispatched unit of a run's stage: the job ledger (0004, studio.orchestration).
+
+    The orchestrator is the system of record. A worker (an in-process stage task or a
+    standalone service task) only ever sees ``params`` + ``token``; its result comes back
+    through a Celery ``link`` callback and, for services, an outcome file. Whether that
+    result counts is decided here: the token must match and the job must still be open.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_pk: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    stage: Mapped[str] = mapped_column(String(32))            # clean | analyze | formulas | ...
+    seq: Mapped[int] = mapped_column(Integer, default=0)       # order within the stage
+    lane: Mapped[str] = mapped_column(String(16))             # domain.Lane
+    backend: Mapped[str] = mapped_column(String(16))          # local | service
+    task: Mapped[str] = mapped_column(String(128))            # Celery task name
+    queue: Mapped[str] = mapped_column(String(128))
+    #: what the worker needs besides the token (leaf indices, output_dir, ...)
+    params: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="planned", index=True)
+    #: single-use capability: a result is applied only with the token of the current attempt
+    token: Mapped[str | None] = mapped_column(String(64))
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    #: re-sends left when the job is lost (no heartbeat, no outcome by its deadline)
+    budget: Mapped[int] = mapped_column(Integer, default=2)
+    task_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    dispatched_at: Mapped[datetime | None]
+    started_at: Mapped[datetime | None]
+    #: last sign of life (local stage tasks beat while their body runs)
+    heartbeat_at: Mapped[datetime | None]
+    deadline_at: Mapped[datetime | None]
+    finished_at: Mapped[datetime | None]
+    #: the worker's compact return value (Celery passes it to the link callback)
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    run: Mapped[Run] = relationship(back_populates="jobs")
 
 
 class Note(Base):

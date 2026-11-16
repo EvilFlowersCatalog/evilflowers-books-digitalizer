@@ -33,19 +33,25 @@ One terminal each, or all at once with a Procfile runner (`honcho start -f deplo
 `overmind start -f …`): copy the block below into `deploy/dev/Procfile`.
 
 ```Procfile
-api:        .venv/bin/uvicorn evilflowers_books_digitalizer.studio.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
-worker-cpu: .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q interactive,cpu -n cpu@%h --concurrency 2 --prefetch-multiplier 1 -O fair --loglevel INFO
-worker-ai:  .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q ai -n ai@%h --concurrency 1 --prefetch-multiplier 1 --loglevel INFO
-worker-io:  .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q io -n io@%h --beat --schedule .cache/studio/celerybeat-schedule --concurrency 2 --loglevel INFO
-spa:        pnpm -C frontend dev
+portal:       .venv/bin/uvicorn evilflowers_books_digitalizer.studio.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
+orchestrator: .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.portal -n orchestrator@%h --beat --schedule .cache/studio/celerybeat-schedule --concurrency 2 --loglevel INFO
+interactive:  .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.interactive -n interactive@%h --concurrency 2 --prefetch-multiplier 1 --loglevel INFO
+worker-cpu:   .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.cpu -n cpu@%h --concurrency 2 --prefetch-multiplier 1 -O fair --loglevel INFO
+worker-ai:    .venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.ai -n ai@%h --concurrency 1 --prefetch-multiplier 1 --loglevel INFO
+spa:          pnpm -C frontend dev
 ```
 
-The same pools as in k8s (`deploy/k8s/base/workers.yaml`). For a quick single process,
-one worker can take every queue:
+The same roles as in k8s (`deploy/k8s/base/workers.yaml`): the orchestrator owns the
+portal queue and beat (pump every 15 s, reconcile every 60 s) and must run exactly
+once; the others only execute local stage jobs. For a quick single process, one worker
+can take every queue:
 
 ```bash
-.venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q interactive,cpu,ai,io --beat --schedule .cache/studio/celerybeat-schedule --loglevel INFO
+.venv/bin/celery -A evilflowers_books_digitalizer.studio.workers.app:celery worker -Q digitalizer.portal,digitalizer.interactive,digitalizer.cpu,digitalizer.ai --beat --schedule .cache/studio/celerybeat-schedule --loglevel INFO
 ```
+
+Scheduling (`[scheduling]` in the config): `GET /api/v1/scheduler` shows the admission
+mode and capacity; `POST /api/v1/scheduler/pause` / `resume` hold and release bulk work.
 
 macOS: if a forked worker child crashes in an Objective-C initializer, start the workers
 with `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` (a macOS fork-safety check, not a bug in

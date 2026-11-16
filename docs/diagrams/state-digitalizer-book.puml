@@ -1,0 +1,44 @@
+@startuml state-digitalizer-book
+!include elvira.iuml
+' =============================================================================
+' What: a book's status is driven only by its runs and by operator decisions;
+'       a FULL run renders and then gates, so the reviewer sees the PDF; a
+'       passing gate approves it, and only an approved book is published
+'       (re-runs reopen it).
+' Kind: UML state machine, one Book, proposal. The run and job machines that
+'       drive these transitions are in state-digitalizer-run-job.
+' Source: this repo docs/design/studio-spec.md (statuses discovered/queued/
+'         running/review/approved/published/error, studio.gate, ordering of
+'         RENDER then PUBLISH runs), studio/workers/stages/orchestrate.py (STAGES:
+'         FULL = clean, analyze, formulas, render, gate) and gate.py (approved /
+'         review, publish run when auto_publish = "gate") (2026-11-16).
+' =============================================================================
+
+title Book lifecycle in the portal (proposal, 2026-11-16)
+
+[*] --> discovered : import (scan tree listed)
+
+state discovered
+state queued : a FULL run is waiting
+state running : FULL run: clean, analyze,\nrender, gate (or a RERUN)
+state review <<focus>> : gate flagged it;\noperator edits pages,\nregions, metadata
+state approved : outputs final (PDF, PDF/A,\nEPUB, IA item); PUBLISH\nqueued only with a catalog target
+state published : optional: entry +\nacquisitions in the catalog
+state error : last run failed\n(error kept on the run)
+
+discovered --> queued : operator or batch\nstarts a run
+queued --> running : orchestrator dispatches\nthe first job
+running --> review : gate: flags or\nlow score
+running --> approved : gate passed
+review --> running : page re-run\n(interactive)
+review --> approved : operator approves
+approved --> published : publish run done\n(optional)
+approved --> running : re-run
+published --> running : re-run after\npublication
+running --> error : run failed
+approved --> error : render or\npublish failed
+error --> queued : retry
+
+caption Status is a projection of runs plus operator decisions, never set by a worker. Approved is a valid end state:\npublication is optional. A re-run goes through the gate again; a published book republishes (upload, then delete old files).
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/state-digitalizer-book.puml
+@enduml

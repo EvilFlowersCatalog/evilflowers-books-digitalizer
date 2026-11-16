@@ -1,7 +1,17 @@
 """TaskQueue adapters: Celery by task *name* (no import of task functions) and an inline recorder.
 
-Keeping the API process free of worker imports (ScanTailor, torch, …) is the
-point: ``send_task("studio.run", …)`` only needs the broker URL.
+Keeping the API process free of worker imports (ScanTailor, onnxruntime, …) is the
+point: ``send_task("digitalizer.run", …)`` only needs the broker URL.
+
+Broker contract (shared with every worker on the digitalizer's Redis db, kit services
+included, evilflowers-worker#5):
+
+* plain lists, **no priority emulation**: a ``priority`` would land in a
+  ``<queue>\\x06\\x16<n>`` list that kit workers never read, and KEDA / redis_exporter
+  would see an empty queue. Urgency is the interactive queue + the pump's admission order;
+* one ``visibility_timeout`` for every consumer of the db (the shortest one wins):
+  12 h, the kit's default, above the longest single job (a whole-book render);
+* no result backend: results come back as ``link`` / ``link_error`` callbacks.
 """
 
 from __future__ import annotations
@@ -10,23 +20,17 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-#: queue names (docs/design/studio-spec.md "Queues and tasks")
-INTERACTIVE, CPU, AI, IO = "interactive", "cpu", "ai", "io"
+from evilflowers_books_digitalizer.studio.config import (
+    AI_QUEUE,
+    CPU_QUEUE,
+    INTERACTIVE_QUEUE,
+    PORTAL_QUEUE,
+)
 
-#: Redis emulates priorities with one list per step and BRPOPs them in *ascending*
-#: order (kombu ``_brpop_start``), so 0 is the most urgent: operator re-runs use it,
-#: batch work the middle of the range.
-INTERACTIVE_PRIORITY = 0
-DEFAULT_PRIORITY = 5
-#: shared by the worker app and the API client, so both agree on the list names.
-#: ``visibility_timeout`` must exceed the longest single task (a whole-book render
-#: or formulas stage): with ``acks_late`` Redis redelivers an unacked message after
-#: it, and a second worker would start the same stage while the first still runs.
-TRANSPORT_OPTIONS: dict[str, Any] = {
-    "queue_order_strategy": "priority",
-    "priority_steps": list(range(10)),
-    "visibility_timeout": 24 * 3600,
-}
+#: every queue this application consumes
+QUEUES = (PORTAL_QUEUE, CPU_QUEUE, AI_QUEUE, INTERACTIVE_QUEUE)
+VISIBILITY_TIMEOUT = 12 * 3600
+TRANSPORT_OPTIONS: dict[str, Any] = {"visibility_timeout": VISIBILITY_TIMEOUT}
 
 
 class CeleryTaskQueue:
@@ -34,24 +38,22 @@ class CeleryTaskQueue:
         if app is None:
             from celery import Celery
 
-            app = Celery("studio-client", broker=broker_url, backend=broker_url)
+            app = Celery("digitalizer-api", broker=broker_url)
             app.conf.broker_transport_options = dict(TRANSPORT_OPTIONS)
         self._app = app
 
-    def _send(self, name: str, args: list[Any], queue: str,
-              priority: int = DEFAULT_PRIORITY) -> str:
-        result = self._app.send_task(name, args=args, queue=queue, priority=priority)
-        return str(result.id)
+    def _send(self, name: str, args: list[Any]) -> str:
+        return str(self._app.send_task(name, args=args, queue=PORTAL_QUEUE).id)
 
     def enqueue_run(self, run_id: int, *, interactive: bool = False) -> str:
-        return self._send("studio.run", [run_id], INTERACTIVE if interactive else IO,
-                          priority=INTERACTIVE_PRIORITY if interactive else DEFAULT_PRIORITY)
+        # one queue for starts: the orchestrator is light; the lane decides admission
+        return self._send("digitalizer.run", [run_id])
 
     def enqueue_discover(self, project: str, collection: str | None = None) -> str:
-        return self._send("studio.discover", [project, collection], IO)
+        return self._send("digitalizer.discover", [project, collection])
 
     def enqueue_export(self, project: str) -> str:
-        return self._send("studio.export_training", [project], IO)
+        return self._send("digitalizer.export_training", [project])
 
     def revoke(self, task_id: str) -> None:
         self._app.control.revoke(task_id, terminate=False)
@@ -70,16 +72,16 @@ class RecordingTaskQueue:
         return uuid.uuid4().hex
 
     def enqueue_run(self, run_id: int, *, interactive: bool = False) -> str:
-        task_id = self._record("studio.run", run_id, interactive=interactive)
+        task_id = self._record("digitalizer.run", run_id, interactive=interactive)
         if self.on_run is not None:
             self.on_run(run_id)
         return task_id
 
     def enqueue_discover(self, project: str, collection: str | None = None) -> str:
-        return self._record("studio.discover", project, collection)
+        return self._record("digitalizer.discover", project, collection)
 
     def enqueue_export(self, project: str) -> str:
-        return self._record("studio.export_training", project)
+        return self._record("digitalizer.export_training", project)
 
     def revoke(self, task_id: str) -> None:
         self.revoked.append(task_id)

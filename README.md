@@ -120,12 +120,29 @@ archive-pdf-tools, hocr-tools and BookReader work on it directly, and
 
 ## Deployment
 
-One image (`Dockerfile`) runs the API and every worker pool; the container command picks
-the role, and the SPA is built into it. Kubernetes manifests (kustomize base + dev
-overlay, namespace `digitalizer`) are in [deploy/k8s/](deploy/k8s/README.md): `studio-api`
-with a migrating init container and `/healthz` probes, `worker-cpu`, `worker-ai`,
-`worker-io` (with beat), NFS volumes for the read-only scans and the output tree, and
-secrets from `studio-secrets`. The config is `configs/studio.k8s.toml`.
+This repository is the **portal + orchestration + lab** of the digitalizer
+([target architecture](docs/design/target-architecture.md)). The orchestrator keeps a
+*job ledger* (`jobs` table): every stage of a run is a job. A job is sent either to a local
+Celery queue (`digitalizer.cpu`, `digitalizer.ai`, `digitalizer.interactive`) or to a
+service built on evilflowers-worker. A service reports back through Celery `link` /
+`link_error` callbacks.
+
+An admission pump runs bulk work in the background. It holds back at peak hours, when the
+catalog's queues are busy, or when an operator pauses it, so that the other services and
+interactive re-runs keep their preference. Configure it in `[scheduling]` and
+`[orchestration]` in the studio config.
+
+One image (`Dockerfile`) runs the portal and every Celery role; the container command
+picks the role, and the SPA is built into it. The Kubernetes manifests (kustomize base +
+dev overlay, namespace `digitalizer`) are in [deploy/k8s/](deploy/k8s/README.md):
+
+* `portal`;
+* `orchestrator` (with beat);
+* `worker-interactive`;
+* the bulk workers `worker-cpu` and `worker-ai`, scaled 0..N by KEDA under a low
+  PriorityClass.
+
+The config is `configs/studio.k8s.toml`.
 
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
@@ -138,14 +155,13 @@ kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
 The studio grew out of this unattended batch pipeline, which still works on its own:
 TIFF scans → **two PDFs per book** (a fast **distribution** copy and a **PDF/A-2b
 archival** master) with Slovak OCR, metadata and covers, imported into the catalog.
-Built entirely on OSS tooling (Tesseract, ScanTailor, archive-pdf-tools, pikepdf,
-webdav4).
+Built entirely on OSS tooling (Tesseract, ScanTailor, archive-pdf-tools, pikepdf).
 
 ## Pipeline architecture
 
 Scans are **two-page spreads on a black scanner bed** (uncompressed RGB TIFF @ 300
-DPI, ~24 MB/frame). Frames are read by a pluggable **source** (a local mount in
-production, WebDAV in dev — `[source]` in `configs/pipeline.toml`). One OCR pass
+DPI, ~24 MB/frame). Frames are read off the raw-scans mount by the filesystem
+**source** (`[source]` in `configs/pipeline.toml`). One OCR pass
 feeds a profile-driven renderer that emits **one PDF per output profile**:
 
 ```
@@ -178,7 +194,7 @@ source (TIFF frames per book)        output/distribution/<source>/<slug>.pdf,.tx
 Text stays razor-sharp in both — the JBIG2 1-bit mask is full resolution; only
 the colour layers downsample. (The old single output used 26-MP JPEG2000 layers
 that rendered blank/slow in Preview and PDF.js — fixed by the JPEG distribution
-copy. See `notebooks/03_dual_output_lab.ipynb`.)
+copy. See `lab/notebooks/03_dual_output_lab.ipynb`.)
 
 **Output layout** (`[render] layout`): `split` (default) separates the trees —
 `<output>/distribution/<faculty>/<slug>.pdf` (+ sidecars/cover) and
@@ -195,7 +211,7 @@ without touching existing code. `pipeline.factory.build_pipeline` wires it from
 
 The empirical basis for the settings is in
 [docs/digitalization_pipeline_report.md](docs/digitalization_pipeline_report.md)
-and reproducible in `notebooks/03_dual_output_lab.ipynb`.
+and reproducible in `lab/notebooks/03_dual_output_lab.ipynb`.
 
 ## Setup
 
@@ -239,8 +255,7 @@ With [uv](https://docs.astral.sh/uv/) (recommended) or Poetry:
 ```bash
 git clone https://github.com/EvilFlowersCatalog/evilflowers-books-digitalizer.git
 cd evilflowers-books-digitalizer
-uv sync                                             # or: poetry install
-cp credentials.example.toml credentials.toml        # WebDAV creds (dev/webdav source only)
+poetry install
 ```
 
 Run the operator CLI:
@@ -366,13 +381,13 @@ print(ctx.artifacts["pdf_distribution"], ctx.artifacts["pdf_archival"])
 
 ```
 evilflowers_books_digitalizer/
-├── config.py             settings + credentials.toml loading
+├── config.py             PROJECT_ROOT
 ├── runtime.py            resolves pipeline.toml -> paths, source, catalog
 ├── models.py             BookRef, PageScan, SourceStats
 ├── cache.py              LocalCache — scans & cached stats layout
 ├── batch.py              process_book — one book, low-storage, isolated
 ├── cli.py                operator CLI (python -m evilflowers_books_digitalizer)
-├── sources/              AbstractBookSource + filesystem (mount) / webdav backends
+├── sources/              AbstractBookSource + FilesystemBookSource (raw-scans mount)
 ├── metadata/             Excel catalog matched to books by directory name
 ├── covers/               PIL cover renderer, templates, palettes, bundled fonts
 ├── catalog/              import layer: book -> EvilFlowers Catalog entry (manifest + REST)
@@ -399,8 +414,7 @@ frontend/                 the studio SPA (React + TypeScript + Vite)
 configs/catalog.xlsx      bibliographic metadata (you provide)
 deploy/                   batch (systemd, compose, runbook); studio dev stack + k8s manifests
 docs/                     studio guide + spec, architecture, deployment, operations, metadata & covers
-notebooks/                exploration & experimentation
-credentials.toml          WebDAV secrets (gitignored; not needed for the mount backend)
+lab/                      notebooks/ and experiments/ (exploration, not shipped)
 .cache/                   staged scans + share stats (gitignored)
 output/                   produced PDFs / text / covers (gitignored)
 ```

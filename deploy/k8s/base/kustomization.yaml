@@ -1,10 +1,11 @@
-# Restoration studio, kustomize base (docs/design/deployment-restoration-studio.puml).
+# Books digitalizer, kustomize base (docs/diagrams/deployment-digitalizer-dev).
 #
 # Render (the config lives in configs/, outside this directory, hence the flag):
 #   kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev
 #
-# Prerequisites (not created here): Secret studio-secrets (secret.example.yaml),
-# Secret ghcr-pull, the gateway NFS exports, and the `shared` postgres/redis Services.
+# Prerequisites (not created here, knowledge#66): Secret studio-secrets
+# (secret.example.yaml), Secret ghcr-pull, the gateway NFS exports, the `shared`
+# postgres/redis Services, KEDA, and the shared vlm (knowledge#67).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -13,16 +14,17 @@ namespace: digitalizer
 labels:
   - pairs:
       app.kubernetes.io/part-of: elvira
-      app.kubernetes.io/instance: digitalizer-studio
+      app.kubernetes.io/instance: digitalizer
+      app.kubernetes.io/managed-by: ansible
     includeTemplates: true          # pods carry them too (Loki/Tempo filters)
     includeSelectors: false         # selectors are immutable; keep them minimal
 
 resources:
   - namespace.yaml
+  - priorityclasses.yaml            # cluster-scoped (see the file)
   - storage.yaml
-  - studio-api.yaml
+  - portal.yaml
   - workers.yaml
-  - vlm.yaml
   - nfs-server.yaml                 # local-config: not rendered, feeds `replacements`
 
 # The NFS server address is set in one place (nfs-server.yaml) and copied into each PV.
@@ -48,4 +50,4 @@ patches:
   - path: pod-defaults.yaml
     target:
       kind: Deployment
-      labelSelector: app.kubernetes.io/component in (api,worker)
+      labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)

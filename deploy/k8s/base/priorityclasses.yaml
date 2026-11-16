@@ -1,0 +1,17 @@
+# Book digitalization is background work: its bulk workers sit below every default pod
+# (priority 0) and never preempt anything. Under node pressure the scheduler evicts them
+# first and places the catalog's pods (extraction, search, the API) instead; an evicted
+# job returns to the queue and the ledger re-sends it (studio.orchestration.ledger).
+#
+# Cluster-scoped: if the platform role in the knowledge repository owns PriorityClasses,
+# drop this file from the kustomization and keep the name.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: digitalizer-batch
+value: -100
+preemptionPolicy: Never
+globalDefault: false
+description: >-
+  Bulk book digitalization (EvilFlowers books digitalizer). Yields to every default pod;
+  never preempts.

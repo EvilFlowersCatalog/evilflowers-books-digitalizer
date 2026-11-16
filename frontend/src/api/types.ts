@@ -162,6 +162,8 @@ export interface ProjectOut {
   /** collection key -> (status -> count); optional, see contract request */
   collection_counts?: Record<string, Partial<Record<BookStatus, number>>>;
   auto_publish?: "never" | "gate" | "review";
+  /** a publish target is configured; without one, `approved` is a book's end state */
+  publishes?: boolean;
 }
 
 /** Read-only project preset (Settings screen); `GET /projects/{p}/config` (requested). */

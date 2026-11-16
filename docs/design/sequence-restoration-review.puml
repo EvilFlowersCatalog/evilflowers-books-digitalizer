@@ -1,4 +1,5 @@
 @startuml sequence-restoration-review
+' SUPERSEDED 2026-11-16 by docs/diagrams/sequence-digitalizer-page-rerun.puml (kept for history)
 !include ../../../tools/diagrams/elvira.iuml
 ' =============================================================================
 ' What: the human-in-the-loop path. An operator opens a flagged book in the

@@ -50,9 +50,11 @@ def test_stage_copy_materializes_real_files(mount, tmp_path):
     assert all(p.stat().st_size == 10 for p in staged)
 
 
-def test_unknown_backend_raises():
-    with pytest.raises(ValueError):
-        build_source({"backend": "nope"}, "fad")
+@pytest.mark.parametrize("backend", ["nope", "webdav"])
+def test_unknown_backend_raises(backend):
+    """WebDAV was removed (the scans are a mount); an old config fails loudly."""
+    with pytest.raises(ValueError, match="only 'filesystem'"):
+        build_source({"backend": backend}, "fad")
 
 
 def test_invalid_stage_mode_raises(tmp_path):

@@ -1,9 +1,8 @@
-"""Local-mount backend for the scan shares (production default).
+"""Local-mount source for the scans.
 
-On the production VM the NAS volumes are mounted read-only under a single root,
-e.g. ``/mnt/digital-library/raw-scans/<faculty>/<NAME>-skeny/<book>/stream_pages_tif``.
-This backend reads books straight off that mount — no VPN, no WebDAV flakiness
-(the batch log shows real ``Server disconnected`` errors over WebDAV).
+The scans are mounted read-only under a single root, e.g.
+``/mnt/digital-library/raw-scans/<faculty>/<NAME>-skeny/<book>/stream_pages_tif``.
+This backend reads books straight off that mount.
 
 Staging is **zero-copy by default**: a book's raw frames are *symlinked* into
 the local working directory rather than copied, so processing multiple TB never

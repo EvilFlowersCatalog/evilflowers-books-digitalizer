@@ -61,7 +61,7 @@ def _project_out(svc: Services, slug: str, counts: dict[str, dict[str, int]]) ->
         for status, n in per_status.items():
             totals[status] += n
     return dto.ProjectOut(slug=slug, name=cfg.name, auto_publish=cfg.auto_publish,
-                          outputs=list(cfg.outputs),
+                          publishes=cfg.publish.enabled, outputs=list(cfg.outputs),
                           collections={k: cfg.collections.get(k, k) for k in keys},
                           collection_counts={k: dict(counts.get(k, {})) for k in keys},
                           counts=dict(totals))

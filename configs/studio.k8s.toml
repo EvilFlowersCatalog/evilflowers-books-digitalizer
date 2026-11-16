@@ -22,6 +22,45 @@ redis_url = "redis://redis.shared.svc.cluster.local:6379/8"
 # Its own subtree, so it never mixes with the legacy batch's digitized/{dev,prod}.
 artifacts_root = "/data/digitized/studio"
 cache_dir = "/scratch/cache"
+# The services' STORAGE_PATH: /data holds raw-scans/ and digitized/ (paths in service jobs
+# are relative to it). Needed only once a stage runs as a service ([orchestration.stages]).
+storage_root = "/data"
+
+[orchestration]
+budget = 2                             # re-sends of a lost job before its run fails
+stale_after_seconds = 600              # a local job silent this long: its worker is gone
+# Every stage runs in-process (digitalizer.local.<stage>) until its service ships; switch
+# one at a time (docs/design/target-architecture.md §3), e.g. once evilflowers-scan-service
+# is deployed on Redis db 8:
+# [orchestration.stages.clean]
+# backend = "service"
+# task = "evilflowers_scan.clean"
+# queue = "evilflowers_scan.standalone"
+# interactive_queue = "evilflowers_scan.standalone.interactive"
+
+[scheduling]
+# Book digitalization is background work: full width at night and at weekends, narrow during
+# the working day, held while the catalog's own extraction has a backlog. Operator re-runs
+# (interactive lane) are never held. Admission only decides what is SENT: a running job is
+# never interrupted, so render (a whole book) waits for off-peak.
+timezone = "Europe/Bratislava"
+peak_hours = ["mon-fri 07:00-19:00"]
+bulk_inflight = 6
+bulk_inflight_peak = 1
+bulk_inflight_contended = 0
+interactive_inflight = 4
+off_peak_stages = ["render"]
+[scheduling.queue_inflight]
+"digitalizer.ai" = 1                   # = worker-ai's KEDA maximum (one model in memory)
+[[scheduling.backpressure]]
+# The catalog's extraction and OCR workers on Redis db 7 (knowledge Extraction-Pipeline):
+# a backlog there means the catalog needs the cluster more than a book's digitalization.
+name = "catalog-extraction"
+redis_url = "redis://redis.shared.svc.cluster.local:6379/7"
+queues = ["evilflowers_analyzer", "evilflowers_image", "evilflowers_equation",
+          "evilflowers_text_worker", "evilflowers.text.paragraphs", "evilflowers.text.tables",
+          "evilflowers_ocr_worker"]
+max_depth = 20
 
 [projects.stu]
 name = "STU — Slovak University of Technology"
@@ -33,9 +72,8 @@ item_id = "stu-{collection}-{book}"
 language = "slk"                       # MARC code (IA `language`)
 ocr_language = "slk+eng"
 layout_detectors = ["heuristic", "doclayout"]   # doclayout: ONNX model baked into the image
-# The vlm Deployment (deploy/k8s/base/vlm.yaml) is replicas 0 by default: scale it to 1
-# before a formula pass, or the run fails at studio.formulas with "vlm service
-# unavailable" (re-run it once vlm is up). Set "none" to keep formulas as image crops.
+# PaddleOCR-VL is the shared vlm in namespace shared (evilflowers-vlm-service, knowledge#67).
+# Until it is deployed, set "none" to keep formulas as image crops.
 formula_recognizer = "paddleocr-vl-http"
 outputs = ["pdf", "pdfa", "epub"]
 auto_publish = "review"                # real corpus: a human approves before anything goes public
@@ -52,6 +90,8 @@ svf = "Stavebná fakulta STU"
 providers = ["opac"]
 
 [projects.stu.publish]
+# Publication is optional: target = "none" (or no [publish]) ends a book in `approved`
+# with its files (PDF, PDF/A-2b, EPUB, IA item) on the digitized export.
 target = "evilflowers"
 # Dev catalog (Cookbooks/Digitalizer §2). Switch to the prod API once its host and
 # a prod API key exist; the knowledge base names no prod API URL yet.
@@ -79,8 +119,8 @@ model = "/opt/evilflowers-tools/models/doclayout-yolo/doclayout_yolo_docstructbe
 threads = 2
 
 [projects.stu.pipeline.vlm]
-# HttpFormulaRecognizer -> deploy/k8s/base/vlm.yaml (Service vlm :8000)
-url = "http://vlm.digitalizer.svc.cluster.local:8000"
+# HttpFormulaRecognizer -> the shared vlm (Service vlm.shared :80 -> :8000, knowledge#67)
+url = "http://vlm.shared.svc.cluster.local"
 # One batch request: batch_size crops, each ~5-30 s on 4 CPU cores (up to ~2 min for a
 # page-wide line), plus time queued behind other requests.
 batch_size = 4

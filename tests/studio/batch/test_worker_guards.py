@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
-import pytest
 from batch_harness import PROJECT, Studio, make_studio
 
 from evilflowers_books_digitalizer.db.models import Page, Region, Run
@@ -22,66 +20,14 @@ from evilflowers_books_digitalizer.studio.domain import (
 from evilflowers_books_digitalizer.studio.ports import CleanedPage, FormulaJob, LeafPlan
 from evilflowers_books_digitalizer.studio.testing import fakes
 from evilflowers_books_digitalizer.studio.workers import tasks
-from evilflowers_books_digitalizer.studio.workers.app import celery
 from evilflowers_books_digitalizer.studio.workers.stages.clean import MOVED_REASON
 
 
-# ---------------------------------------------------------------- publish hold
-def test_held_publish_resends_itself_without_spending_retries(
-        discovered: Studio, monkeypatch: pytest.MonkeyPatch) -> None:
-    """More waits than MAX_RETRIES: each is a fresh message, the run stays queued."""
-    render_id = discovered.new_run(RunKind.RENDER)
-    publish_id = discovered.new_run(RunKind.PUBLISH)
-    sent: list[tuple[Any, dict[str, Any]]] = []
-    monkeypatch.setattr(celery.conf, "task_always_eager", False)
-    monkeypatch.setattr(tasks.run, "apply_async", lambda args, **kw: sent.append((args, kw)))
-    for _ in range(tasks.MAX_RETRIES + 3):
-        out = tasks.run(publish_id)
-        assert out == {"run_id": publish_id, "skipped": True, "waiting_for": render_id}
-    assert len(sent) == tasks.MAX_RETRIES + 3
-    assert all(args == (publish_id,) and kw["countdown"] == tasks.WAIT_SECONDS
-               for args, kw in sent)
-    assert discovered.session().get(Run, publish_id).status == RunStatus.QUEUED
+# Holds, broker refusals and stranded follow-up runs are ledger concerns now:
+# tests/studio/batch/test_ledger.py (a queued follow-up is started by the pump).
 
 
-def test_held_publish_in_eager_mode_fails_instead_of_recursing(discovered: Studio) -> None:
-    discovered.new_run(RunKind.RENDER)
-    publish_id = discovered.new_run(RunKind.PUBLISH)
-    assert tasks.run.delay(publish_id).get()["skipped"] is True
-    run = discovered.session().get(Run, publish_id)
-    assert run.status == RunStatus.FAILED and "waits for run" in (run.error or "")
-
-
-# ---------------------------------------------------------------- dispatch / follow-ups
-def test_failed_canvas_dispatch_fails_the_run(discovered: Studio,
-                                              monkeypatch: pytest.MonkeyPatch) -> None:
-    class Broken:
-        def apply_async(self) -> None:
-            raise ConnectionError("broker gone")
-
-    monkeypatch.setattr(tasks, "canvas", lambda plan: Broken())
-    with pytest.raises(ConnectionError):
-        discovered.execute(RunKind.FULL)
-    run = discovered.session().query(Run).one()
-    assert run.status == RunStatus.FAILED and "broker gone" in (run.error or "")
-
-
-def test_failed_follow_up_enqueue_fails_the_publish_row(
-        discovered: Studio, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A queued row with no task behind it would 409 every later run of the book."""
-    from evilflowers_books_digitalizer.studio.workers import context
-
-    publish_id = discovered.new_run(RunKind.PUBLISH)
-
-    def refuse(*_: Any, **__: Any) -> None:
-        raise ConnectionError("broker gone")
-
-    monkeypatch.setattr(tasks.run, "apply_async", refuse)
-    tasks._dispatch_follow_ups(context.current(), [publish_id])
-    run = discovered.session().get(Run, publish_id)
-    assert run.status == RunStatus.FAILED and "broker gone" in (run.error or "")
-
-
+# ---------------------------------------------------------------- retried stage bodies
 def test_gate_retry_reuses_its_publish_run(tmp_path: Path) -> None:
     """Body committed, finish failed: the retried gate must not insert a second publish."""
     from evilflowers_books_digitalizer.studio.workers import context

@@ -1,7 +1,7 @@
 """Download/stage step: make a book's TIFF frames available in the local cache.
 
-Backend-agnostic: with the filesystem source this symlinks frames off the
-mount (zero-copy); with WebDAV it downloads them. Both are resumable.
+The filesystem source symlinks frames off the mount (zero-copy by default) or
+copies them (``stage_mode``); staging is resumable.
 """
 
 from __future__ import annotations

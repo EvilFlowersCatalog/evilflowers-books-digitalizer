@@ -1,0 +1,60 @@
+@startuml sequence-digitalizer-page-rerun
+!include elvira.iuml
+' =============================================================================
+' What: an operator's page re-run uses the same command + link-callback +
+'       outcome-file contract as a full run, but on each service's
+'       interactive queue, which one always-on replica consumes; a newer edit
+'       supersedes the older run, and the older job's outcome is refused by
+'       its token, so a superseded run never becomes the page.
+' Kind: UML sequence diagram, one scenario (crop override on one page, then a
+'       second edit before the first finishes), proposal. Omitted: telemetry,
+'       DZI tile requests, the hocr job (same shape as layout).
+' Source: this repo docs/design/studio-spec.md (interactive queue, page.updated,
+'         regions.updated, PATCH /pages/{id}, POST /books/{id}/runs),
+'         studio/workers/stages/orchestrate.py (RERUN stages) (2026-11-16);
+'         evilflowers-worker docs/architecture.md §3.3-§3.4, runtime.py
+'         (queues, prefetch 1) @ 8fc9c20; Celery 5.7 docs calling.html (link)
+'         and routing.html (Redis priorities are approximate).
+' =============================================================================
+
+title Re-run of one page from the page studio (proposal, 2026-11-16)
+
+actor "Operator\n(SPA)" as op
+participant "Portal API" as api
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+queue "Redis db 8" as redis
+participant "scan-service\n(interactive replica)" as scan
+participant "analyzer-service\n(interactive replica)" as layout
+
+op -> api : PATCH /pages/{id} {override: crop}
+op -> api : POST /books/{id}/runs\n{kind: rerun, pages: [12], interactive: true}
+api -> orch : Run A(queued)
+orch -[$accent_msg()]> redis : <b>send_task evilflowers_scan.clean</b>\n<b>queue …scan.interactive, token A1, link=job_done</b>
+redis -> scan : deliver at once (min replicas 1)
+
+op -> api : PATCH /pages/{id} {override: deskew}\n+ POST …/runs (pages: [12])
+api -> orch : Run B(queued)
+orch -> orch : Run A → superseded\n(token A1 revoked in the ledger)
+orch -> redis : send_task …scan.clean (leaf 12, token B1)
+
+scan -> scan : leaf 12 + DZI under jobs/A1/,\noutcome file (token A1)
+scan -> redis : link: job_done(A1)
+redis -> orch : job_done(A1)
+orch -> orch : refused: run superseded,\ndelete jobs/A1/
+redis -> scan : deliver B1
+scan -> scan : leaf 12 + DZI under jobs/B1/,\noutcome file (token B1)
+scan -> redis : link: job_done(B1)
+redis -[$accent_msg()]> orch : <b>job_done(B1): promote jobs/B1/</b>\n<b>→ leaf 12 version +1</b>
+orch -> api : page.updated (SSE)
+api -> op : tile swaps to the new version
+
+orch -> redis : send_task …analyzer.standalone.layout\nqueue ….interactive (leaf 12)
+redis -> layout : deliver
+layout -> redis : link: job_done (regions + outcome)
+redis -> orch : job_done
+orch -> api : regions.updated (SSE)
+api -> op : regions redrawn
+
+caption One contract for bulk and interactive work: only the queue differs. Workers write under a job-scoped directory and the\norchestrator promotes it when it accepts the callback, so the ledger, not the worker, decides which output becomes the page.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-page-rerun.puml
+@enduml

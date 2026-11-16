@@ -1,0 +1,100 @@
+@startuml component-digitalizer-target
+!include elvira.iuml
+' =============================================================================
+' What: this repository shrinks to portal + orchestration + lab; the heavy
+'       stages run as catalog-free "standalone" Celery tasks: new tasks in the
+'       existing service repositories (same core code as their catalog tasks)
+'       plus two new repositories (scan, render). The orchestrator sends each
+'       command with a Celery link/link_error callback to its own queue, reads
+'       the worker's outcome file, and sends the next stage. Publishing to the
+'       catalog is optional; the catalog's own pipeline runs after it.
+' Kind: UML component diagram, specification level, proposal. Scope: components,
+'       the contract between them and the shared services they reuse. Omitted:
+'       telemetry wiring (every component exports OTLP), config loading, CI.
+' Source: this repo docs/design/studio-spec.md, studio/workers/stages/
+'         {orchestrate,gate}.py, directory listings of stages/, pipeline/steps/,
+'         studio/adapters/, vlm_service/ (2026-11-16); evilflowers-worker README,
+'         docs/architecture.md, runtime.py, outcome.py, settings.py @ 8fc9c20;
+'         READMEs of evilflowers-{analyzer,image,equation,text,ocr}-service,
+'         analyzer develop layout.py, equation develop latex.py, ocr-service
+'         processing.py (2026-11-16); Celery 5.7 docs canvas/calling/routing/
+'         redis (link, link_error, chords need a backend, priorities);
+'         knowledge notes Extraction-Pipeline (2026-11-14), OCR-Service,
+'         Shared-Inference (2026-11-15), Books-Digitalizer (2026-11-08).
+' =============================================================================
+
+title Books digitalizer, target: portal + orchestrator here,\nstandalone tasks on the shared workers (proposal, 2026-11-16)
+
+package "**this repo**: portal · orchestration · lab" as repo {
+  component "**SPA** · React\nreview · page studio" as spa
+  component "**Portal API**\nFastAPI · REST · SSE\nDZI tiles" as api
+  component "**Orchestrator** · Celery\njob ledger · job_done callbacks\nadmission pump · reconcile\ngate · publish" as orch <<proposed>> <<focus>>
+  component "**Lab** (not deployed)\nnotebooks · experiments" as lab
+}
+
+package "**Shared state** (dev)" as state {
+  component "**Redis** db 8\nbroker" as redis <<proposed>>
+  component "**postgresql18**\nvia PgBouncer\ndb digitalizer" as pg <<proposed>>
+  component "**Library storage**\nraw-scans ro\ndigitized rw (NFS)" as lib <<proposed>>
+}
+
+package "**Existing repos**: + standalone task, same core" as existing {
+  component "**ocr-service**\n…standalone.hocr\nengines.py" as ocr <<proposed>>
+  component "**analyzer-service**\n…standalone.layout\nlayout.py (Docling)" as analyzer <<proposed>>
+  component "**equation-service**\n…standalone.formulas\nlatex.py + paddleocr-vl" as equation <<proposed>>
+  component "**image-service**\n…standalone.figures\nfigures.py · captions.py" as image <<proposed>>
+}
+
+package "**New repos**" as fresh {
+  component "**scan-service**\nevilflowers_scan.clean\nScanTailor · DocRes" as scan <<proposed>>
+  component "**render-service**\nevilflowers_render.book\nMRC · PDF/A-2b · EPUB" as render <<proposed>>
+}
+
+package "**Shared inference + catalog**" as infer {
+  component "**vlm**\nPaddleOCR-VL\nPOST /v1/formulas" as vlm <<proposed>>
+  component "**Ollama**\nelvira-assistant\nvision · /api/chat" as ollama
+  component "**Laya**\ndecision model\n(announced)" as laya <<proposed>>
+  component "**EvilFlowers catalog**\n(dev) REST /api/v1\n+ its own pipeline" as catalog
+}
+
+component "**evilflowers-worker**\n(kit) runtime · outcome files\nStandaloneJob · judges" as kit
+
+' ---- layout only ------------------------------------------------------------------
+ocr -[hidden]right- analyzer
+equation -[hidden]right- image
+ocr -[hidden]down- equation
+vlm -[hidden]right- laya
+ollama -[hidden]right- catalog
+vlm -[hidden]down- ollama
+scan -[hidden]right- render
+
+' ---- portal -----------------------------------------------------------------------
+spa --> api : REST · SSE
+api --> orch : create run
+api --> pg : SQL
+orch --> pg : SQL
+
+' ---- the contract: commands out, link callbacks + outcome files back -------------------
+orch -[$accent()]-> redis : <b>send_task + link</b>\n<b>job_done / job_failed</b>
+redis -[$accent()]-> fresh : <b>consume</b>
+fresh -[hidden]down- existing
+redis --> existing : consume\n(standalone queues)
+lib <.. existing : <<write>> jobs/<job>/\n+ outcome file (all six)
+orch ..> lib : <<read>> outcome,\npromote output
+
+' ---- workers use the kit ------------------------------------------------------------
+fresh ..> kit : <<use>> (all six)
+render -[hidden]right- kit
+
+' ---- shared inference and optional publish -------------------------------------------
+equation --> vlm : HTTP crops
+image --> laya : uncertain\nregions
+image --> ollama : captions
+orch --> ollama : title page\n→ metadata
+orch --> catalog : optional: POST entry\n+ PDF, EPUB
+
+$legend_live_proposed()
+
+caption The orchestrator owns state and reaches workers only through Redis: commands out, Celery link callbacks to its own\nqueue back, results as outcome files on the library storage. Existing services keep one core and gain a catalog-free task;\nonly scanning and rendering need new repositories. Solid = the code or service exists today (SPA and API: not deployed).
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/component-digitalizer-target.puml
+@enduml

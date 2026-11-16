@@ -1,28 +1,32 @@
-# studio-api: FastAPI (REST, SSE /api/v1/events, DZI tiles) + the SPA bundle.
+# portal: FastAPI (REST, SSE /api/v1/events, DZI tiles, the scheduler endpoints) + the SPA
+# bundle; /metrics (ledger gauges) scraped by alloy-cluster.
 # Pod template defaults (security, telemetry, secrets, mounts): pod-defaults.yaml.
 #
-# One replica, Recreate: the init container (pod-defaults.yaml) migrates the schema, and two API
+# One replica, Recreate: the init container (pod-defaults.yaml) migrates the schema, and two
 # generations must never run against different schema revisions.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: studio-api
+  name: portal
   labels:
-    app.kubernetes.io/name: studio-api
+    app.kubernetes.io/name: digitalizer-portal
     app.kubernetes.io/component: api
 spec:
   replicas: 1
   strategy: { type: Recreate }
   selector:
-    matchLabels: { app.kubernetes.io/name: studio-api }
+    matchLabels: { app.kubernetes.io/name: digitalizer-portal }
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: studio-api
+        app.kubernetes.io/name: digitalizer-portal
         app.kubernetes.io/component: api
+      annotations:
+        k8s.grafana.com/scrape: "true"           # Deploy-a-Service §3: /metrics on port "http"
+        k8s.grafana.com/metrics.portName: http
+        k8s.grafana.com/metrics.path: /metrics
     spec:
       terminationGracePeriodSeconds: 15
-      # init container `migrate` (alembic upgrade head): pod-defaults.yaml, shared with the workers
       containers:
         - name: studio
           command:
@@ -54,17 +58,17 @@ spec:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { cpu: "1", memory: 2Gi }
 ---
-# VPN-only, like flower: no HTTPRoute. Operators reach it through the k8s-stu router
-# as http://studio.digitalizer.stu.k8s.internal (CoreDNS rewrites <svc>.<ns>).
+# VPN-only, like flower: no HTTPRoute. Operators reach it through the k8s-stu router as
+# http://portal.digitalizer.stu.k8s.internal (CoreDNS rewrites <svc>.<ns>).
 apiVersion: v1
 kind: Service
 metadata:
-  name: studio
+  name: portal
   labels:
-    app.kubernetes.io/name: studio-api
+    app.kubernetes.io/name: digitalizer-portal
     app.kubernetes.io/component: api
 spec:
   type: ClusterIP
-  selector: { app.kubernetes.io/name: studio-api }
+  selector: { app.kubernetes.io/name: digitalizer-portal }
   ports:
     - { name: http, port: 80, targetPort: http }

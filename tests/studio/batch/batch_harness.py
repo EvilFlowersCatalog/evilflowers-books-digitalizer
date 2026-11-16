@@ -79,16 +79,18 @@ class Studio:
 
 
 def make_studio(tmp_path: Path, *, auto_publish: str = "never",
-                layout: fakes.FakeLayout | None = None) -> Studio:
+                layout: fakes.FakeLayout | None = None, publish_target: str = "fake",
+                **config: Any) -> Studio:
+    """``config`` overrides StudioConfig fields (scheduling, orchestration, storage_root)."""
     frames = fakes.make_frames(tmp_path / "scans" / "fei" / "BOOK1", 2)
     project = ProjectConfig(slug=PROJECT, name="Test", scans_root=tmp_path / "scans",
                             item_id="stu-{collection}-{book}", auto_publish=auto_publish,  # type: ignore[arg-type]
                             outputs=("pdf", "pdfa", "epub"),
-                            publish=PublishConfig(target="fake"),
+                            publish=PublishConfig(target=publish_target),
                             pipeline={"chunk_size": 3, "scantailor": {"output_dpi": 300}})
     config = StudioConfig(database_url="sqlite://", redis_url="memory://",
                           artifacts_root=tmp_path / "artifacts", cache_dir=tmp_path / "cache",
-                          projects={PROJECT: project})
+                          projects={PROJECT: project}, **config)
     adapters = Adapters(
         scans=fakes.FakeScanStore({"fei": [ScannedBook("fei", "BOOK1", frames[0].parent,
                                                        tuple(frames))]}),
@@ -100,7 +102,7 @@ def make_studio(tmp_path: Path, *, auto_publish: str = "never",
         formulas=fakes.FakeFormulaRecognizer(),
         renderer=fakes.FakeRenderer(tmp_path / "rendered"),
         metadata=fakes.FakeMetadataProvider(),
-        publisher=fakes.FakePublisher(),
+        publisher=fakes.FakePublisher() if publish_target != "none" else None,
     )
     engine = fakes.sqlite_session().get_bind()
     bus = InMemoryEventBus()
@@ -111,5 +113,6 @@ def make_studio(tmp_path: Path, *, auto_publish: str = "never",
 
 
 def eager_celery() -> None:
+    """Inline tasks; errors are not propagated (errbacks run instead, as in production)."""
     celery.conf.task_always_eager = True
-    celery.conf.task_eager_propagates = True
+    celery.conf.task_eager_propagates = False

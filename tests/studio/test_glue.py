@@ -64,20 +64,21 @@ def test_queue_routing():
     q = RecordingTaskQueue()
     q.enqueue_run(5, interactive=True)
     q.enqueue_discover("stu", "fei")
-    assert q.calls[0] == ("studio.run", (5,), {"interactive": True})
-    assert q.calls[1][0] == "studio.discover"
+    assert q.calls[0] == ("digitalizer.run", (5,), {"interactive": True})
+    assert q.calls[1][0] == "digitalizer.discover"
 
     sent = []
 
     class FakeApp:
-        def send_task(self, name, args, queue, priority):
-            sent.append((name, args, queue, priority))
+        def send_task(self, name, args, queue):         # no priority: plain lists on db 8
+            sent.append((name, args, queue))
             return type("R", (), {"id": "t1"})()
 
     cq = CeleryTaskQueue("redis://unused", app=FakeApp())
     assert cq.enqueue_run(7, interactive=True) == "t1"
     cq.enqueue_run(8)
-    assert sent == [("studio.run", [7], "interactive", 0), ("studio.run", [8], "io", 5)]
+    assert sent == [("digitalizer.run", [7], "digitalizer.portal"),
+                    ("digitalizer.run", [8], "digitalizer.portal")]
 
 
 def test_crop_storage_form():

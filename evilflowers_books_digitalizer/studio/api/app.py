@@ -15,7 +15,8 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from evilflowers_books_digitalizer.studio.adapters.imaging.renditions import ImageCache
-from evilflowers_books_digitalizer.studio.api import errors, events, media, routes
+from evilflowers_books_digitalizer.studio import telemetry
+from evilflowers_books_digitalizer.studio.api import errors, events, media, metrics, routes
 from evilflowers_books_digitalizer.studio.api.deps import AppState
 from evilflowers_books_digitalizer.studio.adapters.imaging.dzi import TileCache
 from evilflowers_books_digitalizer.studio.api.spa import default_static_dir, spa_router
@@ -44,9 +45,11 @@ def create_app(config: StudioConfig | None = None, *, services: Services | None 
         ping_seconds=ping_seconds)
     errors.install(app)
     app.add_api_route("/healthz", _healthz, methods=["GET"], include_in_schema=False)
+    app.include_router(metrics.router)                                   # /metrics (scraped)
     for router in (routes.router, media.router, events.router):
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(spa_router(static_dir or default_static_dir()))   # catch-all: last
+    telemetry.instrument_fastapi(app)
     return app
 
 

@@ -1,8 +1,9 @@
-"""``studio.run`` (decision half): start the run, plan leaves once, choose the stages.
+"""``digitalizer.run`` (decision half): start the run, plan leaves once, choose the stages.
 
 Leaf planning happens here, before any fan-out: parallel clean chunks must all
 see the same, already persisted leaf numbers (an operator's override is keyed by
-them). The task shell turns the returned :class:`WorkPlan` into a Celery canvas.
+them). The job ledger (``studio/orchestration/ledger.py``) turns the returned
+:class:`WorkPlan` into ``jobs`` rows that the pump admits stage by stage.
 """
 
 from __future__ import annotations
@@ -99,7 +100,7 @@ def blocked_by(ctx: WorkerContext, run_id: int) -> int | None:
     """An earlier, still active run this one must wait for, else None.
 
     Approving a book enqueues a render run and a publish run back to back on the
-    ``io`` queue with no ordering guarantee; publishing before the render finished
+    portal queue with no ordering guarantee; publishing before the render finished
     would ship the previous files. Only *earlier* runs count, so two runs can
     never wait for each other.
     """
@@ -111,8 +112,7 @@ def blocked_by(ctx: WorkerContext, run_id: int) -> int | None:
 
 
 def work_plan(ctx: WorkerContext, run: Run) -> WorkPlan:
-    """The work of a started run, from the rows alone (orchestrate and the re-dispatch
-    of a run whose canvas was never sent build the same plan)."""
+    """The work of a started run, from the rows alone (the ledger plans its jobs from it)."""
     book = run.book
     kind = RunKind(run.kind)
     indices = (list(run.pages) if run.pages is not None and kind == RunKind.RERUN
@@ -127,8 +127,8 @@ def orchestrate(ctx: WorkerContext, run_id: int) -> WorkPlan | None:
     target = _needs_plan(ctx, run_id)
     layout = plan_leaves(ctx, *target) if target else None
     with ctx.uow() as uow:
-        # row lock: a duplicate studio.run (sweeper re-enqueue, redelivery) waits here
-        # and then sees ``running`` instead of starting a second canvas
+        # row lock: a duplicate digitalizer.run (the pump's re-send, a redelivery) waits here
+        # and then sees ``running`` instead of planning a second set of jobs
         run = runs.load_run(uow, run_id, lock=True)
         if run.status != RunStatus.QUEUED:
             return None             # redelivered / cancelled: nothing to do

@@ -1,21 +1,25 @@
-# Shared pod template for every Deployment that runs the studio image (api + workers).
-# Applied by kustomization.yaml as a patch on `app.kubernetes.io/component in (api,worker)`,
-# so the five manifests stay short and cannot drift apart (one place for security,
-# telemetry, config, secrets and mounts). Each target names its container "studio".
+# Shared pod template for every Deployment that runs the digitalizer image (portal,
+# orchestrator, workers). Applied by kustomization.yaml as a patch on
+# `app.kubernetes.io/component in (api,orchestrator,worker)`, so the manifests stay short
+# and cannot drift apart (one place for security, telemetry, config, secrets and mounts).
+# Each target names its container "studio".
 #
 # Conventions: evilflowers-knowledge Cookbooks/Deploy-a-Service (§2 pod template,
 # §3 telemetry contract).
 #
-# Traces: NO `elvira.stuba.sk/instrumentation: otel-sdk` label, on purpose. The app has no
-# OpenTelemetry SDK (no opentelemetry-* import or dependency): it exports no spans, so
-# Beyla is the only tracer and nothing is traced twice. The OTEL_* env below names the
-# service for Beyla/alloy. Add the label in the same change that adds an SDK exporter.
+# Traces: the image carries the OpenTelemetry SDK (pyproject extra `telemetry`,
+# studio/telemetry.py), so every pod is labelled `elvira.stuba.sk/instrumentation: otel-sdk`
+# and Beyla leaves it alone (else every request is traced twice). The OTEL_* env below
+# configures the exporter; without OTEL_EXPORTER_OTLP_ENDPOINT tracing is off.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: studio-pod-defaults           # ignored: the patch target selects the Deployments
 spec:
   template:
+    metadata:
+      labels:
+        elvira.stuba.sk/instrumentation: otel-sdk
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -28,8 +32,8 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         seccompProfile: { type: RuntimeDefault }
-      # Every studio pod migrates before it starts: a worker of a new image must never run
-      # against an older schema (e.g. 0003 runs.heartbeat_at, used by studio.recover_runs).
+      # Every pod migrates before it starts: a worker of a new image must never run against
+      # an older schema (e.g. 0004 jobs, the ledger every task reads and writes).
       # An init container, not a pre-sync Job: k3s applies the manifests directory with no
       # hook ordering, and a Job's pod template is immutable (a new image tag would fail to
       # apply). `alembic upgrade head` is a no-op when current. Pods starting together may
@@ -90,6 +94,8 @@ spec:
               valueFrom: { fieldRef: { fieldPath: "metadata.labels['app.kubernetes.io/name']" } }
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://$(HOST_IP):4318"
+            - name: IMAGE_TAG                              # service.version on every span
+              valueFrom: { configMapKeyRef: { name: studio-env, key: IMAGE_TAG, optional: true } }
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: >-
                 service.namespace=elvira,deployment.environment.name=$(DEPLOYMENT_ENVIRONMENT),service.instance.id=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),k8s.node.name=$(NODE_NAME)

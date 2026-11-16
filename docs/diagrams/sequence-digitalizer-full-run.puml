@@ -1,0 +1,89 @@
+@startuml sequence-digitalizer-full-run
+!include elvira.iuml
+' =============================================================================
+' What: a full run is choreography around the orchestrator's job ledger: it
+'       sends each job with send_task(link=job_done, link_error=job_failed);
+'       the worker writes its output and then its outcome file, and Celery
+'       itself sends the callback to the orchestrator's queue, which reads the
+'       file and sends the next stage. The stage order stays today's (clean →
+'       analyze → formulas → render → gate); publication is optional.
+' Kind: UML sequence diagram, one scenario (a book that passes the gate in a
+'       project with a catalog target), proposal. The standalone tasks of
+'       ocr-, analyzer-, equation- and render-service share one lifeline: they
+'       follow the clean loop exactly. Omitted: telemetry, SSE detail.
+' Source: evilflowers-worker runtime.py, outcome.py, settings.py,
+'         docs/architecture.md §2-§3.4 @ 8fc9c20; Celery 5.7 docs canvas.html
+'         and calling.html (link applied with the return value, single-argument
+'         errback for send_task, chords need a result backend); knowledge note
+'         Extraction-Pipeline (2026-11-14); this repo
+'         studio/workers/stages/orchestrate.py (STAGES), gate.py,
+'         docs/design/studio-spec.md (2026-11-16).
+' =============================================================================
+
+title Full run of one book: commands out, link callbacks and outcome files back\n(proposal, 2026-11-16)
+
+actor "Operator" as op
+participant "Portal\nAPI" as api
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+queue "Redis\ndb 8" as redis
+participant "scan-\nservice" as scan
+participant "ocr · analyzer ·\nequation · render" as more
+participant "Catalog\n(dev)" as cat
+
+op -> api : POST runs {kind: full}
+api -> orch : Run(queued)
+orch -> orch : plan leaves, clean jobs\n(leaf batches), token per job
+
+loop each batch (KEDA scales on queue depth)
+  orch -[$accent_msg()]> redis : <b>send_task …scan.clean</b>\n<b>run_id · job · inputs</b>\n<b>outcome · token</b>\n<b>link=job_done</b>\n<b>link_error=job_failed</b>
+  redis -> scan : deliver (acks_late)
+  scan -> scan : leaves, previews, DZI under\njobs/<job>/; outcome file **last**
+  scan -> redis : link: job_done(summary)\n→ digitalizer.portal
+  redis -[$accent_msg()]> orch : <b>job_done: read outcome,</b>\n<b>check token, promote</b>
+end
+orch -> api : run.progress (SSE)
+
+par analyze, same loop as clean
+  orch -> redis : …ocr_worker.standalone.hocr ×N
+  redis -> more : deliver
+  more -> redis : link: job_done
+else
+  orch -> redis : …analyzer.standalone.layout ×N
+  redis -> more : deliver
+  more -> redis : link: job_done
+end
+redis -> orch : job_done ×N (ledger counts)
+
+orch -> redis : …equation.standalone.formulas
+redis -> more : deliver
+more -> more : formula crops →\nvlm (PaddleOCR-VL)
+more -> redis : link: job_done
+redis -> orch : job_done
+
+orch -> redis : evilflowers_render.book
+redis -> more : deliver
+more -> more : MRC PDF · PDF/A-2b ·\nEPUB · IA files, outcome
+more -> redis : link: job_done
+redis -> orch : job_done: artifacts
+
+orch -> orch : quality gate → approved\n(flagged → review: page\nre-run sequence)
+
+opt the project has a catalog target
+  orch -> cat : POST entry +\nacquisitions /api/v1
+  cat --> orch : 201 entry id
+  cat -> cat : its own extraction run\n(analyzer → text ·\nimage · equation)
+end
+orch -> api : book.approved / published (SSE)
+
+note over orch, redis
+**On failure** the worker raises; Celery sends
+job_failed(task_id). **Reconcile** (beat, every
+minute) per job past its deadline: an outcome
+file without a callback is applied; with no file
+the job is re-sent with a new token, and the run
+fails once the job's budget is spent.
+end note
+
+caption No result backend and no event listener: the callback is an ordinary message on the orchestrator's queue. Workers\nnever call the portal or the catalog. Publication is optional; when it happens, the catalog's own pipeline starts on its own.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-full-run.puml
+@enduml

@@ -1,4 +1,4 @@
-"""``studio.clean``: planned leaves -> cleaned pages (+ operator overrides) -> previews/tiles.
+"""Stage clean (``digitalizer.local.clean``): planned leaves -> cleaned pages -> previews/tiles.
 
 Idempotent: only leaves still ``pending`` in this run are cleaned (the run start
 resets the leaves it covers), so a redelivered chunk does no double work. The slow

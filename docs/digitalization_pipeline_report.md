@@ -530,7 +530,7 @@ All experiments are reproducible from the project repository. The relevant artif
 - **Pipeline code.** `evilflowers_books_digitalizer/pipeline/` — framework (`base.py`),
   engine assembly (`factory.py`), and steps (`steps/`), including the `MrcPdf` and
   `FinalizePdf` stages discussed here. Configuration in `configs/pipeline.toml`.
-- **Experiment notebooks.** `notebooks/06`–`09`: the MRC engine lab, the variant/font/table
+- **Experiment notebooks.** `lab/notebooks/06`–`09`: the MRC engine lab, the variant/font/table
   study, the max-quality experiments (Sauvola/Wolf, V5 facsimile, potrace), and the roadmap
   execution (finalizer, PERO, UVDoc, NAF-DPM, and the V2–V5 decision). Notebook 09 is
   re-executable end-to-end and regenerates the figures referenced in §5.5–§5.8.

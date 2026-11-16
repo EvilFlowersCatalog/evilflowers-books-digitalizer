@@ -16,7 +16,7 @@ cover thumbnail, then imports them into the
 [EvilFlowers Catalog](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog).
 
 It is built entirely on open-source tooling (Tesseract, ScanTailor,
-archive-pdf-tools, pikepdf, webdav4) and runs as a plain long-running process —
+archive-pdf-tools, pikepdf) and runs as a plain long-running process —
 no orchestrator, server or database — so it can chew through multi-TB corpora
 unattended on a remote VM, fully resumable.
 
@@ -47,7 +47,6 @@ long batch and makes every book independently resumable.
 
 ```bash
 poetry install
-cp credentials.example.toml credentials.toml   # WebDAV creds (dev source)
 
 # fast checks — no network, seconds
 poetry run pytest -q

@@ -13,11 +13,8 @@ Which file is read (first match wins):
 Relative paths in the TOML (``[paths]`` entries, ``[metadata].excel_path`` and
 ``[source].root``) resolve against the **directory of the config file**, never against the package
 location, so an installed package (Docker image, k8s Job) behaves the same as a
-checkout. Absolute paths are used as given.
-
-Unlike :func:`config.load_settings` (which needs ``credentials.toml`` for the
-WebDAV backend), this loader works credential-free for the production
-filesystem backend.
+checkout. Absolute paths are used as given. No secrets are needed: the scans
+are a filesystem mount.
 """
 
 from __future__ import annotations

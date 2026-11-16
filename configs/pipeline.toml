@@ -14,8 +14,7 @@ cache_dir = "../.cache"
 output_dir = "../output"
 
 [source]
-# backend = "filesystem": read the raw scans off a local mount (production).
-# backend = "webdav": pull over WebDAV (dev; needs credentials.toml + VPN).
+# The raw scans are read off a local mount ("filesystem" is the only backend).
 backend = "filesystem"
 root = "/mnt/digital-library/raw-scans"
 # stage_mode: "symlink" (zero-copy, default), "copy", or "hardlink".

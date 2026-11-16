@@ -1,12 +1,11 @@
 """Operator notes and review decisions.
 
-Approving a book rebuilds its outputs and publishes it (sequence
-"approve and publish") unless the project never publishes on its own
-(``auto_publish = "never"``): a RENDER run and a PUBLISH run are recorded in
-that order and enqueued after the commit. Ordering them is the batch
-orchestrator's job (``studio.run`` holds a publish behind an earlier active
-render: ``workers.stages.orchestrate.blocked_by``). The render run also rewrites
-the IA documents, so the operator's page edits reach ``_scandata.xml``.
+Approving a book rebuilds its outputs (a RENDER run, which also rewrites the IA
+documents, so the operator's page edits reach ``_scandata.xml``) and, when the project
+publishes (a publish target and ``auto_publish`` other than ``never``), records a
+PUBLISH run after it. Both are enqueued after the commit; the orchestrator holds the
+publish behind the earlier render (``workers.stages.orchestrate.blocked_by``).
+Publication is optional: without a target the approved, re-rendered book is finished.
 """
 
 from __future__ import annotations
@@ -73,8 +72,10 @@ def submit_review(svc: Services, book_id: int, cmd: dto.ReviewIn, author: str | 
                 set_status(uow, book, BookStatus.APPROVED)
                 for page in book.pages:      # the operator signed off every leaf
                     page.status = PageStatus.DONE
-                if _publishes_after_review(svc, book.project):
-                    runs = _render_and_publish(uow, book_id, author)
+                cfg = svc.project(book.project)
+                if cfg is not None and cfg.auto_publish != "never":
+                    runs = _render_and_publish(uow, book_id, author,
+                                               publish=cfg.publish.enabled)
             case ReviewDecision.NEEDS_WORK:
                 set_status(uow, book, BookStatus.REVIEW)
             case ReviewDecision.REJECTED:
@@ -85,13 +86,11 @@ def submit_review(svc: Services, book_id: int, cmd: dto.ReviewIn, author: str | 
     return out
 
 
-def _publishes_after_review(svc: Services, project: str | None) -> bool:
-    cfg = svc.project(project)
-    return cfg is not None and cfg.auto_publish != "never"
-
-
-def _render_and_publish(uow: UnitOfWork, book_id: int, author: str | None) -> list[Run]:
+def _render_and_publish(uow: UnitOfWork, book_id: int, author: str | None, *,
+                        publish: bool) -> list[Run]:
     book = get_book(uow.session, book_id)
     check_active(uow.session, book, RunKind.RENDER)
-    return [add_run(uow, book, RunSpec(RunKind.RENDER), author),
-            add_run(uow, book, RunSpec(RunKind.PUBLISH), author)]
+    runs = [add_run(uow, book, RunSpec(RunKind.RENDER), author)]
+    if publish:
+        runs.append(add_run(uow, book, RunSpec(RunKind.PUBLISH), author))
+    return runs

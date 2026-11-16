@@ -1,5 +1,15 @@
 # Restoration Studio — implementation contract
 
+> **Partly superseded (2026-11-16).** Execution, deployment and queues are now described
+> in [target-architecture.md](target-architecture.md) and `docs/diagrams/`:
+>
+> * a job ledger replaces the Celery canvas, `heartbeat_at` / `dispatched_at` and `recover_runs`;
+> * the queues are named `digitalizer.*`;
+> * the Deployments are `portal` and `orchestrator`;
+> * publication is optional.
+>
+> The data model, the IA compatibility rules, the API and the SPA sections still apply.
+
 The single source of truth for everyone implementing the studio. Diagrams:
 `docs/design/*.puml` (component, deployment, two sequences).
 

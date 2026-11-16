@@ -33,10 +33,12 @@ FORMAT_ENV = "EVILFLOWERS_LOG_FORMAT"
 LEVEL_ENV = "EVILFLOWERS_LOG_LEVEL"
 FORMATS = ("text", "json")
 
-#: Fields set through :func:`log_context`.
-CONTEXT_FIELDS = ("source", "book_id", "slug", "step")
+#: Fields set through :func:`log_context` (ledger ids match the span attributes, see
+#: studio.telemetry: ``digitalizer.run.id`` etc., so a Loki line links to its trace).
+CONTEXT_FIELDS = ("project", "book_pk", "run_id", "job_id", "stage", "lane", "task_id",
+                  "source", "book_id", "slug", "step")
 #: Per-line fields passed through ``extra=``.
-EXTRA_FIELDS = ("duration_ms", "status", "entry_id")
+EXTRA_FIELDS = ("duration_ms", "status", "entry_id", "trace_id", "span_id")
 
 _LEVEL_ALIASES = {"WARN": "WARNING"}
 _LEVEL_LABELS = {"WARNING": "WARN"}
@@ -75,6 +77,18 @@ def _fields(record: logging.LogRecord) -> dict[str, Any]:
     return {k: fields[k] for k in CONTEXT_FIELDS + EXTRA_FIELDS if fields.get(k) is not None}
 
 
+def _trace_ids() -> tuple[str, str] | None:
+    """The current OpenTelemetry span's ids (None without OpenTelemetry or a span)."""
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return None
+    ctx = trace.get_current_span().get_span_context()
+    if not ctx.is_valid:
+        return None
+    return f"{ctx.trace_id:032x}", f"{ctx.span_id:016x}"
+
+
 class JsonFormatter(logging.Formatter):
     """One JSON object per record (see the module docstring for the shape)."""
 
@@ -87,6 +101,8 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
         }
         payload.update(_fields(record))
+        if "trace_id" not in payload and (ids := _trace_ids()) is not None:
+            payload["trace_id"], payload["span_id"] = ids   # Loki -> Tempo: "View trace"
         if record.exc_info and record.exc_info[0] is not None:
             payload["exc_type"] = record.exc_info[0].__name__
             payload["exc"] = self.formatException(record.exc_info)

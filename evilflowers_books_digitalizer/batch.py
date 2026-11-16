@@ -114,8 +114,10 @@ def _run_pipeline(
     keep_cache: bool,
 ) -> dict:
     # heavy imports stay inside the worker so the parent stays light
-    from evilflowers_books_digitalizer import BookContext, LocalCache, build_source
+    from evilflowers_books_digitalizer.cache import LocalCache
+    from evilflowers_books_digitalizer.pipeline import BookContext
     from evilflowers_books_digitalizer.pipeline.factory import build_pipeline
+    from evilflowers_books_digitalizer.sources import build_source
     from evilflowers_books_digitalizer.progress import BookProgress
     from evilflowers_books_digitalizer.runtime import build_catalog
 

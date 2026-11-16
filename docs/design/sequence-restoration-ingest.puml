@@ -1,4 +1,5 @@
 @startuml sequence-restoration-ingest
+' SUPERSEDED 2026-11-16 by docs/diagrams/sequence-digitalizer-full-run.puml (kept for history)
 !include ../../../tools/diagrams/elvira.iuml
 ' =============================================================================
 ' What: the automatic path of one book. The operator (or the nightly beat)

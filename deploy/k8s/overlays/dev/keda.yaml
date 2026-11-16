@@ -1,0 +1,51 @@
+# KEDA: the bulk workers follow their queue's length on Redis db 8 (plain lists: the
+# digitalizer sends no priorities, so `digitalizer.cpu` is the whole queue).
+#
+# The pump caps what is in flight (admission), so the queue never holds a book's whole
+# backlog: at peak or while the catalog's queues are deep it stays near empty and the
+# workers scale to zero; off-peak it fills to `bulk_inflight` and they scale out.
+# Scale-in is slow on purpose: a worker that is told to stop gets terminationGracePeriod
+# (600 s) to finish its chunk, after which the job returns to the queue.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-cpu
+spec:
+  scaleTargetRef: { name: worker-cpu }
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  pollingInterval: 15
+  cooldownPeriod: 600
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 600
+          policies: [{ type: Pods, value: 1, periodSeconds: 300 }]
+  triggers:
+    - type: redis
+      metadata:
+        address: redis.shared.svc.cluster.local:6379
+        databaseIndex: "8"
+        listName: digitalizer.cpu
+        listLength: "2"                  # = --concurrency of one worker
+        activationListLength: "0"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-ai
+spec:
+  scaleTargetRef: { name: worker-ai }
+  minReplicaCount: 0
+  maxReplicaCount: 1                     # models are memory-bound; control has room for one
+  pollingInterval: 15
+  cooldownPeriod: 600
+  triggers:
+    - type: redis
+      metadata:
+        address: redis.shared.svc.cluster.local:6379
+        databaseIndex: "8"
+        listName: digitalizer.ai
+        listLength: "1"
+        activationListLength: "0"

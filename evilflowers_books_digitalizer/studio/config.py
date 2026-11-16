@@ -37,6 +37,32 @@ name so new ones need configuration, not code (open/closed principle)::
     [projects.stu.quality]                      # QualityPolicy overrides
     min_ocr_conf = 80.0
 
+    [orchestration]                             # the job ledger (studio.orchestration)
+    budget = 2                                  # re-sends of a lost job before the run fails
+    stale_after_seconds = 600                   # a local job with no heartbeat this long is lost
+    [orchestration.stages.clean]                # where a stage runs: in-process or a service
+    backend = "service"                         # local (default) | service
+    task = "evilflowers_scan.clean"
+    queue = "evilflowers_scan.standalone"
+    interactive_queue = "evilflowers_scan.standalone.interactive"
+    deadline_seconds = 3600
+
+    [scheduling]                                # admission: digitalization yields at peak
+    timezone = "Europe/Bratislava"
+    peak_hours = ["mon-fri 07:00-19:00"]
+    bulk_inflight = 8                           # jobs in flight off-peak
+    bulk_inflight_peak = 2
+    bulk_inflight_contended = 0                 # when a shared queue below is deep
+    interactive_inflight = 4                    # operator re-runs (never held by peak)
+    off_peak_stages = ["render"]                # whole-book stages wait for off-peak
+    [scheduling.queue_inflight]                 # optional caps per queue
+    "digitalizer.ai" = 2
+    [[scheduling.backpressure]]                 # other services' backlog (e.g. the catalog's)
+    name = "catalog-extraction"
+    redis_url = "redis://redis.shared.svc.cluster.local:6379/7"
+    queues = ["evilflowers_analyzer", "evilflowers_image", "evilflowers_equation"]
+    max_depth = 25
+
 Relative paths resolve against the config file's directory. Environment
 variables ``STUDIO_DATABASE_URL`` / ``STUDIO_REDIS_URL`` / ``STUDIO_CONFIG``
 override the file.
@@ -57,6 +83,13 @@ CONFIG_ENV = "STUDIO_CONFIG"
 _IDENT_OK = re.compile(r"[^A-Za-z0-9._-]+")
 
 type AutoPublish = Literal["never", "gate", "review"]
+type Backend = Literal["local", "service"]
+
+#: queues of this application (``digitalizer.*``); services bring their own
+PORTAL_QUEUE = "digitalizer.portal"            # orchestration: runs, callbacks, pump, gate, publish
+CPU_QUEUE = "digitalizer.cpu"                  # in-process clean / render (until the services take them)
+AI_QUEUE = "digitalizer.ai"                    # in-process layout / formulas
+INTERACTIVE_QUEUE = "digitalizer.interactive"  # in-process operator re-runs
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +100,70 @@ class PublishConfig:
     catalog: str = "{collection}"
     files_base_url: str = ""                   # empty = upload copies instead of external_url
     options: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def enabled(self) -> bool:
+        """Publication is optional: without a target a book ends in ``approved``."""
+        return self.target not in ("", "none")
+
+
+@dataclass(frozen=True, slots=True)
+class StageRoute:
+    """Where one stage's jobs run: this app's ``digitalizer.local.<stage>`` task or a service task."""
+
+    backend: Backend
+    task: str
+    queue: str
+    interactive_queue: str
+    deadline_seconds: int
+
+
+#: the in-process default of every stage (today's stage bodies, now ledger jobs)
+DEFAULT_ROUTES: dict[str, StageRoute] = {
+    "clean": StageRoute("local", "digitalizer.local.clean", CPU_QUEUE, INTERACTIVE_QUEUE, 3600),
+    "analyze": StageRoute("local", "digitalizer.local.analyze", AI_QUEUE, INTERACTIVE_QUEUE, 1800),
+    "formulas": StageRoute("local", "digitalizer.local.formulas", AI_QUEUE, AI_QUEUE, 4 * 3600),
+    "render": StageRoute("local", "digitalizer.local.render", CPU_QUEUE, CPU_QUEUE, 8 * 3600),
+    "gate": StageRoute("local", "digitalizer.local.gate", PORTAL_QUEUE, PORTAL_QUEUE, 600),
+    "publish": StageRoute("local", "digitalizer.local.publish", PORTAL_QUEUE, PORTAL_QUEUE, 1800),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class OrchestrationConfig:
+    budget: int = 2                            # re-sends of a lost job before its run fails
+    stale_after_seconds: int = 600             # local job silent this long = its worker is gone
+    start_grace_seconds: int = 30              # a queued run older than this is started by the pump
+    routes: dict[str, StageRoute] = field(default_factory=lambda: dict(DEFAULT_ROUTES))
+
+    def route(self, stage: str) -> StageRoute:
+        return self.routes[stage]
+
+
+@dataclass(frozen=True, slots=True)
+class BackpressureSource:
+    """Another system's queues on Redis; deep queues mean it needs the cluster more."""
+
+    name: str
+    redis_url: str
+    queues: tuple[str, ...]
+    max_depth: int = 25
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulingConfig:
+    timezone: str = "Europe/Bratislava"
+    #: ``"mon-fri 07:00-19:00"`` or ``"07:00-19:00"`` (every day); local time of ``timezone``
+    peak_hours: tuple[str, ...] = ()
+    bulk_inflight: int = 8
+    bulk_inflight_peak: int = 2
+    bulk_inflight_contended: int = 0
+    interactive_inflight: int = 4
+    #: stages whose bulk jobs are admitted off-peak only (a running job is never interrupted,
+    #: so a whole-book job admitted just before the peak would hold its CPUs through it)
+    off_peak_stages: tuple[str, ...] = ()
+    queue_inflight: dict[str, int] = field(default_factory=dict)
+    backpressure: tuple[BackpressureSource, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +207,11 @@ class StudioConfig:
     cache_dir: Path
     projects: dict[str, ProjectConfig]
     config_path: Path | None = None
+    orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
+    scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
+    #: the services' ``STORAGE_PATH``: one root holding the scans and ``artifacts_root``.
+    #: Paths in a service job are relative to it; needed only by service-backed stages.
+    storage_root: Path | None = None
 
     def project(self, slug: str) -> ProjectConfig:
         try:
@@ -152,6 +254,48 @@ def _project(slug: str, raw: dict[str, Any], base: Path) -> ProjectConfig:
     )
 
 
+def _orchestration(raw: dict[str, Any]) -> OrchestrationConfig:
+    routes = dict(DEFAULT_ROUTES)
+    for stage, override in raw.get("stages", {}).items():
+        if stage not in DEFAULT_ROUTES:
+            raise ValueError(f"[orchestration.stages.{stage}]: unknown stage "
+                             f"(known: {', '.join(DEFAULT_ROUTES)})")
+        base = routes[stage]
+        backend = override.get("backend", base.backend)
+        if backend not in ("local", "service"):
+            raise ValueError(f"[orchestration.stages.{stage}] backend must be local or service")
+        if backend == "service" and not {"task", "queue"} <= override.keys():
+            raise ValueError(f"[orchestration.stages.{stage}] a service backend needs task and queue")
+        queue = override.get("queue", base.queue)
+        routes[stage] = StageRoute(backend, override.get("task", base.task), queue,
+                                   override.get("interactive_queue", queue if backend == "service"
+                                                else base.interactive_queue),
+                                   int(override.get("deadline_seconds", base.deadline_seconds)))
+    return OrchestrationConfig(
+        budget=int(raw.get("budget", 2)),
+        stale_after_seconds=int(raw.get("stale_after_seconds", 600)),
+        start_grace_seconds=int(raw.get("start_grace_seconds", 30)),
+        routes=routes)
+
+
+def _scheduling(raw: dict[str, Any]) -> SchedulingConfig:
+    sources = tuple(BackpressureSource(name=s.get("name", s["redis_url"]), redis_url=s["redis_url"],
+                                       queues=tuple(s["queues"]), max_depth=int(s.get("max_depth", 25)))
+                    for s in raw.get("backpressure", []))
+    defaults = SchedulingConfig()
+    return SchedulingConfig(
+        timezone=raw.get("timezone", defaults.timezone),
+        peak_hours=tuple(raw.get("peak_hours", ())),
+        bulk_inflight=int(raw.get("bulk_inflight", defaults.bulk_inflight)),
+        bulk_inflight_peak=int(raw.get("bulk_inflight_peak", defaults.bulk_inflight_peak)),
+        bulk_inflight_contended=int(raw.get("bulk_inflight_contended",
+                                            defaults.bulk_inflight_contended)),
+        interactive_inflight=int(raw.get("interactive_inflight", defaults.interactive_inflight)),
+        off_peak_stages=tuple(raw.get("off_peak_stages", ())),
+        queue_inflight={str(k): int(v) for k, v in raw.get("queue_inflight", {}).items()},
+        backpressure=sources)
+
+
 def load_config(path: str | Path | None = None) -> StudioConfig:
     """Read the studio config (``path`` > ``$STUDIO_CONFIG`` > ``configs/studio.toml``)."""
     from evilflowers_books_digitalizer.config import PROJECT_ROOT
@@ -169,4 +313,8 @@ def load_config(path: str | Path | None = None) -> StudioConfig:
         cache_dir=_resolve(studio.get("cache_dir", "../.cache/studio"), base),
         projects={slug: _project(slug, p, base) for slug, p in raw.get("projects", {}).items()},
         config_path=cfg_path,
+        orchestration=_orchestration(raw.get("orchestration", {})),
+        scheduling=_scheduling(raw.get("scheduling", {})),
+        storage_root=(_resolve(studio["storage_root"], base) if studio.get("storage_root")
+                      else None),
     )

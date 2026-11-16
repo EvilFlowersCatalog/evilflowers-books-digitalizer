@@ -1,4 +1,5 @@
 @startuml deployment-restoration-studio
+' SUPERSEDED 2026-11-16 by docs/diagrams/deployment-digitalizer-dev.puml (kept for history)
 !include ../../../tools/diagrams/elvira.iuml
 ' =============================================================================
 ' What: where the restoration studio runs. The 10 TB scan disk (vdc) stays on

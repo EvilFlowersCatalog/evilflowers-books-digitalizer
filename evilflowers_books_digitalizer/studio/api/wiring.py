@@ -26,10 +26,13 @@ def build_services(config: StudioConfig) -> Services:
     from evilflowers_books_digitalizer.db.store import get_engine
     from evilflowers_books_digitalizer.studio.adapters.eventbus import RedisEventBus
     from evilflowers_books_digitalizer.studio.adapters.queue import CeleryTaskQueue
+    from evilflowers_books_digitalizer.studio.workers.context import production_admission
 
     sessions = sessionmaker(get_engine(config.database_url), expire_on_commit=False)
+    admission = production_admission(config)
     return Services(config=config, sessions=sessions, queue=CeleryTaskQueue(config.redis_url),
-                    bus=RedisEventBus(config.redis_url), artifacts_for=artifact_resolver(config))
+                    bus=RedisEventBus(config.redis_url), artifacts_for=artifact_resolver(config),
+                    control=admission.control, backpressure=admission.backpressure)
 
 
 def artifact_resolver(config: StudioConfig) -> Callable[[str], ArtifactStore | None]:

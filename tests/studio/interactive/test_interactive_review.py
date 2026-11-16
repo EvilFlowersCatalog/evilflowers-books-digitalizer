@@ -40,6 +40,23 @@ def test_approve_in_a_never_publishing_project_only_records(client, services, qu
     assert _status(services, quiet.book_id) == "approved"
 
 
+def test_approve_without_a_publish_target_only_renders(client, services, queue, tmp_path):
+    """Publication is optional: the approved, re-rendered book is finished."""
+    files = seed_book(services, tmp_path, project="files", external_id="F")
+    r = client.post(f"/api/v1/books/{files.book_id}/reviews", json={"decision": "approved"})
+    assert r.status_code == 201, r.text
+    assert [run["kind"] for run in r.json()["runs"]] == ["render"]
+    assert _status(services, files.book_id) == "approved"
+    projects = {p["slug"]: p for p in client.get("/api/v1/projects").json()}
+    assert projects["files"]["publishes"] is False and projects["stu"]["publishes"] is True
+
+
+def test_a_publish_run_needs_a_target(client, services, tmp_path):
+    files = seed_book(services, tmp_path, project="files", external_id="F2", status="approved")
+    r = client.post(f"/api/v1/books/{files.book_id}/runs", json={"kind": "publish"})
+    assert r.status_code == 422 and "no publish target" in r.json()["detail"]
+
+
 def test_needs_work_and_rejected(client, services, tmp_path, queue):
     approved = seed_book(services, tmp_path, external_id="AP", status="approved")
     r = client.post(f"/api/v1/books/{approved.book_id}/reviews", json={"decision": "needs_work"})

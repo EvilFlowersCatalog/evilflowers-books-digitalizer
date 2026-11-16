@@ -32,10 +32,10 @@ def test_project_config_is_read_only_and_secret_free(client):
 def test_import_enqueues_discover(client, queue, bus):
     r = client.post("/api/v1/projects/stu/imports", json={"collection": "fei"})
     assert r.status_code == 202 and r.json()["task_id"]
-    assert queue.calls == [("studio.discover", ("stu", "fei"), {})]
+    assert queue.calls == [("digitalizer.discover", ("stu", "fei"), {})]
     assert bus.published[-1].type == EventType.IMPORT_STARTED
     assert client.post("/api/v1/projects/stu/imports").status_code == 202      # no body = all
-    assert queue.calls[-1] == ("studio.discover", ("stu", None), {})
+    assert queue.calls[-1] == ("digitalizer.discover", ("stu", None), {})
     assert client.post("/api/v1/projects/nope/imports", json={}).status_code == 404
     assert client.post("/api/v1/projects/stu/imports", json={"collection": "x"}).status_code == 422
 

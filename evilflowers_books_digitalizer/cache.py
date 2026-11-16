@@ -44,7 +44,7 @@ class LocalCache:
         return self.root / "stats" / f"{source}.json"
 
     def save_stats(self, stats: SourceStats) -> Path:
-        """Persist share statistics so exploration doesn't re-walk WebDAV."""
+        """Persist source statistics so exploration doesn't re-walk the mount."""
         path = self.stats_path(stats.source)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(stats.model_dump_json(indent=2))

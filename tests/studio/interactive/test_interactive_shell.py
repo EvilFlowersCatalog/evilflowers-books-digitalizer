@@ -106,7 +106,7 @@ def test_cli_parses_the_studio_group():
 
 def test_cli_import_run_and_exports(cli_services, queue, tmp_path, capsys):
     assert cli.main(["studio", "import", "stu", "fei"]) == 0
-    assert queue.calls[-1] == ("studio.discover", ("stu", "fei"), {})
+    assert queue.calls[-1] == ("digitalizer.discover", ("stu", "fei"), {})
     seeded = seed_book(cli_services, tmp_path)
     assert cli.main(["studio", "run", "stu-fei-book1", "--kind", "rerun", "--pages", "0",
                      "--operator", "cli"]) == 0
@@ -116,7 +116,7 @@ def test_cli_import_run_and_exports(cli_services, queue, tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["zip"].endswith("stu-fei-book1_ia.zip")
     assert cli.main(["studio", "export-training", "stu"]) == 0
-    assert queue.calls[-1] == ("studio.export_training", ("stu",), {})
+    assert queue.calls[-1] == ("digitalizer.export_training", ("stu",), {})
     assert cli.main(["studio", "run", "no-such-book"]) == 1
     assert "not found" in capsys.readouterr().err
 

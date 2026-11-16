@@ -19,8 +19,8 @@ orchestrator/server/DB) for unattended multi-TB runs on a remote VM.
             └───┬─────────────┬─────────────┬──────────────┬───────────┘
                 │             │             │              │
           sources/      metadata/       covers/        catalog/
-       (local mount,   (Excel catalog, (OPAC cover by  (entry manifest
-        WebDAV)         dir-name keyed)  ISBN/PIL)       + REST import)
+       (local mount)   (Excel catalog, (OPAC cover by  (entry manifest
+                        dir-name keyed)  ISBN/PIL)       + REST import)
 
    monitor (rich TUI) + stats (CLI/exports) read the JSONL reports + per-book
    heartbeats (output/.progress/) — out of band; monitor shows live parallel
@@ -31,7 +31,7 @@ orchestrator/server/DB) for unattended multi-TB runs on a remote VM.
 
 | Module | Responsibility |
 |---|---|
-| `sources/` | `AbstractBookSource` + `FilesystemBookSource` (local mount, production) and `BookSource` (WebDAV). `build_source` picks the backend from `[source]`. |
+| `sources/` | `AbstractBookSource` + `FilesystemBookSource` (the raw-scans mount). `build_source` builds it from `[source]`. |
 | `pipeline/` | The step framework (`base.py`), engine assembly (`factory.py`), and the steps (`steps/`). |
 | `batch.py` | `process_book` — one book end to end, isolated, low-storage, resumable. |
 | `runner.py` | `run_source`/`run_corpus` — process-pool fan-out over `process_book` with a resumable JSONL report. |

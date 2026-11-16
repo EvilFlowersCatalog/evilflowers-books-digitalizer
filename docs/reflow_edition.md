@@ -1,7 +1,7 @@
 # Toward a Born-Digital Edition: Reflowing Scanned Technical Books
 
 **Status.** Experiment report, 2026-11-06. Reproducible from
-`experiments/reflow/` (see its README). The code is not wired into the
+`lab/experiments/reflow/` (see its README). The code is not wired into the
 pipeline yet; see §8 for the proposed integration.
 
 **Question.** How close can the digitizer get to a document that looks
@@ -132,7 +132,7 @@ benchmark leadership does not transfer to Slovak prose. The VLM is therefore
 
 ## 5. What works: math recovery
 
-**Formulas.** On visual inspection (`experiments/reflow/formula_sheet_40.png`),
+**Formulas.** On visual inspection (`lab/experiments/reflow/formula_sheet_40.png`),
 display formulas come out as correct LaTeX, including 3×3 determinants,
 multi-line systems and long expansions. Typical results:
 
@@ -200,7 +200,7 @@ actual ScanTailor TIFFs, which were not cached.
 Tracing the 600 dpi JBIG2 mask with potrace gives 282–361 KiB of vector outlines
 per page. At reading zoom the edges are smoother and specks vanish. But the glyph
 bumps from the 300→600 dpi upsample are traced faithfully, and each `a` stays
-slightly different (`experiments/reflow/raster_vs_vector.png`).
+slightly different (`lab/experiments/reflow/raster_vs_vector.png`).
 
 A born-digital *look* needs either glyph clustering (identical glyph instances, a
 Type 3 font) or full re-typesetting. Glyph clustering is risky for Slovak diacritic

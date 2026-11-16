@@ -1,66 +1,100 @@
-# Restoration studio on k3s
+# Digitalizer on k3s (namespace `digitalizer`)
 
-Design: `docs/design/deployment-restoration-studio.puml`. One image
-(`ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer`) runs the API and every
-worker; the command decides the role. The formula service has its own image
-(`…-digitalizer-vlm`, Dockerfile target `vlm`).
+Design: `docs/design/target-architecture.md`, diagrams in `docs/diagrams/`. One image
+(`ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer`) runs the portal and every
+Celery role; the command decides the role. PaddleOCR-VL (formulas) is **not** deployed
+here: the shared `vlm` service (namespace `shared`, evilflowers-vlm-service) is called over
+HTTP.
 
-| Deployment | Role | Replicas | Requests → limits |
-|---|---|---|---|
-| `studio-api` | uvicorn (REST, SSE, tiles, SPA) | 1 (Recreate) | 100m/512Mi → 1/2Gi |
-| `worker-cpu` | Celery `interactive,cpu` (ScanTailor, OCR, render), concurrency 3 | 1 | 1.5/3Gi → 4/8Gi |
-| `worker-ai` | Celery `ai` (layout ONNX, formulas → vlm over HTTP), concurrency 1 | 1 | 0.5/2Gi → 2/6Gi |
-| `worker-io` | Celery `io` + beat (discover, tiles, publish, export, recover_runs) | 1 (Recreate) | 0.2/768Mi → 1/2Gi |
-| `vlm` | PaddleOCR-VL-1.6 on CPU, HTTP :8000 (`/v1/formulas`, `/readyz`) | **0** (scale on demand) | 1/4Gi → 4/6Gi |
+| Deployment | Role | Replicas | Priority | Requests → limits |
+|---|---|---|---|---|
+| `portal` | uvicorn: REST, SSE, tiles, SPA, `/metrics`, `/api/v1/scheduler` | 1 (Recreate) | default | 100m/512Mi → 1/2Gi |
+| `orchestrator` | Celery `digitalizer.portal` + beat: runs, job callbacks, pump (15 s), reconcile (60 s), discover, gate, publish | 1 (Recreate) | default | 200m/768Mi → 1/2Gi |
+| `worker-interactive` | Celery `digitalizer.interactive`: operator re-runs, concurrency 2 | 1 | default | 500m/2Gi → 2/6Gi |
+| `worker-cpu` | Celery `digitalizer.cpu`: bulk clean / render, concurrency 2 | **0..3 (KEDA)** | `digitalizer-batch` | 500m/2Gi → 2/6Gi |
+| `worker-ai` | Celery `digitalizer.ai`: bulk layout / formulas, concurrency 1 | **0..1 (KEDA)** | `digitalizer-batch` | 500m/2Gi → 2/6Gi |
 
-Every studio pod (api and workers) runs the init container `migrate` (`alembic upgrade
-head`, `pod-defaults.yaml`), so a worker never starts against an older schema.
+Every pod runs the init container `migrate` (`alembic upgrade head`, `pod-defaults.yaml`),
+so nothing starts against an older schema.
 
-Sized for control (6 vCPU, 32 GB, shared with LGTM/TEI/CI; 2.56 CPU requested before
-the studio): the studio adds 2.3 CPU (4.86 total, 81%) while vlm is off, and vlm's
-1-CPU request makes 5.86 (98%). Hence vlm stays at 0 replicas and is scaled up for a
-formula pass (`kubectl -n digitalizer scale deploy/vlm --replicas=1`, then back to 0).
+## Who yields to whom
 
-Service `studio` (ClusterIP :80) is VPN-only, like flower: no HTTPRoute.
-URL: `http://studio.digitalizer.stu.k8s.internal`.
+Book digitalization is background work; the catalog's own services and the operator
+come first. Three layers, each one configuration:
+
+1. **Admission** (`[scheduling]` in `configs/studio.k8s.toml`). The orchestrator's pump
+   sends bulk jobs only within the current capacity:
+   * `normal`: `bulk_inflight` jobs;
+   * `peak`: `peak_bulk_inflight` jobs (mon–fri 07–19 by default), and the
+     `off_peak_stages` (render) are held until the window ends;
+   * `contended`: the catalog's queues on Redis db 7 are deeper than `max_depth`;
+   * `paused`: an operator switch (`POST /api/v1/scheduler/pause`, Redis key
+     `digitalizer:scheduler:paused`).
+
+   Interactive re-runs have their own lane and are never held.
+2. **Scaling**. KEDA (`overlays/dev/keda.yaml`) scales the bulk workers on their queue's
+   length on Redis db 8. Admission keeps that queue short, so at peak the workers scale
+   to zero on their own. Scale-in is slow: there is a 600 s grace for the running chunk.
+3. **Node pressure**. The bulk workers run under PriorityClass `digitalizer-batch`
+   (`base/priorityclasses.yaml`, value −100, `preemptionPolicy: Never`): they never
+   preempt anything and are evicted first. An evicted job goes back to the queue
+   (`acks_late`). The ledger's reconcile then re-sends a job whose heartbeat went stale,
+   up to its budget.
+
+Sizing on control (6 vCPU): 0.8 CPU is always requested (portal, orchestrator,
+interactive). Full bulk scale adds 2.0 CPU (3 × cpu + 1 × ai).
+
+## Observability
+
+* Pods carry `elvira.stuba.sk/instrumentation: otel-sdk`. The OTel SDK (extra `telemetry`,
+  installed in the image) exports when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+  (`pod-defaults.yaml`).
+* `service.name` comes from `OTEL_SERVICE_NAME`, which is the pod's
+  `app.kubernetes.io/name` (for example `digitalizer-portal` or
+  `digitalizer-worker-cpu`).
+* Spans carry `digitalizer.run.id`, `digitalizer.job.id` and `digitalizer.stage`. The
+  same ids appear in the JSON logs (`run_id`, `job_id`, `stage`, plus `trace_id`).
+* Celery messages carry `digitalizer_*` headers, so a service worker can tag its spans.
+* The `portal` exposes `/metrics`, scraped through the `k8s.grafana.com/scrape`
+  annotations. Its gauges include `digitalizer_jobs{status,lane,stage}`,
+  `digitalizer_job_oldest_planned_seconds`, `digitalizer_runs`,
+  `digitalizer_scheduler_capacity` and `digitalizer_scheduler_mode`.
+
+Service `portal` (ClusterIP :80) is VPN-only: no HTTPRoute.
+URL: `http://portal.digitalizer.stu.k8s.internal`.
 
 ## Render (never apply by hand)
 
 ```bash
-kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev > /tmp/studio-dev.yaml
+kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/overlays/dev > /tmp/digitalizer-dev.yaml
 ```
 
 The flag is needed because the ConfigMap is generated from `configs/studio.k8s.toml`,
-outside this directory. The Ansible role drops the rendered file into
+which lives outside this directory. The Ansible role drops the rendered file into
 `/var/lib/rancher/k3s/server/manifests/` (Cookbooks/Deploy-a-Service §2).
 
 ## Prerequisites
 
-The infrastructure side (Ansible role, NFS server, database, secrets, nginx) is specified
-in **`docs/handoff/knowledge-repo-agent.md`**; this list only says what the manifests
-assume. Status as of 2026-11-07:
+The infrastructure side is tracked in the knowledge repository (knowledge#66, #67):
 
-1. **NFS on gateway** — *to build* (handoff §3.1–3.3). Two exports, `raw-scans` (ro) and
-   `digitized` (rw), `all_squash` to the scans owner; clients are the k3s **node IPs**
-   (today only control, `192.168.122.60`), not the /24 (the hypervisor sits on it too).
-   No ufw rule: gateway trusts its private NIC `enp1s0`. The server address is set once,
-   in `base/nfs-server.yaml` (the value the Ansible role templates).
-2. **Workload label** `elvira.stuba.sk/workload=apps` on control — *live*.
-3. **Postgres/Redis**: the k8s-bridge and the Services `postgres`, `redis` in namespace
-   `shared` — *live*. The `digitalizer` database/role and Redis db 8: handoff §3.4–3.5.
-4. **Secrets** in namespace `digitalizer`: `ghcr-pull`, and `studio-secrets`
-   (`base/secret.example.yaml`: `database-url`, `redis-url`, `evilflowers-api-key`),
-   created by the role (handoff §3.6).
-5. **Publishing uploads copies** to the catalog for now: `configs/studio.k8s.toml` sets no
-   `files_base_url`, because the catalog API cannot create `external_url` acquisitions
-   yet (a project that sets it fails fast). Publishing in place (gateway nginx serving
-   `/digitized/` from the scan disk, handoff §3.7) waits for the catalog server change
-   described in `docs/design/catalog-protocol-requests.md`.
-6. **vlm image**: `docker build --target vlm -t ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer-vlm:master .`
-   and push it; the CI workflow builds only the studio image.
+1. **NFS on gateway**: `raw-scans` (ro) and `digitized` (rw), mounted at `/data`
+   (`storage_root`). The server address is set once, in `base/nfs-server.yaml`.
+2. **Workload label** `elvira.stuba.sk/workload=apps` on the nodes.
+3. **Postgres/Redis** in namespace `shared`, with:
+   * the `digitalizer` database and role;
+   * Redis db 8 (broker);
+   * read access to db 7 (the catalog's queues, for backpressure).
+4. **KEDA** and the PriorityClass `digitalizer-batch` (cluster-scoped; this base ships it,
+   unless the platform owns it).
+5. **Secrets** in namespace `digitalizer`: `ghcr-pull` and `studio-secrets`
+   (`base/secret.example.yaml`).
+6. **Shared vlm**: `http://vlm.shared.svc.cluster.local` (evilflowers-vlm-service).
+
+Publication is optional. A project without a `[publish]` target never publishes.
 
 ## Verify (VPN on)
 
 ```bash
-STUDIO_BASE_URL=http://studio.digitalizer.stu.k8s.internal deploy/dev/smoke.sh
+STUDIO_BASE_URL=http://portal.digitalizer.stu.k8s.internal deploy/dev/smoke.sh
+curl -s http://portal.digitalizer.stu.k8s.internal/api/v1/scheduler
 ```

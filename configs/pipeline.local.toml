@@ -4,7 +4,7 @@
 #            or:  config_path="configs/pipeline.local.toml"  (flows / notebook 11)
 #
 # Differences from the production configs/pipeline.toml:
-#   * source backend = "webdav" (pull a few books over the VPN instead of a mount)
+#   * the source is a local copy of a few books (.cache/raw-scans) instead of the mount
 #   * smaller paths / concurrency / disk guard suited to a laptop
 # Everything else (scantailor, render, finalize, cover) inherits the same
 # defaults as production, so a local run exercises the real pipeline.
@@ -15,10 +15,10 @@ cache_dir = "../.cache"
 output_dir = "../output"
 
 [source]
-# WebDAV for local testing (needs credentials.toml + VPN). Switch to
-# "filesystem" + a local root if you manually stage books to disk instead.
-backend = "webdav"
-# Used only by the filesystem backend; harmless for webdav.
+# A few books copied off the raw-scans export:
+# .cache/raw-scans/<faculty>/<book>/stream_pages_tif/*.tif
+# (add [source.paths] like pipeline.toml to keep the mount's <NAME>-skeny level)
+backend = "filesystem"
 root = "../.cache/raw-scans"
 stage_mode = "symlink"
 

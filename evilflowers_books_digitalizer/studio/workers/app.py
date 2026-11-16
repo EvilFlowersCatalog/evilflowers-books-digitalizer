@@ -1,21 +1,22 @@
-"""Celery application of the studio: ``evilflowers_books_digitalizer.studio.workers.app:celery``.
+"""Celery application of the digitalizer: ``evilflowers_books_digitalizer.studio.workers.app:celery``.
 
-Redis is broker and result backend (``StudioConfig.redis_url``). Four queues,
-served by three pools (docs/design/studio-spec.md, "Queues and tasks")::
+Queues (``studio.config``) and who consumes them::
 
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q interactive,cpu -c 4
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q ai -c 1
-    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q io -B
+    digitalizer.portal       orchestrator: runs, job_done/job_failed callbacks, pump,
+                             reconcile, discover, gate, publish   (+ beat, one replica)
+    digitalizer.cpu          in-process clean / render            (until scan/render services)
+    digitalizer.ai           in-process layout / formulas         (until analyzer/equation tasks)
+    digitalizer.interactive  in-process operator re-runs          (one replica, always on)
 
-Interactive work (an operator's re-run, its layout pass included) is served by
-the cpu pool only, as in the spec and deploy/k8s/base/workers.yaml.
+    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.portal -B
+    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.cpu
+    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.ai -c 1
+    celery -A evilflowers_books_digitalizer.studio.workers.app worker -Q digitalizer.interactive
 
-``acks_late`` + prefetch 1: a page job is acknowledged only when it is done, and a
-worker never hoards long jobs while an operator's interactive re-run waits. The
-Redis ``visibility_timeout`` (``adapters.queue.TRANSPORT_OPTIONS``) is set far above
-the longest single task, so a slow whole-book stage is not redelivered mid-flight.
-``STUDIO_EAGER=1`` runs every task inline (tests, single-process debugging) on an
-in-memory broker, so no Redis is needed.
+No result backend: a job's result returns as a ``link`` callback (studio.orchestration).
+``acks_late`` + ``reject_on_worker_lost`` + prefetch 1: a job is acknowledged only when
+done, a lost worker's job is redelivered (and fenced by its token), and a worker never
+hoards jobs. ``STUDIO_EAGER=1`` runs every task inline on an in-memory broker (tests).
 
 Importing this module reads no database and builds no adapter; the config is read
 only for the broker URL (and tolerated missing).
@@ -27,16 +28,11 @@ import logging
 import os
 
 from celery import Celery
+from celery.signals import worker_process_init
 from kombu import Exchange, Queue
 
-from evilflowers_books_digitalizer.studio.adapters.queue import (
-    AI,
-    CPU,
-    DEFAULT_PRIORITY,
-    INTERACTIVE,
-    IO,
-    TRANSPORT_OPTIONS,
-)
+from evilflowers_books_digitalizer.studio.adapters.queue import QUEUES, TRANSPORT_OPTIONS
+from evilflowers_books_digitalizer.studio.config import AI_QUEUE, CPU_QUEUE, PORTAL_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +40,36 @@ EAGER_ENV = "STUDIO_EAGER"
 DEFAULT_REDIS = "redis://127.0.0.1:6379/0"
 TASKS_MODULE = "evilflowers_books_digitalizer.studio.workers.tasks"
 
-#: default queue per task; studio.run picks interactive variants per run at dispatch time
+#: default queue per task (jobs are always sent with an explicit queue by the pump)
 ROUTES: dict[str, dict[str, str]] = {
-    "studio.discover": {"queue": IO},
-    "studio.run": {"queue": IO},
-    "studio.clean": {"queue": CPU},
-    "studio.analyze": {"queue": AI},
-    "studio.formulas": {"queue": AI},
-    "studio.render": {"queue": CPU},
-    "studio.gate": {"queue": IO},
-    "studio.publish": {"queue": IO},
-    "studio.export_training": {"queue": IO},
-    "studio.recover_runs": {"queue": IO},
+    "digitalizer.run": {"queue": PORTAL_QUEUE},
+    "digitalizer.job_done": {"queue": PORTAL_QUEUE},
+    "digitalizer.job_failed": {"queue": PORTAL_QUEUE},
+    "digitalizer.pump": {"queue": PORTAL_QUEUE},
+    "digitalizer.reconcile": {"queue": PORTAL_QUEUE},
+    "digitalizer.discover": {"queue": PORTAL_QUEUE},
+    "digitalizer.export_training": {"queue": PORTAL_QUEUE},
+    "digitalizer.local.clean": {"queue": CPU_QUEUE},
+    "digitalizer.local.analyze": {"queue": AI_QUEUE},
+    "digitalizer.local.formulas": {"queue": AI_QUEUE},
+    "digitalizer.local.render": {"queue": CPU_QUEUE},
+    "digitalizer.local.gate": {"queue": PORTAL_QUEUE},
+    "digitalizer.local.publish": {"queue": PORTAL_QUEUE},
 }
 
-#: periodic tasks; beat runs embedded in the io worker (``worker -Q io -B``)
+#: periodic tasks; beat runs embedded in the single orchestrator replica (``-B``)
 BEAT_SCHEDULE: dict[str, dict[str, object]] = {
-    # stale-run sweeper (workers.recovery): runs left queued/running by a lost worker
-    "studio.recover_runs": {
-        "task": "studio.recover_runs",
-        "schedule": float(os.environ.get("STUDIO_RECOVER_INTERVAL_SECONDS", "300")),
-        "options": {"queue": IO, "expires": 240},
+    # admission: send planned jobs as capacity frees up, start held / lost runs
+    "digitalizer.pump": {
+        "task": "digitalizer.pump",
+        "schedule": float(os.environ.get("DIGITALIZER_PUMP_INTERVAL_SECONDS", "15")),
+        "options": {"queue": PORTAL_QUEUE, "expires": 14},
+    },
+    # settle what callbacks missed: lost outcomes, dead workers, jobs past their deadline
+    "digitalizer.reconcile": {
+        "task": "digitalizer.reconcile",
+        "schedule": float(os.environ.get("DIGITALIZER_RECONCILE_INTERVAL_SECONDS", "60")),
+        "options": {"queue": PORTAL_QUEUE, "expires": 55},
     },
 }
 
@@ -89,35 +94,44 @@ def broker_url() -> str:
 
 
 def make_app() -> Celery:
-    broker = broker_url()
-    app = Celery("studio", broker=broker, backend="cache+memory://" if eager() else broker,
-                 include=[TASKS_MODULE])
+    app = Celery("digitalizer", broker=broker_url(), include=[TASKS_MODULE])
     app.conf.update(
-        # one exchange + routing key per queue: a bare Queue(name) is bound to the
-        # *default* exchange with the default key, so all four queues would share
-        # key "io" and Redis would deliver every message to every queue
+        # one direct exchange + routing key per queue (what send_task(queue=…) declares
+        # from any producer, the kit's services included)
         task_queues=[Queue(name, Exchange(name, type="direct"), routing_key=name)
-                     for name in (INTERACTIVE, CPU, AI, IO)],
-        task_default_queue=IO,
+                     for name in QUEUES],
+        task_default_queue=PORTAL_QUEUE,
         task_routes=ROUTES,
         beat_schedule=BEAT_SCHEDULE,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,
         task_serializer="json",
-        result_serializer="json",
         accept_content=["json"],
-        result_expires=24 * 3600,
-        # Redis emulates priorities with per-priority lists polled in ascending
-        # order: 0 = operator re-runs (INTERACTIVE_PRIORITY), 5 = batch work
-        task_queue_max_priority=10,
-        task_default_priority=DEFAULT_PRIORITY,
+        task_ignore_result=True,
         broker_transport_options=dict(TRANSPORT_OPTIONS),
+        broker_connection_retry_on_startup=True,
+        # task events: Flower and the Celery exporter read them (observability)
+        worker_send_task_events=True,
+        task_send_sent_event=True,
         worker_hijack_root_logger=False,
         task_always_eager=eager(),
-        task_eager_propagates=eager(),
+        # never propagate: Celery re-raises *before* calling errbacks, so link_error (and
+        # with it digitalizer.job_failed) would never run inline; a job's failure is the
+        # errback's business in production too
+        task_eager_propagates=False,
     )
     return app
 
 
 celery = make_app()
+
+
+@worker_process_init.connect
+def _telemetry(**_: object) -> None:
+    """Tracing starts in each pool process (after the fork), never in the parent."""
+    from evilflowers_books_digitalizer.logs import setup_logging
+    from evilflowers_books_digitalizer.studio import telemetry
+
+    setup_logging()
+    telemetry.configure("digitalizer-worker")

@@ -1,7 +1,7 @@
 .cache/
 output/
 .venv/
-notebooks/
+lab/
 .ruff_cache/
 **/__pycache__/
 credentials.toml

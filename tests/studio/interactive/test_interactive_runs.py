@@ -28,7 +28,7 @@ def test_full_run_queues_book_and_enqueues_on_io(client, services, queue, bus, t
     assert r.status_code == 202, r.text
     run = r.json()
     assert run["kind"] == "full" and run["status"] == "queued" and run["created_by"] == "jana"
-    assert queue.calls == [("studio.run", (run["id"],), {"interactive": False})]
+    assert queue.calls == [("digitalizer.run", (run["id"],), {"interactive": False})]
     assert run["task_id"]
     assert _book(services, seeded.book_id).status == "queued"
     types = [e.type for e in bus.published]
@@ -39,7 +39,7 @@ def test_rerun_is_interactive_and_pins_pages(client, queue, seeded):
     r = client.post(f"/api/v1/books/{seeded.book_id}/runs", json={"kind": "rerun", "pages": [1, 0, 1]})
     assert r.status_code == 202, r.text
     assert r.json()["pages"] == [0, 1] and r.json()["interactive"] is True
-    assert queue.calls[-1] == ("studio.run", (r.json()["id"],), {"interactive": True})
+    assert queue.calls[-1] == ("digitalizer.run", (r.json()["id"],), {"interactive": True})
 
 
 def test_rerun_may_run_beside_a_batch_render_but_not_a_full_run(client, seeded):

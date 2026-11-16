@@ -106,6 +106,28 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class JobStatus(StrEnum):
+    """One unit of dispatched work in the job ledger (docs/diagrams/state-digitalizer-run-job)."""
+
+    PLANNED = "planned"         # row exists, waiting for admission (the scheduler's pump)
+    DISPATCHED = "dispatched"   # token minted, message sent with link / link_error callbacks
+    STARTED = "started"         # a worker reported in (local tasks heartbeat)
+    APPLIED = "applied"         # result applied to the rows; terminal
+    FAILED = "failed"           # the worker failed, or the re-send budget is spent; terminal
+    REVOKED = "revoked"         # its run ended (cancelled, superseded, failed); terminal
+
+    @property
+    def open(self) -> bool:
+        return self in (JobStatus.PLANNED, JobStatus.DISPATCHED, JobStatus.STARTED)
+
+
+class Lane(StrEnum):
+    """Admission lane: operator work is never held behind book digitalization."""
+
+    INTERACTIVE = "interactive"
+    BULK = "bulk"
+
+
 class ReviewDecision(StrEnum):
     APPROVED = "approved"
     NEEDS_WORK = "needs_work"
