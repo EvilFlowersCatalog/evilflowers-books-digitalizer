@@ -23,10 +23,14 @@ images:
   - name: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer
     newTag: master
 
+components:
+  - ../../components/storage-root      # mounts follow STUDIO_STORAGE_ROOT below
+
 configMapGenerator:
   - name: studio-env
     behavior: merge
     literals:
+      - STUDIO_STORAGE_ROOT=/data         # where the pods mount the shared storage
       - DEPLOYMENT_ENVIRONMENT=development
       - EVILFLOWERS_LOG_LEVEL=DEBUG
       - IMAGE_TAG=master

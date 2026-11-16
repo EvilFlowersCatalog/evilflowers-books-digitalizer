@@ -6,12 +6,13 @@ name so new ones need configuration, not code (open/closed principle)::
     [studio]
     database_url = "postgresql+psycopg://studio:studio@127.0.0.1:55432/studio"   # or $STUDIO_DATABASE_URL
     redis_url = "redis://127.0.0.1:56379/0"                                      # or $STUDIO_REDIS_URL
-    artifacts_root = "/data/digitized"          # output tree (IA item layout per book)
-    cache_dir = "/data/cache"                   # scratch: cleaned TIFFs, viewer cache
+    storage_root = "/data"                      # or $STUDIO_STORAGE_ROOT: the shared storage mount
+    artifacts_root = "{storage_root}/digitized" # output tree (IA item layout per book)
+    cache_dir = "/scratch/cache"                # scratch: cleaned TIFFs, viewer cache
 
     [projects.stu]
     name = "STU — Slovak University of Technology"
-    scans_root = "/data/raw-scans"
+    scans_root = "{storage_root}/raw-scans"
     # where a book's frames are, relative to scans_root; {collection} and {book}
     # are captured, the rest is literal or glob.
     book_pattern = "{collection}/*-skeny/{book}"
@@ -63,9 +64,14 @@ name so new ones need configuration, not code (open/closed principle)::
     queues = ["evilflowers_analyzer", "evilflowers_image", "evilflowers_equation"]
     max_depth = 25
 
-Relative paths resolve against the config file's directory. Environment
-variables ``STUDIO_DATABASE_URL`` / ``STUDIO_REDIS_URL`` / ``STUDIO_CONFIG``
-override the file.
+Paths: ``{storage_root}`` expands to the storage root, then relative paths resolve
+against the config file's directory. Environment variables ``STUDIO_DATABASE_URL`` /
+``STUDIO_REDIS_URL`` / ``STUDIO_STORAGE_ROOT`` / ``STUDIO_CONFIG`` override the file.
+
+The storage root is where *this* pod mounts the shared storage. Service jobs carry paths
+relative to it, so the digitalizer and a service may mount it at different absolute
+paths (each sets its own root: ``STUDIO_STORAGE_ROOT`` here, ``STORAGE_PATH`` in the
+service); only the layout under the root must match.
 """
 
 from __future__ import annotations
@@ -80,6 +86,8 @@ from typing import Any, Literal
 from evilflowers_books_digitalizer.studio.domain import QualityPolicy
 
 CONFIG_ENV = "STUDIO_CONFIG"
+#: overrides ``[studio] storage_root``: where this pod mounts the shared storage
+STORAGE_ROOT_ENV = "STUDIO_STORAGE_ROOT"
 _IDENT_OK = re.compile(r"[^A-Za-z0-9._-]+")
 
 type AutoPublish = Literal["never", "gate", "review"]
@@ -220,23 +228,43 @@ class StudioConfig:
             raise KeyError(f"unknown project {slug!r} (known: {', '.join(self.projects)})") from None
 
 
+STORAGE_PLACEHOLDER = "{storage_root}"
+
+
+@dataclass(frozen=True, slots=True)
+class _Paths:
+    """How a path value in the file becomes a path: ``{storage_root}`` first, then the file's dir."""
+
+    base: Path
+    storage_root: Path | None
+
+    def __call__(self, value: str | Path) -> Path:
+        text = str(value)
+        if STORAGE_PLACEHOLDER in text:
+            if self.storage_root is None:
+                raise ValueError(f"{text!r} uses {STORAGE_PLACEHOLDER} but no storage root is set "
+                                 f"([studio] storage_root or ${STORAGE_ROOT_ENV})")
+            text = text.replace(STORAGE_PLACEHOLDER, str(self.storage_root))
+        p = Path(text).expanduser()
+        return p if p.is_absolute() else (self.base / p)
+
+
 def _resolve(value: str | Path, base: Path) -> Path:
-    p = Path(value).expanduser()
-    return p if p.is_absolute() else (base / p)
+    return _Paths(base, None)(value)
 
 
-def _project(slug: str, raw: dict[str, Any], base: Path) -> ProjectConfig:
+def _project(slug: str, raw: dict[str, Any], resolve: _Paths) -> ProjectConfig:
     publish = PublishConfig(**{k: v for k, v in raw.get("publish", {}).items()
                                if k in PublishConfig.__dataclass_fields__},
                             options={k: v for k, v in raw.get("publish", {}).items()
                                      if k not in PublishConfig.__dataclass_fields__})
     metadata = dict(raw.get("metadata", {}))
     if metadata.get("excel_path"):
-        metadata["excel_path"] = str(_resolve(metadata["excel_path"], base))
+        metadata["excel_path"] = str(resolve(metadata["excel_path"]))
     return ProjectConfig(
         slug=slug,
         name=raw.get("name", slug),
-        scans_root=_resolve(raw["scans_root"], base),
+        scans_root=resolve(raw["scans_root"]),
         book_pattern=raw.get("book_pattern", "{collection}/{book}"),
         frames_glob=raw.get("frames_glob", "*.tif"),
         item_id=raw.get("item_id", "{collection}-{book}"),
@@ -305,16 +333,37 @@ def load_config(path: str | Path | None = None) -> StudioConfig:
         raw = tomllib.load(fh)
     base = cfg_path.absolute().parent
     studio = raw.get("studio", {})
-    return StudioConfig(
+    root_value = os.environ.get(STORAGE_ROOT_ENV) or studio.get("storage_root")
+    storage_root = _resolve(root_value, base) if root_value else None
+    resolve = _Paths(base, storage_root)
+    config = StudioConfig(
         database_url=os.environ.get("STUDIO_DATABASE_URL") or studio.get(
             "database_url", f"sqlite:///{_resolve('studio.db', base)}"),
         redis_url=os.environ.get("STUDIO_REDIS_URL") or studio.get("redis_url", "redis://127.0.0.1:6379/0"),
-        artifacts_root=_resolve(studio.get("artifacts_root", "../output/studio"), base),
-        cache_dir=_resolve(studio.get("cache_dir", "../.cache/studio"), base),
-        projects={slug: _project(slug, p, base) for slug, p in raw.get("projects", {}).items()},
+        artifacts_root=resolve(studio.get("artifacts_root", "../output/studio")),
+        cache_dir=resolve(studio.get("cache_dir", "../.cache/studio")),
+        projects={slug: _project(slug, p, resolve) for slug, p in raw.get("projects", {}).items()},
         config_path=cfg_path,
         orchestration=_orchestration(raw.get("orchestration", {})),
         scheduling=_scheduling(raw.get("scheduling", {})),
-        storage_root=(_resolve(studio["storage_root"], base) if studio.get("storage_root")
-                      else None),
+        storage_root=storage_root,
     )
+    _check_shared_storage(config)
+    return config
+
+
+def _check_shared_storage(config: StudioConfig) -> None:
+    """A service-backed stage exchanges paths relative to the storage root: fail at load time,
+    not on the first job, when the scans or the artifacts live outside it."""
+    if not any(r.backend == "service" for r in config.orchestration.routes.values()):
+        return
+    if config.storage_root is None:
+        raise ValueError("a service-backed stage needs a storage root "
+                         f"([studio] storage_root or ${STORAGE_ROOT_ENV})")
+    root = config.storage_root
+    outside = [str(p) for p in (config.artifacts_root,
+                                *(pc.scans_root for pc in config.projects.values()))
+               if not p.is_relative_to(root)]
+    if outside:
+        raise ValueError(f"service-backed stages need every scan and artifact path under the "
+                         f"storage root {root}; outside it: {', '.join(outside)}")

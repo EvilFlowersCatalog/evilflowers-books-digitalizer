@@ -41,6 +41,9 @@ configMapGenerator:
   - name: studio-env
     literals:
       - STUDIO_CONFIG=/etc/studio/studio.toml
+      # the shared storage root; overlays change it and include components/storage-root,
+      # which moves the raw-scans / digitized mounts under it
+      - STUDIO_STORAGE_ROOT=/data
       - DEPLOYMENT_ENVIRONMENT=production
       - EVILFLOWERS_LOG_FORMAT=json
       - EVILFLOWERS_LOG_LEVEL=INFO

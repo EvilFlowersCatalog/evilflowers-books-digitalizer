@@ -21,11 +21,16 @@ function Kpis() {
   const { project } = useSession();
   const c = project?.counts ?? {};
   const total = Object.values(c).reduce((n, v) => n + (v ?? 0), 0);
+  // without a publish target, `approved` is the end state: count it as done, not pending
+  const finished: [string, number, string] =
+    project?.publishes === false
+      ? ["Done", (c.approved ?? 0) + (c.ok ?? 0) + (c.published ?? 0), "var(--st-approved)"]
+      : ["Published", c.published ?? 0, "var(--st-published)"];
   const items: [string, number, string?][] = [
     ["Books", total],
     ["In review", c.review ?? 0, "var(--st-review)"],
     ["Running", (c.running ?? 0) + (c.queued ?? 0), "var(--st-running)"],
-    ["Published", c.published ?? 0, "var(--st-published)"],
+    finished,
     ["Errors", c.error ?? 0, "var(--st-error)"],
   ];
   return (

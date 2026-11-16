@@ -77,8 +77,14 @@ which lives outside this directory. The Ansible role drops the rendered file int
 
 The infrastructure side is tracked in the knowledge repository (knowledge#66, #67):
 
-1. **NFS on gateway**: `raw-scans` (ro) and `digitized` (rw), mounted at `/data`
-   (`storage_root`). The server address is set once, in `base/nfs-server.yaml`.
+1. **NFS on gateway**: `raw-scans` (ro) and `digitized` (rw). The server address is set
+   once, in `base/nfs-server.yaml`. Both are mounted under the **storage root**, which is
+   also set once: `STUDIO_STORAGE_ROOT` in the overlay's `studio-env` (dev: `/data`).
+   `components/storage-root` moves the mounts to `<root>/raw-scans` and `<root>/digitized`,
+   and the app derives its `{storage_root}` paths from the same variable.
+   Service jobs carry paths relative to the root. A service may therefore mount the
+   storage at a different absolute path (its own `STORAGE_PATH`), as long as the layout
+   below the root is the same.
 2. **Workload label** `elvira.stuba.sk/workload=apps` on the nodes.
 3. **Postgres/Redis** in namespace `shared`, with:
    * the `digitalizer` database and role;
@@ -90,7 +96,14 @@ The infrastructure side is tracked in the knowledge repository (knowledge#66, #6
    (`base/secret.example.yaml`).
 6. **Shared vlm**: `http://vlm.shared.svc.cluster.local` (evilflowers-vlm-service).
 
-Publication is optional. A project without a `[publish]` target never publishes.
+**Publication is optional.** A project without a `[publish]` target never publishes: an
+approved book is complete, with its files (PDF, PDF/A-2b, EPUB, IA item) on the digitized
+export, and the portal counts it as done.
+
+With a target, publishing uploads the access PDF to the catalog. The upload starts the
+**catalog's own pipeline** on that PDF: analyzer, then text, image and equation extraction,
+then embeddings. It runs on the catalog's workers (Redis db 7) and counts against the
+backpressure that holds the digitalizer's bulk work.
 
 ## Verify (VPN on)
 

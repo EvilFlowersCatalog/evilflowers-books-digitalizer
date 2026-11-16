@@ -101,6 +101,7 @@ spec:
                 service.namespace=elvira,deployment.environment.name=$(DEPLOYMENT_ENVIRONMENT),service.instance.id=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),k8s.node.name=$(NODE_NAME)
           volumeMounts:
             - { name: config, mountPath: /etc/studio, readOnly: true }
+            # <STUDIO_STORAGE_ROOT>/…: rewritten by components/storage-root in the overlays
             - { name: raw-scans, mountPath: /data/raw-scans, readOnly: true }
             - { name: digitized, mountPath: /data/digitized }
             - { name: scratch, mountPath: /scratch }

@@ -1,0 +1,32 @@
+# The shared storage root, set once per overlay: STUDIO_STORAGE_ROOT in ConfigMap studio-env.
+#
+# The app reads it ($STUDIO_STORAGE_ROOT overrides [studio] storage_root, and the config's
+# {storage_root} paths follow), and this component rewrites the pods' mount paths from it:
+#   <root>/raw-scans   (PVC raw-scans, ro)
+#   <root>/digitized   (PVC digitized, rw)
+# so the mounts and the config can never disagree.
+#
+# Include it in every overlay; the overlay's studio-env merge sets the value:
+#   components: [../../components/storage-root]
+#
+# Service jobs carry paths relative to the root, so a service may mount the same storage at
+# another absolute path (its STORAGE_PATH); only the layout below the root must match.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+replacements:
+  - source: { kind: ConfigMap, name: studio-env, fieldPath: data.STUDIO_STORAGE_ROOT }
+    targets:
+      # the delimiter is the mount's own suffix: everything before it is the root
+      - select:
+          kind: Deployment
+          labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)
+        fieldPaths:
+          - spec.template.spec.containers.[name=studio].volumeMounts.[name=raw-scans].mountPath
+        options: { delimiter: /raw-scans, index: 0 }
+      - select:
+          kind: Deployment
+          labelSelector: app.kubernetes.io/component in (api,orchestrator,worker)
+        fieldPaths:
+          - spec.template.spec.containers.[name=studio].volumeMounts.[name=digitized].mountPath
+        options: { delimiter: /digitized, index: 0 }

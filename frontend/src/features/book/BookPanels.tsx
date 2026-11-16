@@ -11,6 +11,7 @@ import type { BookDetail, PageOut, ReviewDecision, RunOut } from "../../api/type
 import { Badge, Button, buttonClass, Empty, ErrorNote, Panel, ProgressBar, RunStatusBadge } from "../../components/ui";
 import { confirmApproval } from "../../lib/approval";
 import { bytes, clock, relativeTime, score } from "../../lib/format";
+import { useSession } from "../../lib/session";
 import { NOT_IN_ACCESS } from "../../api/types";
 import s from "./book.module.css";
 import sc from "../screen.module.css";
@@ -166,10 +167,17 @@ export function RunsPanel({ runs }: { runs: RunOut[] }) {
 }
 
 export function PublicationsPanel({ detail }: { detail: BookDetail }) {
+  const { project } = useSession();
   return (
     <Panel title="Publication history">
       {detail.publications.length === 0 ? (
-        <span className="faint">Not published yet.</span>
+        project?.publishes === false ? (
+          <span className="faint">
+            This project has no publish target: an approved book is complete, with its files on the digitized export.
+          </span>
+        ) : (
+          <span className="faint">Not published yet.</span>
+        )
       ) : (
         detail.publications
           .slice()

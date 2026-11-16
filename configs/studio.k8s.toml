@@ -4,10 +4,11 @@
 # ($STUDIO_CONFIG). Every path is ABSOLUTE: relative ones would resolve against
 # /etc/studio, a read-only ConfigMap mount.
 #
-# Pod mounts (deploy/k8s/base):
-#   /data/raw-scans   NFS gateway:/mnt/digital-library/raw-scans   read-only (export ro)
-#   /data/digitized   NFS gateway:/mnt/digital-library/digitized   rw
-#   /scratch          local-path PVC on the workload node          rw (cleaned TIFFs, tiles cache)
+# Pod mounts (deploy/k8s), under the storage root $STUDIO_STORAGE_ROOT (set once per overlay,
+# default /data; kustomize derives the mount paths from it):
+#   {storage_root}/raw-scans   NFS gateway:/mnt/digital-library/raw-scans   read-only (export ro)
+#   {storage_root}/digitized   NFS gateway:/mnt/digital-library/digitized   rw
+#   /scratch                   local-path PVC on the workload node          rw (cleaned TIFFs, tiles cache)
 #
 # Secrets come from the environment, never from this file:
 #   STUDIO_DATABASE_URL  postgresql+psycopg://digitalizer:…@postgres.shared.svc.cluster.local:5432/digitalizer
@@ -18,13 +19,14 @@
 # Only used when the env vars above are missing (e.g. a local `kubectl run` debug pod).
 database_url = "postgresql+psycopg://digitalizer@postgres.shared.svc.cluster.local:5432/digitalizer"
 redis_url = "redis://redis.shared.svc.cluster.local:6379/8"
-# IA item layout: /data/digitized/studio/<project>/<item_id>/<item_id>.pdf …
-# Its own subtree, so it never mixes with the legacy batch's digitized/{dev,prod}.
-artifacts_root = "/data/digitized/studio"
-cache_dir = "/scratch/cache"
-# The services' STORAGE_PATH: /data holds raw-scans/ and digitized/ (paths in service jobs
-# are relative to it). Needed only once a stage runs as a service ([orchestration.stages]).
+# The shared storage root: it holds raw-scans/ and digitized/. Service jobs carry paths
+# relative to it, so a service may mount the same storage elsewhere (its own STORAGE_PATH);
+# only the layout below the root must match. $STUDIO_STORAGE_ROOT (studio-env) overrides it.
 storage_root = "/data"
+# IA item layout: {storage_root}/digitized/studio/<project>/<item_id>/<item_id>.pdf …
+# Its own subtree, so it never mixes with the legacy batch's digitized/{dev,prod}.
+artifacts_root = "{storage_root}/digitized/studio"
+cache_dir = "/scratch/cache"
 
 [orchestration]
 budget = 2                             # re-sends of a lost job before its run fails
@@ -64,7 +66,7 @@ max_depth = 20
 
 [projects.stu]
 name = "STU — Slovak University of Technology"
-scans_root = "/data/raw-scans"
+scans_root = "{storage_root}/raw-scans"
 # Real tree (Cookbooks/Digitalizer): raw-scans/<faculty>/<FACULTY>-skeny/<book>/stream_pages_tif/*.tif
 book_pattern = "{collection}/*-skeny/{book}"
 frames_glob = "stream_pages_tif/*.tif"
