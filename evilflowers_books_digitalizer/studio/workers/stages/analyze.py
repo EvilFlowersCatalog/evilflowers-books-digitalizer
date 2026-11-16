@@ -22,7 +22,7 @@ from pathlib import Path
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from evilflowers_books_digitalizer.db.models import Note, Region
+from evilflowers_books_digitalizer.db.models import Note, Page, Region, Run
 from evilflowers_books_digitalizer.studio.domain import (
     BBox,
     FusedRegion,
@@ -37,7 +37,7 @@ from evilflowers_books_digitalizer.studio.domain import (
 from evilflowers_books_digitalizer.studio.events import EventType
 from evilflowers_books_digitalizer.studio.ports import OcrPage
 from evilflowers_books_digitalizer.studio.workers import runs
-from evilflowers_books_digitalizer.studio.workers.context import WorkerContext
+from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
 from evilflowers_books_digitalizer.studio.workers.stages import common
 from evilflowers_books_digitalizer.studio.workers.stages.clean import refresh_previews
 
@@ -68,6 +68,33 @@ class AnalyzeJob:
                 if d.status == RegionStatus.CONFIRMED and d.action == action]
 
 
+def decided_of(page: Page) -> list[Decided]:
+    """The operator's decisions on a page (they survive re-runs and win every fusion)."""
+    return [Decided(common.region_kind(r), common.region_bbox(r), RegionStatus(r.status),
+                    RegionAction(r.action)) for r in page.regions if r.status in DECIDED]
+
+
+def _confirmed(page: Page, *actions: RegionAction) -> list[BBox]:
+    return [d.bbox for d in decided_of(page)
+            if d.status == RegionStatus.CONFIRMED and d.action in actions]
+
+
+def removed_boxes(page: Page) -> list[BBox]:
+    """Confirmed ``remove`` boxes: erased from the page image itself."""
+    return _confirmed(page, RegionAction.REMOVE)
+
+
+def ocr_mask(page: Page) -> list[BBox]:
+    """What OCR must not read: removed areas and areas kept as images."""
+    return _confirmed(page, RegionAction.REMOVE, RegionAction.AS_IMAGE)
+
+
+def ocr_language(ctx: WorkerContext, project: str, page: Page) -> str:
+    override = common.override(page)
+    return (override.ocr_language if override and override.ocr_language
+            else ctx.project(project).ocr_language)
+
+
 def _job(ctx: WorkerContext, run_id: int, page_index: int) -> AnalyzeJob | None:
     with ctx.uow() as uow:
         run = runs.load_run(uow, run_id)
@@ -77,13 +104,8 @@ def _job(ctx: WorkerContext, run_id: int, page_index: int) -> AnalyzeJob | None:
         if page is None or page.status != PageStatus.CLEANED or not page.clean_path:
             return None             # not cleaned, or already analyzed in this run
         project = runs.project_of(book)
-        override = common.override(page)
-        decided = [Decided(common.region_kind(r), common.region_bbox(r), RegionStatus(r.status),
-                           RegionAction(r.action)) for r in page.regions if r.status in DECIDED]
         return AnalyzeJob(project, common.item_id(book), page.index, Path(page.clean_path),
-                          (override.ocr_language if override and override.ocr_language
-                           else ctx.project(project).ocr_language),
-                          page.dpi or 300, decided)
+                          ocr_language(ctx, project, page), page.dpi or 300, decided_of(page))
 
 
 def _ocr_input(ctx: WorkerContext, job: AnalyzeJob) -> Path:
@@ -99,13 +121,18 @@ def _ocr_input(ctx: WorkerContext, job: AnalyzeJob) -> Path:
     return ops.erase(job.image, pictures, ocr_copy)
 
 
+def fuse_with(decided: list[Decided], proposals: list[RegionProposal]) -> list[FusedRegion]:
+    """Detector proposals fused with the operator's decisions; only the machine rows return
+    (the operator's own rows stay as they are)."""
+    operator = [RegionProposal(d.kind, d.bbox, RegionSource.OPERATOR) for d in decided]
+    return [f for f in fuse(operator + proposals) if f.source != RegionSource.OPERATOR]
+
+
 def detect(ctx: WorkerContext, job: AnalyzeJob) -> tuple[OcrPage, list[FusedRegion]]:
     adapters = ctx.adapters(job.project)
     ocr = adapters.ocr.recognize(_ocr_input(ctx, job), language=job.language, dpi=job.dpi)
     proposals = [p for d in adapters.detectors for p in d.detect(job.image, ocr=ocr)]
-    operator = [RegionProposal(d.kind, d.bbox, RegionSource.OPERATOR) for d in job.decided]
-    fused = fuse(operator + proposals)
-    return ocr, [f for f in fused if f.source != RegionSource.OPERATOR]
+    return ocr, fuse_with(job.decided, proposals)
 
 
 def _region(f: FusedRegion) -> Region:
@@ -131,6 +158,22 @@ def _replace_undecided(session: Session, page_pk: int) -> None:
     session.execute(delete(Region).where(Region.id.in_(stale)))
 
 
+def store(uow: Uow, run: Run, page: Page, *, text: str, mean_conf: float, hocr_path: Path,
+          fused: list[FusedRegion]) -> None:
+    """One page's analysis into its rows (in-process and service path alike)."""
+    _replace_undecided(uow.session, page.id)
+    uow.session.expire(page, ["regions"])
+    page.regions.extend(_region(f) for f in fused)
+    disputed = sum(r.status == RegionStatus.DISPUTED for r in page.regions)
+    page.ocr_text, page.ocr_conf, page.hocr_path = text, mean_conf, str(hocr_path)
+    page.status = PageStatus.DISPUTED if disputed else PageStatus.ANALYZED
+    project = runs.project_of(run.book)
+    uow.emit(EventType.REGIONS_UPDATED, project, page.book_pk, page_id=page.id,
+             index=page.index, disputed=disputed)
+    uow.emit(EventType.PAGE_UPDATED, project, page.book_pk, page_id=page.id,
+             index=page.index, version=page.version, status=page.status)
+
+
 def analyze(ctx: WorkerContext, run_id: int, page_index: int) -> None:
     job = _job(ctx, run_id, page_index)
     if job is None:
@@ -142,15 +185,6 @@ def analyze(ctx: WorkerContext, run_id: int, page_index: int) -> None:
     with ctx.uow() as uow:
         run = runs.load_run(uow, run_id)
         page = next(p for p in run.book.pages if p.index == page_index)
-        _replace_undecided(uow.session, page.id)
-        uow.session.expire(page, ["regions"])
-        page.regions.extend(_region(f) for f in fused)
-        disputed = sum(r.status == RegionStatus.DISPUTED for r in page.regions)
-        page.ocr_text, page.ocr_conf, page.hocr_path = ocr.text, ocr.mean_conf, str(hocr_path)
-        page.status = PageStatus.DISPUTED if disputed else PageStatus.ANALYZED
-        project = runs.project_of(run.book)
-        uow.emit(EventType.REGIONS_UPDATED, project, page.book_pk, page_id=page.id,
-                 index=page.index, disputed=disputed)
-        uow.emit(EventType.PAGE_UPDATED, project, page.book_pk, page_id=page.id,
-                 index=page.index, version=page.version, status=page.status)
+        store(uow, run, page, text=ocr.text, mean_conf=ocr.mean_conf, hocr_path=hocr_path,
+              fused=fused)
         runs.advance(uow, run)

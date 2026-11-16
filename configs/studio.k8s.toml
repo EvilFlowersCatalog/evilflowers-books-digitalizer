@@ -39,6 +39,38 @@ stale_after_seconds = 600              # a local job silent this long: its worke
 # task = "evilflowers_scan.clean"
 # queue = "evilflowers_scan.standalone"
 # interactive_queue = "evilflowers_scan.standalone.interactive"
+# batch = 32                           # leaves per bulk job (the service default)
+# interactive_batch = 1                # an operator re-run: one job per page
+# deadline_seconds = 3600              # no outcome by then: reconcile re-sends (new token)
+#
+# Analyze runs as two services per leaf batch, fused here (never one in-process part and one
+# service part); confirmed "remove" boxes then go to scan-service (evilflowers_scan.erase,
+# the default of the optional [….analyze.erase]). Docling only: no stamp/sticker proposals.
+# [orchestration.stages.analyze]
+# backend = "service"
+# [orchestration.stages.analyze.hocr]
+# task = "evilflowers_ocr_worker.standalone.hocr"
+# queue = "evilflowers_ocr_worker.standalone"
+# interactive_queue = "evilflowers_ocr_worker.standalone.interactive"
+# [orchestration.stages.analyze.layout]
+# task = "evilflowers_analyzer.standalone.layout"
+# queue = "evilflowers_analyzer.standalone"
+# interactive_queue = "evilflowers_analyzer.standalone.interactive"
+#
+# Formulas: only leaf batches with regions to re-read are sent; answers are judged here.
+# [orchestration.stages.formulas]
+# backend = "service"
+# task = "evilflowers_equation.standalone.formulas"
+# queue = "evilflowers_equation.standalone"
+# interactive_queue = "evilflowers_equation.standalone.interactive"
+# deadline_seconds = 14400               # a page of formulas can take minutes on CPU
+#
+# Render: prepare here (metadata, text documents, request), media on render-service.
+# [orchestration.stages.render]
+# backend = "service"
+# task = "evilflowers_render.book"
+# queue = "evilflowers_render.standalone"
+# deadline_seconds = 28800               # a long book; render is an off-peak stage anyway
 
 [scheduling]
 # Book digitalization is background work: full width at night and at weekends, narrow during

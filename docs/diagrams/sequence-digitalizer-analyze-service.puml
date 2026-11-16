@@ -1,0 +1,57 @@
+@startuml sequence-digitalizer-analyze-service
+!include elvira.iuml
+' =============================================================================
+' What: the analyze stage on services: each leaf batch is two parallel jobs,
+'       hOCR on ocr-service and layout on analyzer-service, both reading the
+'       cleaned page through a mask (the operator's confirmed boxes) and never
+'       changing it; when the second half of a batch is applied the
+'       orchestrator fuses the two with the operator's decisions; leaves with
+'       confirmed "remove" boxes then get an erase job on scan-service, so the
+'       page image itself changes only through a new attempt dir.
+' Kind: UML sequence diagram, one batch of a full run's analyze stage, as
+'       implemented on the orchestrator side; the three service tasks are
+'       proposed (evilflowers-ocr-service#7, evilflowers-analyzer-service#8,
+'       evilflowers-scan-service#1). Omitted: pump admission (as in
+'       sequence-digitalizer-clean-service), SSE, reconcile.
+' Source: this repo studio/orchestration/{ledger,contract,appliers}.py,
+'         studio/workers/stages/analyze.py, studio/config.py (StageRoute.parts)
+'         (2026-11-16); knowledge#66 (Redis db 8, proposed, 2026-11-16).
+' =============================================================================
+
+title Analyze stage on services: hOCR ∥ layout, fused per batch (orchestrator side implemented, 2026-11-16)
+
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+queue "Redis db 8" as redis
+participant "ocr-service\n…standalone.hocr" as ocr <<proposed>>
+participant "analyzer-service\n…standalone.layout" as lay <<proposed>>
+participant "scan-service\nevilflowers_scan.erase" as scan <<proposed>>
+collections "Shared storage\n{storage_root}" as fs
+
+orch -> redis : batch k, part hocr: leaves + mask\n(remove ∪ as_image boxes), language, dpi
+orch -> redis : batch k, part layout: leaves + mask\n(remove boxes)
+par
+  redis -> ocr : deliver
+  ocr -> fs : hOCR per leaf into its attempt dir,\noutcome (text, mean_conf) last
+  ocr -> redis : link: job_done
+else
+  redis -> lay : deliver
+  lay -> fs : regions.json (fractions, kinds)\ninto its attempt dir, outcome last
+  lay -> redis : link: job_done
+end
+redis -[$accent_msg()]> orch : <b>job_done (first half)</b>
+orch -> orch : check outcome, job applied;\nwait for the other half
+redis -[$accent_msg()]> orch : <b>job_done (second half)</b>
+orch -> fs : read both outcomes
+orch -> orch : per leaf: regions -> page pixels, fuse with\nthe operator's decisions, store regions,\nOCR text, hocr_path (into the hOCR attempt)
+opt a leaf has confirmed "remove" boxes
+  orch -> redis : batch k, part erase: image + boxes
+  redis -> scan : deliver
+  scan -> fs : erased page, WebP, DZI into its\nattempt dir, outcome last
+  scan -> redis : link: job_done
+  redis -> orch : job_done: page -> erased files\n(pointer switch, version + 1)
+end
+orch -> orch : every analyze job applied -> plan formulas
+
+caption The services only read the cleaned page; a mask is applied to their private copy. The layout attempt dir is deleted once\nfused; the hOCR dir stays while a page points into it. Stamp and sticker proposals (the in-process heuristic) are not produced on this path.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-analyze-service.puml
+@enduml

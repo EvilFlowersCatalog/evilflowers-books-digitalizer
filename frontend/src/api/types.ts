@@ -54,7 +54,7 @@ export const REGION_KINDS = [
 ] as const;
 export type RegionKind = (typeof REGION_KINDS)[number];
 
-export type RegionSource = "heuristic" | "yolo" | "vlm" | "operator";
+export type RegionSource = "heuristic" | "yolo" | "vlm" | "docling" | "operator";
 export type RegionStatus = "proposed" | "disputed" | "confirmed" | "rejected";
 export const REGION_ACTIONS = ["keep", "remove", "as_image", "reocr"] as const;
 export type RegionAction = (typeof REGION_ACTIONS)[number];

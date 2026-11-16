@@ -35,8 +35,10 @@ class WorkPlan:
     chunk: int                      # leaves per clean task
     interactive: bool
 
-    def chunks(self) -> list[list[int]]:
-        return [list(self.pages[i:i + self.chunk]) for i in range(0, len(self.pages), self.chunk)]
+    def chunks(self, size: int | None = None) -> list[list[int]]:
+        """The leaves in batches of ``size`` (default: the project's chunk size)."""
+        n = max(1, size or self.chunk)
+        return [list(self.pages[i:i + n]) for i in range(0, len(self.pages), n)]
 
 
 @dataclass(frozen=True, slots=True)

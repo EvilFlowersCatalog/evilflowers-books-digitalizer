@@ -220,6 +220,13 @@ def render(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
                   lambda ctx, job: render_stage.render(ctx, job.run_id))
 
 
+@celery.task(name="digitalizer.local.render_prepare", bind=True, max_retries=MAX_RETRIES)
+def render_prepare(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
+    """Render on a service, step 1 (in-process): metadata, text documents, the request."""
+    return _local(self, job_id, token,
+                  lambda ctx, job: render_stage.prepare(ctx, job.run_id))
+
+
 @celery.task(name="digitalizer.local.gate", bind=True, max_retries=MAX_RETRIES)
 def gate(self: Any, job_id: int, token: str, **_: Any) -> dict[str, Any]:
     return _local(self, job_id, token, lambda ctx, job: gate_stage.gate(ctx, job.run_id))

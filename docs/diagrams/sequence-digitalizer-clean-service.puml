@@ -1,0 +1,53 @@
+@startuml sequence-digitalizer-clean-service
+!include elvira.iuml
+' =============================================================================
+' What: the clean stage as a service: the ledger plans leaf batches (32 per
+'       bulk job, 1 per interactive job), the pump admits them within the
+'       current capacity, scan-service writes into the attempt's own directory
+'       and its outcome file last, and job_done promotes the result by
+'       pointing the page rows at those files; a superseded attempt's
+'       directory is deleted after the commit, once no page points into it.
+' Kind: UML sequence diagram, one scenario (a full run's clean stage, one
+'       batch shown), as implemented on the orchestrator side; scan-service is
+'       proposed (evilflowers-scan-service#1). Omitted: SSE, telemetry headers.
+' Source: this repo studio/orchestration/{ledger,contract,appliers}.py,
+'         studio/config.py (StageRoute.batch / interactive_batch),
+'         configs/studio.k8s.toml [orchestration.stages.clean] (2026-11-16);
+'         evilflowers-scan-service#1 (task contract); knowledge#66 (Redis db 8
+'         for the digitalizer, proposed, 2026-11-16); Celery 5.6 calling.html
+'         (link / link_error).
+' =============================================================================
+
+title Clean stage on evilflowers-scan-service (orchestrator side implemented, 2026-11-16)
+
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+database "postgresql18\ndb digitalizer" as pg
+queue "Redis db 8" as redis
+participant "scan-service\nevilflowers_scan.clean" as scan <<proposed>>
+collections "Shared storage\n{storage_root}" as fs
+
+orch -> pg : plan clean jobs: leaves in batches\n(bulk 32 · interactive 1), status planned
+loop pump (beat 15 s and after every change)
+  orch -> pg : admit within capacity (lane, queue cap,\npeak / contended / paused), mint token
+  orch -[$accent_msg()]> redis : <b>send_task evilflowers_scan.clean</b>\n<b>run_id · job · token · output_dir · outcome</b>\n<b>leaves (frame, crop, rotation, override)</b>\n<b>link=job_done · link_error=job_failed</b>
+end
+redis -> scan : deliver (acks_late)
+scan -> fs : read frames (raw-scans, ro)
+scan -> fs : cleaned leaves, WebP, DZI into\n<item>_studio/jobs/<job>-a<attempt>/
+scan -> fs : outcome.json **last**
+scan -> redis : link: digitalizer.job_done(job_id, task_id)
+redis -[$accent_msg()]> orch : <b>job_done</b>
+orch -> fs : read outcome: run_id + token must match,\nevery path inside the storage root
+orch -> pg : pages -> files in the attempt dir (promote),\njob applied; last batch -> plan analyze
+orch -> fs : after commit: delete superseded attempt\ndirs no page points into
+
+alt the service raised
+  scan -> redis : link_error: digitalizer.job_failed
+  redis -> orch : job failed, run failed, siblings revoked
+else no callback (worker killed, lost message)
+  orch -> fs : reconcile (60 s): outcome file present?\nyes -> settle; past deadline -> re-send, new token
+end
+
+caption The service never touches the database or the portal; the ledger decides whether an attempt counts. A re-run that\nsupersedes a page leaves the old attempt dir in place until the new one is applied, so the SPA never shows a missing page.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-clean-service.puml
+@enduml

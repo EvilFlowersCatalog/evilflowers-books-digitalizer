@@ -21,25 +21,32 @@ transaction-scoped advisory lock on PostgreSQL, so two pumps never double-admit.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import shutil
 import uuid
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy import select, text
 
-from evilflowers_books_digitalizer.db.models import Job, Run, utcnow
-from evilflowers_books_digitalizer.studio.config import PORTAL_QUEUE, StageRoute
+from evilflowers_books_digitalizer.db.models import Book, Job, Run, utcnow
+from evilflowers_books_digitalizer.studio.config import (
+    CHAINED_STAGES,
+    PORTAL_QUEUE,
+    SPLIT_STAGES,
+    StageRoute,
+)
 from evilflowers_books_digitalizer.studio.domain import JobStatus, Lane, RunStatus
 from evilflowers_books_digitalizer.studio.orchestration import contract
 from evilflowers_books_digitalizer.studio.orchestration.scheduling import Admission, Capacity
 from evilflowers_books_digitalizer.studio.workers import runs
 from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
-from evilflowers_books_digitalizer.studio.workers.stages import common
+from evilflowers_books_digitalizer.studio.workers.stages import analyze, common, formulas, render
 from evilflowers_books_digitalizer.studio.workers.stages.orchestrate import (
     WorkPlan,
     blocked_by,
@@ -51,6 +58,8 @@ logger = logging.getLogger(__name__)
 
 #: stages that fan out one job per leaf chunk / per leaf; the rest are one job per run
 CHUNKED, PER_PAGE = "clean", "analyze"
+#: stages that fan out per leaf batch when a service runs them (in-process: one job per run)
+SERVICE_CHUNKED = ("clean", "formulas")
 OPEN = [str(s) for s in JobStatus if s.open]
 IN_FLIGHT = [str(JobStatus.DISPATCHED), str(JobStatus.STARTED)]
 ACTIVE_RUNS = [str(RunStatus.QUEUED), str(RunStatus.RUNNING)]
@@ -86,38 +95,76 @@ class Settled:
     run_finished: bool = False
     follow_ups: list[int] = field(default_factory=list)
     revoke: list[str] = field(default_factory=list)
+    #: after the commit: attempt dirs (relative) whose result will never count
+    discard: list[str] = field(default_factory=list)
+    #: after the commit: attempt dirs the applied pages used to point into (deleted when
+    #: no page of ``book_pk`` points into them any more)
+    superseded: list[Path] = field(default_factory=list)
+    book_pk: int | None = None
 
 
 # ---------------------------------------------------------------- planning
-def _units(stage: str, plan: WorkPlan) -> list[dict[str, Any]]:
-    if stage == CHUNKED:
-        return [{"pages": chunk} for chunk in plan.chunks()]
+def _units(stage: str, plan: WorkPlan, route: StageRoute, batch: int
+           ) -> list[tuple[int, dict[str, Any]]]:
+    """``(seq, params)`` per job. A split stage sends every batch to each of its parts,
+    under one ``seq``: the batch's jobs are fused once all of them are applied."""
+    if route.parts and stage in CHAINED_STAGES:
+        return [(0, {"part": CHAINED_STAGES[stage][0]})]   # the rest follow one by one
+    if route.parts:
+        return [(seq, {"pages": chunk, "part": name})
+                for seq, chunk in enumerate(plan.chunks(batch))
+                for name in SPLIT_STAGES[stage]]
+    if stage == CHUNKED or (route.backend == "service" and stage in SERVICE_CHUNKED):
+        return list(enumerate({"pages": chunk} for chunk in plan.chunks(batch)))
     if stage == PER_PAGE:
-        return [{"page": index} for index in plan.pages]
-    return [{}]
+        return list(enumerate({"page": index} for index in plan.pages))
+    return [(0, {})]
+
+
+def add_job(uow: Uow, ctx: WorkerContext, run: Run, stage: str, seq: int,
+            params: dict[str, Any]) -> Job:
+    """A planned job of ``stage`` (``params["part"]`` picks the part of a split stage)."""
+    route = ctx.config.orchestration.route(stage)
+    interactive = bool(run.interactive)
+    target = route.part(params["part"]) if params.get("part") else route
+    job = Job(run_pk=run.id, stage=stage, seq=seq,
+              lane=str(Lane.INTERACTIVE if interactive else Lane.BULK),
+              backend=target.backend, task=target.task,
+              queue=target.interactive_queue if interactive else target.queue,
+              params=params, status=str(JobStatus.PLANNED),
+              budget=ctx.config.orchestration.budget)
+    uow.session.add(job)
+    run.jobs.append(job)
+    return job
+
+
+def _with_work(run: Run, stage: str, plan: WorkPlan) -> WorkPlan:
+    """A service stage gets only the leaves that have work for it (formulas: leaves with
+    regions to re-read); a stage left with none is skipped."""
+    if stage != "formulas":
+        return plan
+    wanted = {p.index for p in run.book.pages if formulas.to_read(p)}
+    return replace(plan, pages=tuple(i for i in plan.pages if i in wanted))
 
 
 def _plan_from(uow: Uow, ctx: WorkerContext, run: Run, start: int) -> bool:
     """Plan the first stage at or after ``start`` that has work; False = nothing left."""
-    plan = work_plan(ctx, run)
-    for stage in plan.stages[start:]:
-        units = _units(stage, plan)
+    base = work_plan(ctx, run)
+    interactive = bool(run.interactive)
+    for stage in base.stages[start:]:
+        route = ctx.config.orchestration.route(stage)
+        plan = _with_work(run, stage, base) if route.backend == "service" else base
+        units = _units(stage, plan, route, route.batch_size(interactive=interactive,
+                                                            project_default=plan.chunk))
         if not units:
             continue
-        route = ctx.config.orchestration.route(stage)
-        interactive = bool(run.interactive)
-        lane = Lane.INTERACTIVE if interactive else Lane.BULK
-        for seq, params in enumerate(units):
-            uow.session.add(Job(run_pk=run.id, stage=stage, seq=seq, lane=str(lane),
-                                backend=route.backend, task=route.task,
-                                queue=route.interactive_queue if interactive else route.queue,
-                                params=params, status=str(JobStatus.PLANNED),
-                                budget=ctx.config.orchestration.budget))
+        for seq, params in units:
+            add_job(uow, ctx, run, stage, seq, params)
         if route.backend == "service":
-            runs.enter_stage(uow, run, stage, len(plan.pages) if stage in (CHUNKED, PER_PAGE)
-                             else 1)
-        runs.log(uow, run, f"stage {stage}: {len(units)} job(s) on {route.backend} "
-                           f"{route.task}")
+            per_leaf = stage in (CHUNKED, PER_PAGE, *SERVICE_CHUNKED)
+            runs.enter_stage(uow, run, stage, len(plan.pages) if per_leaf else 1)
+        tasks = ", ".join(sorted({p.task for p in route.parts.values()})) or route.task
+        runs.log(uow, run, f"stage {stage}: {len(units)} job(s) on {route.backend} {tasks}")
         return True
     return False
 
@@ -166,15 +213,35 @@ def _kwargs(ctx: WorkerContext, job: Job, run: Run, token: str) -> dict[str, Any
     if job.backend == "local":
         return {"job_id": job.id, "token": token, **(job.params or {})}
     storage = contract.Storage(ctx.config.storage_root)
-    item_dir = ctx.adapters(runs.project_of(run.book)).artifacts.item_dir(common.item_id(run.book))
-    if job.stage == CHUNKED:
-        wanted = set(job.params.get("pages") or [])
-        inputs = contract.clean_inputs([p for p in run.book.pages if p.index in wanted], storage)
-    else:
-        raise contract.PortError(f"stage {job.stage} has no service contract yet")
+    project = runs.project_of(run.book)
+    item_dir = ctx.adapters(project).artifacts.item_dir(common.item_id(run.book))
+    wanted = set(job.params.get("pages") or [])
+    pages = [p for p in run.book.pages if p.index in wanted]
+    match contract.kind(job):
+        case "clean":
+            inputs = contract.clean_inputs(pages, storage)
+        case "analyze.hocr":
+            inputs = contract.hocr_inputs(
+                pages, storage, language=lambda p: analyze.ocr_language(ctx, project, p),
+                mask=analyze.ocr_mask)
+        case "analyze.layout":
+            inputs = contract.layout_inputs(pages, storage, mask=analyze.removed_boxes)
+        case "analyze.erase":
+            inputs = contract.erase_inputs(pages, storage, boxes=analyze.removed_boxes)
+        case "formulas":
+            inputs = contract.formulas_inputs(pages, storage, regions=formulas.to_read,
+                                              task=formulas.task_of)
+        case "render.book":
+            inputs = {"request": storage.rel(render.request_path(Path(item_dir), run.id))}
+        case other:
+            raise contract.PortError(f"{other} has no service contract yet")
     message = contract.message(job, run, token, storage, Path(item_dir), inputs)
     job.params = {**(job.params or {}), "output_dir": message["output_dir"],
                   "outcome": message["outcome"]}
+    if "regions" in inputs:             # what was asked: the answers are applied to these only
+        job.params["regions"] = [r["key"] for r in inputs["regions"]]
+    if "request" in inputs:
+        job.params["request"] = inputs["request"]
     return message
 
 
@@ -321,16 +388,32 @@ def record_error(ctx: WorkerContext, job_id: int, token: str, exc: BaseException
 
 
 # ---------------------------------------------------------------- settling results
-type Applier = Callable[[Uow, WorkerContext, Run, Job, contract.Outcome], None]
+#: applies an outcome to the rows; returns the attempt dirs the rows pointed into before
+type Applier = Callable[[Uow, WorkerContext, Run, Job, contract.Outcome], list[Path]]
 
 #: how a service outcome lands in the rows, per stage (studio.orchestration.appliers)
 APPLIERS: dict[str, Applier] = {}
 
 
+def _next_part(uow: Uow, ctx: WorkerContext, run: Run, stage: str, same: list[Job]) -> bool:
+    """A chained stage: plan its next part once the previous one is applied (True = planned)."""
+    chain = CHAINED_STAGES.get(stage)
+    if not chain or not ctx.config.orchestration.route(stage).parts:
+        return False
+    done = {contract.part(j) for j in same}
+    upcoming = [p for p in chain if p not in done]
+    if not upcoming:
+        return False
+    add_job(uow, ctx, run, stage, 0, {"part": upcoming[0]})
+    return True
+
+
 def _advance(uow: Uow, ctx: WorkerContext, run: Run, stage: str, settled: Settled) -> None:
-    """After a job is applied: plan the next stage once the whole stage is applied."""
+    """After a job is applied: plan the next part / stage once the whole stage is applied."""
     same = [j for j in run.jobs if j.stage == stage]
     if any(JobStatus(j.status).open for j in same):
+        return
+    if _next_part(uow, ctx, run, stage, same):
         return
     stages = work_plan(ctx, run).stages
     if _plan_from(uow, ctx, run, stages.index(stage) + 1):
@@ -341,17 +424,26 @@ def _advance(uow: Uow, ctx: WorkerContext, run: Run, stage: str, settled: Settle
         settled.follow_ups.extend(int(i) for i in (job.summary or {}).get("follow_ups", []))
 
 
-def _apply_service(uow: Uow, ctx: WorkerContext, run: Run, job: Job) -> None:
-    model = contract.OUTCOMES.get(job.stage)
-    applier = APPLIERS.get(job.stage)
+def _apply_service(uow: Uow, ctx: WorkerContext, run: Run, job: Job) -> list[Path]:
+    key = contract.kind(job)
+    model = contract.OUTCOMES.get(key)
+    applier = APPLIERS.get(key)
     if model is None or applier is None:
-        raise contract.OutcomeError(f"stage {job.stage} has no service applier")
+        raise contract.OutcomeError(f"{key} has no service applier")
     storage = contract.Storage(ctx.config.storage_root)
     outcome = contract.read_outcome(storage, job, model)
     if outcome.status == "failed":
         raise contract.OutcomeError(outcome.error or f"job {job.id}: the service reported failure")
     if outcome.status == "done":
-        applier(uow, ctx, run, job, outcome)
+        return applier(uow, ctx, run, job, outcome)
+    return []
+
+
+def _dead_attempt(job: Job) -> str | None:
+    """The output dir of a service attempt whose result can no longer count."""
+    if job.backend != "service" or job.status == JobStatus.APPLIED:
+        return None
+    return (job.params or {}).get("output_dir")
 
 
 def settle(ctx: WorkerContext, job_id: int, task_id: str | None,
@@ -359,30 +451,94 @@ def settle(ctx: WorkerContext, job_id: int, task_id: str | None,
     """``digitalizer.job_done``: apply the attempt's result if it is still the current one."""
     settled = Settled()
     with ctx.uow() as uow:
-        job = uow.session.get(Job, job_id)
-        if job is None or (task_id is not None and job.task_id != task_id) \
-                or not JobStatus(job.status).open:
-            return settled               # a stale attempt, a duplicate callback, a revoked job
-        run = runs.load_run(uow, job.run_pk, lock=True)
-        uow.session.refresh(job)
-        if not JobStatus(job.status).open:
-            return settled
-        if run.status not in ACTIVE_RUNS:
-            job.status, job.finished_at = str(JobStatus.REVOKED), utcnow()
-            return settled
-        if (summary or {}).get("skipped"):
-            return settled               # the task refused this attempt (it is not current)
-        try:
-            if job.backend == "service":
-                _apply_service(uow, ctx, run, job)
-        except contract.OutcomeError as exc:
-            settled.revoke = _fail_job(uow, run, job, str(exc))
-            return settled
-        job.status, job.finished_at = str(JobStatus.APPLIED), utcnow()
-        job.summary = dict(summary or {})
-        settled.applied = True
-        _advance(uow, ctx, run, job.stage, settled)
+        _settle_in(uow, ctx, job_id, task_id, summary, settled)
+    _clean_up(ctx, settled)
     return settled
+
+
+def _settle_in(uow: Uow, ctx: WorkerContext, job_id: int, task_id: str | None,
+               summary: dict[str, Any] | None, settled: Settled) -> None:
+    job = uow.session.get(Job, job_id)
+    if job is None or (task_id is not None and job.task_id != task_id):
+        return                           # a stale attempt (reconcile discarded its dir)
+    if not JobStatus(job.status).open:
+        if (dead := _dead_attempt(job)) is not None:
+            settled.discard.append(dead)  # a late result of a revoked / failed attempt
+        return                           # (a duplicate callback of an applied one: nothing)
+    run = runs.load_run(uow, job.run_pk, lock=True)
+    uow.session.refresh(job)
+    if not JobStatus(job.status).open:
+        return
+    if run.status not in ACTIVE_RUNS:
+        job.status, job.finished_at = str(JobStatus.REVOKED), utcnow()
+        settled.discard.extend(d for d in [_dead_attempt(job)] if d)
+        return
+    if (summary or {}).get("skipped"):
+        return                           # the task refused this attempt (it is not current)
+    try:
+        superseded = _apply_service(uow, ctx, run, job) if job.backend == "service" else []
+    except contract.OutcomeError as exc:
+        settled.revoke = _fail_job(uow, run, job, str(exc))
+        settled.discard.extend(d for d in [_dead_attempt(job)] if d)
+        _run_dirs(ctx, run, settled)
+        return
+    job.status, job.finished_at = str(JobStatus.APPLIED), utcnow()
+    job.summary = dict(summary or {})
+    settled.applied = True
+    settled.superseded, settled.book_pk = superseded, run.book_pk
+    _advance(uow, ctx, run, job.stage, settled)
+
+
+def _clean_up(ctx: WorkerContext, settled: Settled) -> None:
+    """After the commit: delete attempt dirs that can never be (or no longer are) pointed at.
+
+    Runs only after the rows are committed, so a rolled-back apply never leaves a page
+    pointing at a deleted file. Best effort: a leftover dir costs disk, not correctness.
+    """
+    if (not settled.discard and not settled.superseded) or ctx.config.storage_root is None:
+        return
+    storage = contract.Storage(ctx.config.storage_root)
+    for rel in settled.discard:
+        _remove(storage, rel)
+    if not settled.superseded or settled.book_pk is None:
+        return
+    with ctx.uow() as uow:
+        book = uow.session.get(Book, settled.book_pk)
+        used = [path for page in (book.pages if book else [])
+                for path in (page.clean_path, page.dzi_path, page.preview_path, page.hocr_path)
+                if path]
+    for directory in set(settled.superseded):
+        prefix = f"{directory}{os.sep}"
+        if not any(path.startswith(prefix) for path in used):
+            _remove(storage, storage.rel(directory))
+
+
+def _remove(storage: contract.Storage, rel: str) -> None:
+    try:
+        target = storage.abs(rel)
+    except contract.OutcomeError:
+        return
+    if target.parent.name != contract.JOBS_DIR:
+        logger.warning("not an attempt dir, left in place: %s", target)
+        return
+    shutil.rmtree(target, ignore_errors=True)
+    logger.info("removed attempt dir %s", rel)
+
+
+def _run_dirs(ctx: WorkerContext, run: Run, settled: Settled) -> None:
+    """A failed run: every service attempt dir of it becomes a cleanup candidate (one that a
+    page still points into, e.g. an applied clean, is kept by :func:`_clean_up`)."""
+    if ctx.config.storage_root is None:
+        return
+    storage = contract.Storage(ctx.config.storage_root)
+    for job in run.jobs:
+        rel = (job.params or {}).get("output_dir")
+        if job.backend == "service" and rel:
+            try:
+                settled.superseded.append(storage.abs(rel))
+            except contract.OutcomeError:
+                continue
+    settled.book_pk = run.book_pk
 
 
 def _fail_job(uow: Uow, run: Run, job: Job, error: str) -> list[str]:
@@ -401,6 +557,7 @@ def _fail_job(uow: Uow, run: Run, job: Job, error: str) -> list[str]:
 
 def fail(ctx: WorkerContext, job_id: int, task_id: str | None) -> list[str]:
     """``digitalizer.job_failed`` (errback): the current attempt failed -> its run fails."""
+    settled = Settled()
     with ctx.uow() as uow:
         job = uow.session.get(Job, job_id)
         if job is None or (task_id is not None and job.task_id != task_id) \
@@ -410,11 +567,15 @@ def fail(ctx: WorkerContext, job_id: int, task_id: str | None) -> list[str]:
         error = job.error or "the task failed"
         if job.backend == "service" and not job.error:
             error = _service_error(ctx, job) or error
-        return _fail_job(uow, run, job, error)
+        settled.revoke = _fail_job(uow, run, job, error)
+        settled.discard.extend(d for d in [_dead_attempt(job)] if d)
+        _run_dirs(ctx, run, settled)
+    _clean_up(ctx, settled)
+    return settled.revoke
 
 
 def _service_error(ctx: WorkerContext, job: Job) -> str | None:
-    model = contract.OUTCOMES.get(job.stage, contract.Outcome)
+    model = contract.OUTCOMES.get(contract.kind(job), contract.Outcome)
     try:
         outcome = contract.read_outcome(contract.Storage(ctx.config.storage_root), job, model)
     except contract.OutcomeError:
@@ -431,6 +592,7 @@ def reconcile(ctx: WorkerContext, transport: Transport, now: datetime | None = N
     to_settle: list[tuple[int, str | None]] = []
     resent, failed = 0, 0
     revoke: list[str] = []
+    dead = Settled()                     # attempt dirs to delete after the commit
     with ctx.uow() as uow:
         revoke = _revoke_orphans(uow)
         flying = uow.session.scalars(select(Job).join(Run).where(
@@ -441,6 +603,8 @@ def reconcile(ctx: WorkerContext, transport: Transport, now: datetime | None = N
                 continue
             if not _lost(job, moment, stale):
                 continue
+            if job.backend == "service" and (rel := (job.params or {}).get("output_dir")):
+                dead.discard.append(rel)  # this attempt can never count any more
             if job.budget > 0:
                 job.budget -= 1
                 job.status, job.token = str(JobStatus.PLANNED), None
@@ -451,6 +615,7 @@ def reconcile(ctx: WorkerContext, transport: Transport, now: datetime | None = N
             else:
                 revoke += _fail_job(uow, job.run, job, "lost: no result and no re-sends left")
                 failed += 1
+    _clean_up(ctx, dead)
     settled = [settle(ctx, job_id, task_id, {}) for job_id, task_id in to_settle]
     if revoke:
         transport.revoke(revoke)

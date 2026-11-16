@@ -1,0 +1,43 @@
+@startuml sequence-digitalizer-render-service
+!include elvira.iuml
+' =============================================================================
+' What: render on a service is a chained stage: the orchestrator's own
+'       prepare step (metadata lookup, the item's text documents, a request
+'       file on the shared storage) and then render-service's book job (the
+'       media); applying the book renames the media into the IA item layout
+'       and writes the rows and the IA XML documents with the same code as
+'       the in-process render.
+' Kind: UML sequence diagram, one book, as implemented on the orchestrator
+'       side; render-service is proposed (evilflowers-render-service#1).
+'       Omitted: pump admission (render is an off-peak stage), reconcile, SSE.
+' Source: this repo studio/workers/stages/render.py (prepare, finish),
+'         studio/orchestration/{ledger,contract,appliers}.py, studio/config.py
+'         (CHAINED_STAGES, DEFAULT_PARTS) (2026-11-16); knowledge#66 (Redis db 8,
+'         proposed).
+' =============================================================================
+
+title Render stage: prepare here, media on render-service (orchestrator side implemented, 2026-11-16)
+
+participant "Orchestrator\n(job ledger)" as orch <<focus>>
+participant "OPAC" as opac
+queue "Redis db 8" as redis
+participant "render-service\nevilflowers_render.book" as rs <<proposed>>
+collections "Shared storage\n{storage_root}" as fs
+
+orch -> orch : formulas applied: plan render/prepare\n(in-process, portal queue)
+orch -> opac : metadata lookup (OCR text: ISBN)
+orch -> fs : _hocr.html, _djvu.txt, regions.json;\nrender/request-<run>.json + access hOCR
+orch -> orch : prepare applied: plan render/book
+orch -[$accent_msg()]> redis : <b>send_task evilflowers_render.book</b>\n<b>request (path) · output_dir · outcome · token</b>\n<b>link=job_done · link_error=job_failed</b>
+redis -> rs : deliver (off-peak)
+rs -> fs : read request: pages, hOCR, metadata,\nformats, regions (EPUB), JP2 leaves
+rs -> fs : <id>.pdf (MRC, JPEG) · <id>_archival.pdf (PDF/A-2b, JP2)\n<id>.epub · <id>_jp2.zip; outcome last (size, md5, pdfa_valid)
+rs -> redis : link: job_done
+redis -[$accent_msg()]> orch : <b>job_done</b>
+orch -> fs : check every file (requested, in the attempt, size);\nrename into the item (IA names)
+orch -> orch : rows: artifacts, PDF page map, n_pages;\nIA XML (_meta, _scandata, _files) from the rows
+orch -> fs : after commit: delete the attempt dir
+
+caption The service writes only media; the IA XML documents come from the rows the orchestrator owns. Nothing is moved\nunless every requested format is there; a failed PDF/A check fails the job.
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-render-service.puml
+@enduml

@@ -53,6 +53,7 @@ ROUTES: dict[str, dict[str, str]] = {
     "digitalizer.local.analyze": {"queue": AI_QUEUE},
     "digitalizer.local.formulas": {"queue": AI_QUEUE},
     "digitalizer.local.render": {"queue": CPU_QUEUE},
+    "digitalizer.local.render_prepare": {"queue": PORTAL_QUEUE},
     "digitalizer.local.gate": {"queue": PORTAL_QUEUE},
     "digitalizer.local.publish": {"queue": PORTAL_QUEUE},
 }

@@ -47,8 +47,11 @@ name so new ones need configuration, not code (open/closed principle)::
     queue = "evilflowers_scan.standalone"
     interactive_queue = "evilflowers_scan.standalone.interactive"
     deadline_seconds = 3600
+    batch = 32                                  # leaves per bulk job (service default 32;
+                                                # local default [pipeline] chunk_size)
+    interactive_batch = 1                       # leaves per operator re-run job
 
-    [scheduling]                                # admission: digitalization yields at peak
+    [scheduling]                              # admission: digitalization yields at peak
     timezone = "Europe/Bratislava"
     peak_hours = ["mon-fri 07:00-19:00"]
     bulk_inflight = 8                           # jobs in flight off-peak
@@ -116,6 +119,20 @@ class PublishConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RoutePart:
+    """One task of a stage that runs as several (analyze: hocr ∥ layout; render: prepare → book).
+
+    A part is a service task, except the orchestrator's own steps around a service (render's
+    ``prepare``: metadata lookup, text files, the request), which stay in-process.
+    """
+
+    task: str
+    queue: str
+    interactive_queue: str
+    backend: Backend = "service"
+
+
+@dataclass(frozen=True, slots=True)
 class StageRoute:
     """Where one stage's jobs run: this app's ``digitalizer.local.<stage>`` task or a service task."""
 
@@ -124,7 +141,45 @@ class StageRoute:
     queue: str
     interactive_queue: str
     deadline_seconds: int
+    #: leaves per bulk job of a chunked stage (clean); None = the project's
+    #: ``[pipeline] chunk_size``. A service route defaults to :data:`SERVICE_BATCH`.
+    batch: int | None = None
+    #: leaves per interactive job: 1 = every re-run page is its own job, so an operator
+    #: sees each page as soon as it is done and pages run in parallel
+    interactive_batch: int = 1
+    #: a stage that runs as several tasks (``SPLIT_STAGES`` / ``CHAINED_STAGES``): one route per part
+    parts: dict[str, RoutePart] = field(default_factory=dict)
 
+    def batch_size(self, *, interactive: bool, project_default: int) -> int:
+        size = self.interactive_batch if interactive else (self.batch or project_default)
+        return max(1, size)
+
+    def part(self, name: str) -> RoutePart:
+        try:
+            return self.parts[name]
+        except KeyError:
+            raise KeyError(f"route {self.task or '(split)'} has no part {name!r}") from None
+
+
+#: leaves per bulk job when a chunked stage runs on a service (evilflowers-books-digitalizer#4)
+SERVICE_BATCH = 32
+
+#: stages a service runs as parallel parts: every leaf batch goes to each of them
+SPLIT_STAGES: dict[str, tuple[str, ...]] = {"analyze": ("hocr", "layout")}
+#: stages a service runs as parts in order, one job each (the next is planned when the
+#: previous one is applied)
+CHAINED_STAGES: dict[str, tuple[str, ...]] = {"render": ("prepare", "book")}
+#: the parts a service-backed split / chained stage must be configured with
+REQUIRED_PARTS: dict[str, tuple[str, ...]] = {"analyze": ("hocr", "layout"), "render": ("book",)}
+#: parts with a default route (overridable): planned on demand, or the orchestrator's own
+DEFAULT_PARTS: dict[str, dict[str, RoutePart]] = {
+    # the page image itself changes only on scan-service (confirmed "remove" boxes)
+    "analyze": {"erase": RoutePart("evilflowers_scan.erase", "evilflowers_scan.standalone",
+                                   "evilflowers_scan.standalone.interactive")},
+    # metadata lookup, item text files and the render request: light, the orchestrator's
+    "render": {"prepare": RoutePart("digitalizer.local.render_prepare", PORTAL_QUEUE,
+                                    PORTAL_QUEUE, backend="local")},
+}
 
 #: the in-process default of every stage (today's stage bodies, now ledger jobs)
 DEFAULT_ROUTES: dict[str, StageRoute] = {
@@ -282,6 +337,31 @@ def _project(slug: str, raw: dict[str, Any], resolve: _Paths) -> ProjectConfig:
     )
 
 
+def _parts(stage: str, raw: dict[str, Any]) -> dict[str, RoutePart]:
+    """The parts of a split / chained stage on services: every required one configured.
+
+    A chained stage's single service part may also be given as the stage's own ``task`` /
+    ``queue`` (``[orchestration.stages.render] task = "evilflowers_render.book"``).
+    """
+    required = REQUIRED_PARTS[stage]
+    if len(required) == 1 and required[0] not in raw and {"task", "queue"} <= raw.keys():
+        raw = {**raw, required[0]: {k: raw[k] for k in ("task", "queue", "interactive_queue")
+                                    if k in raw}}
+    missing = [p for p in required if not {"task", "queue"} <= set(raw.get(p, {}))]
+    if missing:
+        raise ValueError(f"[orchestration.stages.{stage}] on services needs "
+                         + ", ".join(f"[orchestration.stages.{stage}.{p}] with task and queue"
+                                     for p in missing)
+                         + " (a stage runs entirely in-process or entirely on services)")
+    parts = dict(DEFAULT_PARTS.get(stage, {}))
+    for name in (*required, *parts):
+        if name in raw:
+            p = raw[name]
+            parts[name] = RoutePart(p["task"], p["queue"], p.get("interactive_queue", p["queue"]),
+                                    backend=parts[name].backend if name in parts else "service")
+    return parts
+
+
 def _orchestration(raw: dict[str, Any]) -> OrchestrationConfig:
     routes = dict(DEFAULT_ROUTES)
     for stage, override in raw.get("stages", {}).items():
@@ -292,13 +372,22 @@ def _orchestration(raw: dict[str, Any]) -> OrchestrationConfig:
         backend = override.get("backend", base.backend)
         if backend not in ("local", "service"):
             raise ValueError(f"[orchestration.stages.{stage}] backend must be local or service")
-        if backend == "service" and not {"task", "queue"} <= override.keys():
+        split = backend == "service" and stage in REQUIRED_PARTS
+        parts = _parts(stage, override) if split else {}
+        if backend == "service" and not split and not {"task", "queue"} <= override.keys():
             raise ValueError(f"[orchestration.stages.{stage}] a service backend needs task and queue")
         queue = override.get("queue", base.queue)
-        routes[stage] = StageRoute(backend, override.get("task", base.task), queue,
-                                   override.get("interactive_queue", queue if backend == "service"
-                                                else base.interactive_queue),
-                                   int(override.get("deadline_seconds", base.deadline_seconds)))
+        batch = override.get("batch", SERVICE_BATCH if backend == "service" else base.batch)
+        routes[stage] = StageRoute(backend, "" if split else override.get("task", base.task),
+                                   "" if split else queue,
+                                   "" if split else override.get(
+                                       "interactive_queue",
+                                       queue if backend == "service" else base.interactive_queue),
+                                   int(override.get("deadline_seconds", base.deadline_seconds)),
+                                   batch=int(batch) if batch is not None else None,
+                                   interactive_batch=int(override.get("interactive_batch",
+                                                                      base.interactive_batch)),
+                                   parts=parts)
     return OrchestrationConfig(
         budget=int(raw.get("budget", 2)),
         stale_after_seconds=int(raw.get("stale_after_seconds", 600)),

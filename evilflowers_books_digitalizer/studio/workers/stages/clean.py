@@ -95,9 +95,15 @@ def apply_cleaned(uow: Uow, page: Page, cleaned: CleanedPage, dzi: Path, webp: P
     page.clean_path = str(cleaned.image)
     page.width, page.height, page.dpi = cleaned.width, cleaned.height, cleaned.dpi
     page.skew_angle = cleaned.skew_deg
+    page.status = PageStatus.CLEANED
+    replace_image(uow, page, cleaned.image, dzi, webp)
+
+
+def replace_image(uow: Uow, page: Page, image: Path, dzi: Path, webp: Path) -> None:
+    """Point a page at a new rendition of itself (same geometry: an erase), version + 1."""
+    page.clean_path = str(image)
     page.dzi_path = str(dzi)
     page.preview_path = str(webp) if webp.exists() else None
-    page.status = PageStatus.CLEANED
     page.version = (page.version or 0) + 1
     uow.emit(EventType.PAGE_UPDATED, runs.project_of(page.book), page.book_pk, page_id=page.id,
              index=page.index, version=page.version, status=page.status)

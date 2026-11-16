@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from evilflowers_books_digitalizer.db.models import Region
+from evilflowers_books_digitalizer.db.models import Page, Region, Run
 from evilflowers_books_digitalizer.reflow.vlm import fix_latex, looks_hallucinated
 from evilflowers_books_digitalizer.studio.domain import RegionAction, RegionKind, RegionStatus
 from evilflowers_books_digitalizer.studio.ports import FormulaJob
 from evilflowers_books_digitalizer.studio.workers import runs
-from evilflowers_books_digitalizer.studio.workers.context import WorkerContext
+from evilflowers_books_digitalizer.studio.workers.context import Uow, WorkerContext
 from evilflowers_books_digitalizer.studio.workers.stages import common
 
 REJECTED = "vlm rejected"
@@ -29,14 +29,29 @@ def job_key(region_id: int) -> str:
     return f"region-{region_id}"
 
 
+def region_id(key: str) -> int:
+    return int(key.removeprefix("region-"))
+
+
+def to_read(page: Page) -> list[Region]:
+    """The regions of a page the recognizer must (re-)read: ``reocr`` ones no person decided."""
+    if not page.clean_path:
+        return []
+    return [r for r in page.regions if r.action == RegionAction.REOCR and r.status in OPEN]
+
+
+def task_of(region: Region) -> str:
+    """``formula`` (math only) or ``ocr`` (a table / a mixed math + prose line)."""
+    return "formula" if region.kind == RegionKind.FORMULA else "ocr"
+
+
 def _jobs(ctx: WorkerContext, run_id: int) -> tuple[str, list[FormulaJob]]:
     with ctx.uow() as uow:
         run = runs.load_run(uow, run_id)
         book = run.book
-        jobs = [FormulaJob(job_key(r.id), Path(p.clean_path), common.region_bbox(r),
-                           "formula" if r.kind == RegionKind.FORMULA else "ocr")
-                for p in common.selected(book.pages, run.pages) if p.clean_path
-                for r in p.regions if r.action == RegionAction.REOCR and r.status in OPEN]
+        jobs = [FormulaJob(job_key(r.id), Path(p.clean_path or ""), common.region_bbox(r),
+                           task_of(r))
+                for p in common.selected(book.pages, run.pages) for r in to_read(p)]  # to_read: cleaned
         runs.enter_stage(uow, run, "formulas", len(jobs))
         return runs.project_of(book), jobs
 
@@ -57,6 +72,29 @@ def merge_reason(current: str | None, new: str | None) -> str | None:
     return "; ".join([*parts, new] if new else parts) or None
 
 
+def apply_answers(uow: Uow, run: Run, keys: list[str], answers: dict[str, str]) -> None:
+    """The recognizer's answers for ``keys`` into the regions (in-process and service alike).
+
+    A missing answer is a failure (the region stays an image crop); every answer passes
+    :func:`judge` here, whoever recognized it, so the gate counts rejections the same way.
+    """
+    rejected = 0
+    for key in keys:
+        # row lock: an operator PATCH waits for this short commit instead of racing it
+        region = uow.session.get(Region, region_id(key), with_for_update=True)
+        if region is None or region.status not in OPEN:
+            continue            # the operator decided it while the recognizer ran
+        text, reason = judge(answers.get(key))
+        rejected += bool(reason and reason.startswith(REJECTED))
+        if text is not None:
+            region.text = text
+        elif region.kind == RegionKind.FORMULA:
+            region.text = None    # Tesseract's guess at math is noise
+        region.reason = merge_reason(region.reason, reason)
+    runs.log(uow, run, f"formulas: {len(keys)} jobs, {len(answers)} answered, "
+                       f"{rejected} rejected")
+
+
 def formulas(ctx: WorkerContext, run_id: int) -> None:
     project, jobs = _jobs(ctx, run_id)
     if not jobs:
@@ -64,20 +102,5 @@ def formulas(ctx: WorkerContext, run_id: int) -> None:
     answers = ctx.adapters(project).formulas.recognize(jobs)
     with ctx.uow() as uow:
         run = runs.load_run(uow, run_id)
-        rejected = 0
-        for job in jobs:
-            # row lock: an operator PATCH waits for this short commit instead of racing it
-            region = uow.session.get(Region, int(job.key.removeprefix("region-")),
-                                     with_for_update=True)
-            if region is None or region.status not in OPEN:
-                continue            # the operator decided it while the recognizer ran
-            text, reason = judge(answers.get(job.key))
-            rejected += bool(reason and reason.startswith(REJECTED))
-            if text is not None:
-                region.text = text
-            elif region.kind == RegionKind.FORMULA:
-                region.text = None    # Tesseract's guess at math is noise
-            region.reason = merge_reason(region.reason, reason)
+        apply_answers(uow, run, [job.key for job in jobs], answers)
         runs.advance(uow, run, len(jobs))
-        runs.log(uow, run, f"formulas: {len(jobs)} jobs, {len(answers)} answered, "
-                           f"{rejected} rejected")

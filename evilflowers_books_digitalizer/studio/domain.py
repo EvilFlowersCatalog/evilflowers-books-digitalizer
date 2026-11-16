@@ -74,6 +74,7 @@ class RegionSource(StrEnum):
     HEURISTIC = "heuristic"     # hOCR + image heuristics (reflow.analyze)
     YOLO = "yolo"               # DocLayout-YOLO
     VLM = "vlm"                 # PaddleOCR-VL
+    DOCLING = "docling"         # evilflowers-analyzer-service (standalone layout task)
     OPERATOR = "operator"       # drawn or relabelled by a person
 
 
