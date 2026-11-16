@@ -33,7 +33,7 @@ come first. Three layers, each one configuration:
 
    Interactive re-runs have their own lane and are never held.
 2. **Scaling**. KEDA (`overlays/dev/keda.yaml`) scales the bulk workers on their queue's
-   length on Redis db 8. Admission keeps that queue short, so at peak the workers scale
+   length on the broker (Valkey `valkey.shared`, db 8). Admission keeps that queue short, so at peak the workers scale
    to zero on their own. Scale-in is slow: there is a 600 s grace for the running chunk.
 3. **Node pressure**. The bulk workers run under PriorityClass `digitalizer-batch`
    (`base/priorityclasses.yaml`, value −100, `preemptionPolicy: Never`): they never
@@ -86,10 +86,13 @@ The infrastructure side is tracked in the knowledge repository (knowledge#66, #6
    storage at a different absolute path (its own `STORAGE_PATH`), as long as the layout
    below the root is the same.
 2. **Workload label** `elvira.stuba.sk/workload=apps` on the nodes.
-3. **Postgres/Redis** in namespace `shared`, with:
+3. **Postgres, Valkey and Redis** in namespace `shared`, with:
    * the `digitalizer` database and role;
-   * Redis db 8 (broker);
-   * read access to db 7 (the catalog's queues, for backpressure).
+   * Valkey (`valkey.shared.svc.cluster.local:6379`) db 8 as the broker (#8). The
+     `STUDIO_REDIS_URL` secret and both KEDA triggers must name it; KEDA on any other
+     host watches an empty db 8 and never scales, without an error;
+   * read access to gateway's Redis db 7 (`redis.shared`, the catalog's queues, for
+     backpressure). It stays there until the dev catalog moves.
 4. **KEDA** and the PriorityClass `digitalizer-batch` (cluster-scoped; this base ships it,
    unless the platform owns it).
 5. **Secrets** in namespace `digitalizer`: `ghcr-pull` and `studio-secrets`

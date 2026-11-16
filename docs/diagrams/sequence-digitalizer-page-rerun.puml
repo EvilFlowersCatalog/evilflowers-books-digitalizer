@@ -22,7 +22,7 @@ title Re-run of one page from the page studio (proposal, 2026-11-16)
 actor "Operator\n(SPA)" as op
 participant "Portal API" as api
 participant "Orchestrator\n(job ledger)" as orch <<focus>>
-queue "Redis db 8" as redis
+queue "Valkey db 8" as redis
 participant "scan-service\n(interactive replica)" as scan
 participant "analyzer-service\n(interactive replica)" as layout
 

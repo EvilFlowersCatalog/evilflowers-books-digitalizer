@@ -20,7 +20,7 @@ Diagrams (`docs/diagrams/`, ELVIRA theme, rendered `.svg` + `.png` next to each 
 | Topic | Decision |
 |---|---|
 | Formulas | **PaddleOCR-VL**, called from equation-service through a new backend |
-| Broker | Redis **db 8** (the value lives in the knowledge repository's configuration and may change) |
+| Broker | **Valkey** `valkey.shared` (Redis protocol), **db 8** (#8; the value lives in the knowledge repository's `keyvalue.yml` and may change) |
 | Namespace | **`digitalizer`** |
 | Existing extractors | They report to the catalog, so the digitalizer **does not use their catalog tasks**. Each existing repository gets a **second, catalog-free ("standalone") task** that shares the same core code. The catalog-based pipeline runs on the PDF only after publication. |
 | Publication | **Optional.** A book can be finished, approved and exported (PDF, PDF/A, EPUB, IA item) without ever reaching the catalog |
@@ -124,7 +124,7 @@ evilflowers-equation-service, evilflowers-image-service (and later evilflowers-t
   callbacks, the judge library (§6) as an HTTP-only extra, and docs that the system of record can be any
   orchestrator.
 - **knowledge:**
-  - namespace `digitalizer`, Redis db 8 and its exporter, KEDA objects per standalone queue;
+  - namespace `digitalizer`, Valkey db 8 and its exporter, KEDA objects per standalone queue;
   - NFS with `digitized` read-write for control;
   - Ollama's NetworkPolicy admitting `digitalizer`;
   - vlm in `shared`;
@@ -135,7 +135,8 @@ evilflowers-equation-service, evilflowers-image-service (and later evilflowers-t
 | Service | Used for | Fact source |
 |---|---|---|
 | PostgreSQL 18 via PgBouncer `:6432` (k8s-bridge) | database `digitalizer` | knowledge entity k8s-bridge |
-| Redis `:6379` (k8s-bridge), db 8 | commands and link callbacks | knowledge Extraction-Pipeline (db 7 = catalog) |
+| Valkey `valkey.shared:6379`, db 8 | commands and link callbacks (broker, #8) | knowledge `keyvalue.yml` (vault Infrastructure/Key-Value) |
+| Redis `:6379` (k8s-bridge), db 7 | the catalog's queues, read for backpressure only | knowledge Extraction-Pipeline |
 | NFS on gateway (`roles/nfs_server`, written, not applied) | `raw-scans` read-only and `digitized` read-write PVs, both under `/data/library` (the kit's `STORAGE_PATH`) | knowledge NFS-Storage |
 | Ollama `elvira-assistant` (vision) on app01 | metadata draft from title pages, figure captions, judges | knowledge Shared-Inference |
 | tei-rerank on app01 | association scores (caption ↔ figure) | knowledge Shared-Inference |

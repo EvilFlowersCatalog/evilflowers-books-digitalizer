@@ -12,13 +12,15 @@
 #
 # Secrets come from the environment, never from this file:
 #   STUDIO_DATABASE_URL  postgresql+psycopg://digitalizer:…@postgres.shared.svc.cluster.local:5432/digitalizer
-#   STUDIO_REDIS_URL     redis://redis.shared.svc.cluster.local:6379/8   (Celery db 8)
+#   STUDIO_REDIS_URL     redis://valkey.shared.svc.cluster.local:6379/8  (Celery db 8, Valkey)
 #   EVILFLOWERS_API_KEY  catalog token ([projects.stu.publish].api_key_env)
 
 [studio]
 # Only used when the env vars above are missing (e.g. a local `kubectl run` debug pod).
 database_url = "postgresql+psycopg://digitalizer@postgres.shared.svc.cluster.local:5432/digitalizer"
-redis_url = "redis://redis.shared.svc.cluster.local:6379/8"
+# The broker is Valkey in namespace shared (Redis protocol, #8). The catalog's queues
+# ([[scheduling.backpressure]] below) stay on gateway's Redis db 7.
+redis_url = "redis://valkey.shared.svc.cluster.local:6379/8"
 # The shared storage root: it holds raw-scans/ and digitized/. Service jobs carry paths
 # relative to it, so a service may mount the same storage elsewhere (its own STORAGE_PATH);
 # only the layout below the root must match. $STUDIO_STORAGE_ROOT (studio-env) overrides it.

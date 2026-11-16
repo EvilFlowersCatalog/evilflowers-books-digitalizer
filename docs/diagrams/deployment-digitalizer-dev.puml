@@ -4,7 +4,8 @@
 ' What: on dev the digitalizer is one namespace on control: the portal
 '       (API, orchestrator) plus KEDA-scaled standalone workers (two new
 '       images, and second Deployments of the ocr, analyzer, equation and image
-'       images), all on Redis db 8; state, scans and outputs stay on gateway
+'       images), all on Valkey db 8 (namespace shared on control); state, scans
+'       and outputs stay on gateway
 '       (Postgres through the k8s-bridge, the library disk over NFS), formula
 '       and vision inference come from namespace shared on app01, and the
 '       optional publication goes to the dev catalog. Until the services take
@@ -20,7 +21,8 @@
 '         Shared-Inference (2026-11-15), Extraction-Pipeline (2026-11-14),
 '         Books-Digitalizer (2026-11-08), app01 (2026-11-13), entity k8s-bridge
 '         (:6432 pgbouncer, :6379 redis; kernel DNAT, no relay container per
-'         STATUS 2026-11-13), entity alloy-node (OTLP/HTTP :4318);
+'         STATUS 2026-11-13), entity alloy-node (OTLP/HTTP :4318), Key-Value
+'         (Valkey StatefulSet on control, written, not applied, 2026-11-16);
 '         this repo docs/design/deployment-restoration-studio.puml,
 '         docs/design/studio-spec.md (2026-11-16).
 ' =============================================================================
@@ -50,8 +52,8 @@ digitized → **rw** (today: ro)
 db digitalizer «proposed»
 ]
     node redis <<container>> [
-**redis**
-db 7 catalog · db 8 «proposed»
+**redis** 7.4
+db 7 catalog
 ]
   }
 }
@@ -86,6 +88,12 @@ ocr · analyzer · equation · image
 **PV digitized** (NFS, RWX)
 both under /data/library = STORAGE_PATH
 **PVC scratch** (local-path)
+]
+  }
+  frame "namespace shared" as nsct {
+    node valkey <<container>> <<proposed>> [
+**valkey** 9 · StatefulSet valkey-0
+db 8 digitalizer dev (broker)
 ]
   }
   frame "namespace evilflowers-dev" as nsdev {
@@ -123,9 +131,11 @@ pg -[hidden]down- ollama
 admin --> portal : HTTP via VPN\nREST · SSE · DZI
 
 ' ---- commands and state ------------------------------------------------------------
-portal -[$accent()]-> bridge : <b>Redis :6379 db 8 commands</b>\n<b>+ callbacks</b> · SQL :6432
-workers -[$accent()]-> bridge : <b>Redis :6379 db 8 consume,</b>\n<b>send job_done link</b>
-local --> bridge : Redis db 8 consume\nSQL :6432 (heartbeat)
+portal -[$accent()]-> valkey : <b>Redis protocol :6379 db 8</b>\n<b>commands + callbacks</b>
+portal --> bridge : SQL :6432
+workers -[$accent()]-> valkey : <b>:6379 db 8 consume,</b>\n<b>send job_done link</b>
+local --> valkey : :6379 db 8 consume
+local --> bridge : SQL :6432 (heartbeat)
 portal --> bridge : Redis db 7 LLEN\n(backpressure, read only)
 bridge --> pg : TCP
 bridge --> redis : TCP
@@ -148,6 +158,6 @@ catdev --> bridge : Redis db 7\nanalyzer.extract
 
 $legend_live_proposed()
 
-caption Workers hold no catalog or database credential: commands and their link callbacks travel on Redis db 8 (its own\nvisibility timeout), results as files on the library export. Until gateway exports digitized read-write over NFS,\nthe only fallback is hostPath on gateway, which competes with production for its 8 cores.
+caption Workers hold no catalog or database credential: commands and their link callbacks travel on Valkey db 8 (its own\nvisibility timeout), results as files on the library export. Until gateway exports digitized read-write over NFS,\nthe only fallback is hostPath on gateway, which competes with production for its 8 cores.
 footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/deployment-digitalizer-dev.puml
 @enduml

@@ -208,11 +208,29 @@ def attempt_dir(path: str | Path | None) -> Path | None:
     return next((d for d in Path(path).parents if d.parent.name == JOBS_DIR), None)
 
 
+def input_paths(fields: dict[str, Any]) -> list[str]:
+    """The kit's ``StandaloneJob.inputs`` from a stage's structured fields: every file the job
+    reads, relative to ``STORAGE_PATH``, in order, each once (#9).
+
+    clean: each leaf's ``frame``; hocr, layout, erase: each leaf's cleaned ``image``; formulas:
+    the distinct ``image`` of its regions; render: the ``request`` (it lists the pages)."""
+    paths: list[str] = []
+    for row in [*fields.get("leaves", ()), *fields.get("regions", ())]:
+        paths.append(row.get("frame") or row["image"])
+    if fields.get("request"):
+        paths.append(fields["request"])
+    return list(dict.fromkeys(paths))
+
+
 def message(job: Job, run: Run, token: str, storage: Storage, item_dir: Path,
             inputs: dict[str, Any]) -> dict[str, Any]:
-    """The keyword arguments of a service task (``StandaloneJob`` + the stage's inputs)."""
+    """The keyword arguments of a service task: the kit's ``StandaloneJob`` (with its required
+    ``inputs`` list) + the stage's structured fields, which the services read per leaf."""
+    paths = input_paths(inputs)
+    if not paths:
+        raise PortError(f"job {job.id} ({kind(job)}) has no input file")
     output_dir = storage.job_dir(item_dir, job)
-    return {"run_id": str(run.id), "job": job_key(job), "token": token,
+    return {"run_id": str(run.id), "job": job_key(job), "token": token, "inputs": paths,
             "output_dir": output_dir, "outcome": f"{output_dir}/{OUTCOME_FILE}", **inputs}
 
 

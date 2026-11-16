@@ -15,13 +15,13 @@
 '       sequence-digitalizer-clean-service), SSE, reconcile.
 ' Source: this repo studio/orchestration/{ledger,contract,appliers}.py,
 '         studio/workers/stages/analyze.py, studio/config.py (StageRoute.parts)
-'         (2026-11-16); knowledge#66 (Redis db 8, proposed, 2026-11-16).
+'         (2026-11-16); knowledge#66, Key-Value (Valkey db 8, 2026-11-16).
 ' =============================================================================
 
 title Analyze stage on services: hOCR ∥ layout, fused per batch (orchestrator side implemented, 2026-11-16)
 
 participant "Orchestrator\n(job ledger)" as orch <<focus>>
-queue "Redis db 8" as redis
+queue "Valkey db 8" as redis
 participant "ocr-service\n…standalone.hocr" as ocr <<proposed>>
 participant "analyzer-service\n…standalone.layout" as lay <<proposed>>
 participant "scan-service\nevilflowers_scan.erase" as scan <<proposed>>

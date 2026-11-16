@@ -13,8 +13,8 @@
 ' Source: this repo studio/orchestration/{ledger,contract,appliers}.py,
 '         studio/config.py (StageRoute.batch / interactive_batch),
 '         configs/studio.k8s.toml [orchestration.stages.clean] (2026-11-16);
-'         evilflowers-scan-service#1 (task contract); knowledge#66 (Redis db 8
-'         for the digitalizer, proposed, 2026-11-16); Celery 5.6 calling.html
+'         evilflowers-scan-service#1 (task contract); knowledge#66 and Key-Value
+'         (Valkey db 8 for the digitalizer, written, not applied, 2026-11-16); Celery 5.6 calling.html
 '         (link / link_error).
 ' =============================================================================
 
@@ -22,7 +22,7 @@ title Clean stage on evilflowers-scan-service (orchestrator side implemented, 20
 
 participant "Orchestrator\n(job ledger)" as orch <<focus>>
 database "postgresql18\ndb digitalizer" as pg
-queue "Redis db 8" as redis
+queue "Valkey db 8" as redis
 participant "scan-service\nevilflowers_scan.clean" as scan <<proposed>>
 collections "Shared storage\n{storage_root}" as fs
 

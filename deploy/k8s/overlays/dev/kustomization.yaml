@@ -10,7 +10,7 @@ kind: Kustomization
 
 resources:
   - ../../base
-  - keda.yaml                           # bulk workers scale 0..N on Redis db 8
+  - keda.yaml                           # bulk workers scale 0..N on Valkey db 8
 
 labels:
   - pairs:

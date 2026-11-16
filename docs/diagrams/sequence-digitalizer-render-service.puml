@@ -12,15 +12,15 @@
 '       Omitted: pump admission (render is an off-peak stage), reconcile, SSE.
 ' Source: this repo studio/workers/stages/render.py (prepare, finish),
 '         studio/orchestration/{ledger,contract,appliers}.py, studio/config.py
-'         (CHAINED_STAGES, DEFAULT_PARTS) (2026-11-16); knowledge#66 (Redis db 8,
-'         proposed).
+'         (CHAINED_STAGES, DEFAULT_PARTS) (2026-11-16); knowledge#66 and Key-Value
+'         (Valkey db 8, 2026-11-16).
 ' =============================================================================
 
 title Render stage: prepare here, media on render-service (orchestrator side implemented, 2026-11-16)
 
 participant "Orchestrator\n(job ledger)" as orch <<focus>>
 participant "OPAC" as opac
-queue "Redis db 8" as redis
+queue "Valkey db 8" as redis
 participant "render-service\nevilflowers_render.book" as rs <<proposed>>
 collections "Shared storage\n{storage_root}" as fs
 

@@ -1,5 +1,7 @@
-# KEDA: the bulk workers follow their queue's length on Redis db 8 (plain lists: the
-# digitalizer sends no priorities, so `digitalizer.cpu` is the whole queue).
+# KEDA: the bulk workers follow their queue's length on the broker, Valkey db 8 in namespace
+# shared (#8; Redis protocol, plain lists: the digitalizer sends no priorities, so
+# `digitalizer.cpu` is the whole queue). The address must be the broker's: on any other
+# host KEDA reads an empty db 8 and the workers never scale, without an error.
 #
 # The pump caps what is in flight (admission), so the queue never holds a book's whole
 # backlog: at peak or while the catalog's queues are deep it stays near empty and the
@@ -25,7 +27,7 @@ spec:
   triggers:
     - type: redis
       metadata:
-        address: redis.shared.svc.cluster.local:6379
+        address: valkey.shared.svc.cluster.local:6379
         databaseIndex: "8"
         listName: digitalizer.cpu
         listLength: "2"                  # = --concurrency of one worker
@@ -44,7 +46,7 @@ spec:
   triggers:
     - type: redis
       metadata:
-        address: redis.shared.svc.cluster.local:6379
+        address: valkey.shared.svc.cluster.local:6379
         databaseIndex: "8"
         listName: digitalizer.ai
         listLength: "1"

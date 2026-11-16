@@ -19,7 +19,9 @@ They are the executable form of the contract in
 * the frames are only read; everything is written under ``output_dir``;
 * the outcome file is written **last** and atomically (temp file + rename), so its
   presence means the attempt's files are complete (``reconcile`` relies on that);
-* ``run_id`` and ``token`` are echoed unchanged.
+* ``run_id`` and ``token`` are echoed unchanged;
+* every message is first checked as the kit's ``evilflowers_worker.contract.StandaloneJob``
+  validates it (:func:`accept`), so a message a real service would refuse fails here too.
 
 Not shipped to a service: it imports the digitalizer's ports. The service ports the
 behaviour, not the module.
@@ -34,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image
+from pydantic import BaseModel, ConfigDict, Field
 
 from evilflowers_books_digitalizer.studio.adapters.ia.images import build_jp2_zip
 from evilflowers_books_digitalizer.studio.adapters.ia.naming import ia_name
@@ -61,6 +64,36 @@ from evilflowers_books_digitalizer.studio.ports import (
 PREVIEW_PX = 1600
 
 
+class StandaloneJob(BaseModel):
+    """A copy of the fields of ``evilflowers_worker.contract.StandaloneJob`` (evilflowers-worker
+    @ e530f68): the kit is not a dependency of the digitalizer, so its rules are mirrored here.
+    Unknown fields are ignored, as in the kit."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    run_id: str = Field(min_length=1)
+    job: str = Field(min_length=1)
+    token: str = Field(min_length=1)
+    inputs: list[str] = Field(min_length=1)
+    output_dir: str = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+
+
+def accept(storage_root: Path, message: dict[str, Any]) -> StandaloneJob:
+    """Validate ``message`` as the kit does before any work: the fields, and every input a
+    relative path that stays under the storage root (``StandaloneJob.input_paths``). Also
+    checks what the kit cannot: the input files exist."""
+    job = StandaloneJob.model_validate(message)
+    root = storage_root.resolve()
+    for rel in job.inputs:
+        path = (root / rel).resolve()
+        if Path(rel).is_absolute() or not path.is_relative_to(root):
+            raise ValueError(f"input escapes the storage root: {rel!r}")
+        if not path.is_file():
+            raise FileNotFoundError(f"input {rel!r} does not exist")
+    return job
+
+
 def write_outcome(path: Path, outcome: dict[str, Any]) -> None:
     """Atomically, as ``evilflowers_worker.outcome`` does: a reader sees all of it or nothing."""
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -72,6 +105,7 @@ def scan_clean(storage_root: Path, cleaner: PageCleaner, image_ops: ImageOps,
                **message: Any) -> dict[str, Any]:
     """One ``evilflowers_scan.clean`` job: the leaves of ``message`` -> cleaned pages + outcome."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
 
@@ -123,6 +157,7 @@ def ocr_hocr(storage_root: Path, ocr: OcrEngine, image_ops: ImageOps,
              **message: Any) -> dict[str, Any]:
     """``evilflowers_ocr_worker.standalone.hocr`` (evilflowers-ocr-service#7)."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
     leaves = []
@@ -149,6 +184,7 @@ def analyzer_layout(storage_root: Path, detectors: list[LayoutDetector], image_o
     """``evilflowers_analyzer.standalone.layout`` (evilflowers-analyzer-service#8): regions as
     fractions of the page, origin top-left, in ``regions.json``."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -180,6 +216,7 @@ def equation_formulas(storage_root: Path, recognizer: FormulaRecognizer,
     the cleaned pages -> LaTeX / text in ``formulas.json``. A region without an answer is a
     row with ``text: null`` (or no row); the orchestrator judges every answer itself."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
     try:
@@ -210,6 +247,7 @@ def render_book(storage_root: Path, renderer: Renderer, **message: Any) -> dict[
     (distribution PDF, PDF/A-2b master, EPUB, IA JP2 package) in ``output_dir``. Only media:
     the text documents and the IA XML stay with the orchestrator."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
     request = json.loads((root / message["request"]).read_text(encoding="utf-8"))
@@ -246,6 +284,7 @@ def render_book(storage_root: Path, renderer: Renderer, **message: Any) -> dict[
 def scan_erase(storage_root: Path, image_ops: ImageOps, **message: Any) -> dict[str, Any]:
     """``evilflowers_scan.erase``: ``boxes`` painted white on the page -> a new page + previews."""
     root = storage_root.resolve()
+    accept(root, message)
     out = root / message["output_dir"]
     out.mkdir(parents=True, exist_ok=True)
     leaves = []

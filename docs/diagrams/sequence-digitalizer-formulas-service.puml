@@ -12,14 +12,14 @@
 '       (evilflowers-equation-service#8). Omitted: pump admission, reconcile,
 '       SSE (as in sequence-digitalizer-clean-service).
 ' Source: this repo studio/orchestration/{ledger,contract,appliers}.py,
-'         studio/workers/stages/formulas.py (2026-11-16); knowledge#66 (Redis
-'         db 8, proposed), knowledge#67 (the shared vlm, PaddleOCR-VL).
+'         studio/workers/stages/formulas.py (2026-11-16); knowledge#66 and
+'         Key-Value (Valkey db 8, 2026-11-16), knowledge#67 (the shared vlm, PaddleOCR-VL).
 ' =============================================================================
 
 title Formulas stage on equation-service (orchestrator side implemented, 2026-11-16)
 
 participant "Orchestrator\n(job ledger)" as orch <<focus>>
-queue "Redis db 8" as redis
+queue "Valkey db 8" as redis
 participant "equation-service\n…standalone.formulas" as eq <<proposed>>
 participant "vlm\nPaddleOCR-VL" as vlm <<proposed>>
 collections "Shared storage\n{storage_root}" as fs
