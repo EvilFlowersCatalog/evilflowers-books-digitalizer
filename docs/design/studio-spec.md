@@ -311,13 +311,13 @@ region edits.
 | `POST /scheduler/resume` | | `SchedulerOut` |
 | `GET /labelling/tasks` | | `[TaskOut]`: name, title, label keys + hints, target, items, labelled, skipped, double, mine (#7). Tasks: `figure_kind`, `is_data_table`, `table_quality`, `section_relation`, `subject`, `scan_mark` (item kind `mark_group`, from the studio DB), `title_page` (item kind `book`, `by_hand = false`: progress and export only) |
 | `POST /labelling/tasks/{task}/samples` | query `n` (1–2000, default 100) | `202 {task, n, status}`: samples up to `n` new items in the background, from the catalog or, for `scan_mark`, from the studio DB. 503 when `[labelling]` is not configured (catalog tasks only; `scan_mark` needs none). `title_page` is not sampled: its cases come from confirmed forms |
-| `GET /labelling/tasks/{task}/next` | `X-Operator` required | `LabelItemOut \| null`: payload only, never the model's answer (band, p, decision, relation) |
+| `GET /labelling/tasks/{task}/next` | `X-Operator` required | `LabelItemOut \| null`: payload only, never the model's answer (band, p, decision, relation). Order: a spot check of an agent label until 10 % of agent-labelled items have a human answer, then a second-person item until 10 %, then a fresh item that nobody answered and no agent holds (#16) |
 | `GET /labelling/items/{id}` | | `LabelItemOut` |
 | `POST /labelling/items/{id}/labels` | `{labels: [{task, value}]}`, `X-Operator` required | `LabelItemOut`; one answer per (item, task, labeller), `skip` allowed |
 | `GET /labelling/items/{id}/image` | | the crop: proxied from the catalog (the key stays on the server), or cut from the cleaned page for a mark group |
-| `GET /labelling/tasks/{task}/export` | | JSONL, one line per non-skip label; for `title_page`, one line per field of each confirmed form |
-| `GET /labelling/tasks/{task}/summary` | | counts per label / language / labeller / via, agreement, Cohen's κ, sampling note |
-| `POST /mcp` (no prefix) | MCP streamable HTTP (JSON-RPC) | labelling tools: `list_label_tasks`, `next_label_item` (text + crop image), `submit_label`, `sample_label_items`, `label_summary`, `export_labels`; also `studio mcp` over stdio |
+| `GET /labelling/tasks/{task}/export` | query `labeller_kind` (`human` \| `agent`, optional; 400 otherwise) | JSONL, one line per non-skip label, with `labeller_kind` and `model` (#16); for `title_page`, one line per field of each confirmed form |
+| `GET /labelling/tasks/{task}/summary` | | counts per label / language / labeller / via / labeller_kind / model; `human_human` and `agent_human` agreement (pairs, agreement, κ, per language, confusion); `double`/`agreement`/`kappa` = human↔human; spot-check progress; `agent_trusted` (κ ≥ 0.7 once the spot check is complete); sampling note |
+| `POST /mcp` (no prefix) | MCP streamable HTTP (JSON-RPC) | labelling tools: `list_label_tasks`, `next_label_item` (text + crop image), `submit_label`, `sample_label_items`, `label_summary`, `export_labels`; with `[labelling] agent_labellers = true` also `claim_label_items`, `submit_labels`, `release_label_items` for a model labelling on its own (#16); also `studio mcp` over stdio |
 
 Errors are `{"detail": str}`, with status codes 400/404/409 (state transition) and 422.
 

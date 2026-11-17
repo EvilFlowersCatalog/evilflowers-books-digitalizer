@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -319,8 +320,9 @@ def test_export_line_shape_skip_and_second_labeller(lab_services: Services, lab_
     lines = [json.loads(x) for x in lab_client.get("/api/v1/labelling/tasks/figure_kind/export").text.splitlines()]
     assert len(lines) == 5 and all(line["label"] != "skip" for line in lines)
     line = lines[0]
-    assert set(line) == {"task", "item", "language", "label", "labeller", "labelled_at", "via"}
-    assert line["via"] == "spa"
+    assert set(line) == {"task", "item", "language", "label", "labeller", "labelled_at", "via",
+                         "labeller_kind", "model"}
+    assert (line["via"], line["labeller_kind"], line["model"]) == ("spa", "human", None)
     assert set(line["item"]) >= {"entry_id", "run_id", "region"} and line["labelled_at"].endswith("Z")
 
     summary = lab_client.get("/api/v1/labelling/tasks/figure_kind/summary").json()
@@ -440,3 +442,278 @@ def test_mcp_over_http_on_the_portal(lab_services: Services, tmp_path: Path):
         assert resp.json()["result"]["serverInfo"]["name"] == "evilflowers-studio"
         tools = http.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         assert "next_label_item" in tools.text
+        assert "claim_label_items" not in tools.text      # agent tools are off by default
+
+
+# ---------------------------------------------------------------- agent labellers (#16)
+MODEL = "claude-opus-5-5"
+
+
+@pytest.fixture
+def agent_services(lab_services: Services) -> Services:
+    cfg = dataclasses.replace(lab_services.config.labelling, agent_labellers=True)
+    return dataclasses.replace(lab_services, config=dataclasses.replace(lab_services.config, labelling=cfg))
+
+
+def test_config_parses_the_agent_switch():
+    from evilflowers_books_digitalizer.studio.config import _labelling
+
+    cfg = _labelling({"agent_labellers": True, "agent_lease_minutes": 5})
+    assert cfg.agent_labellers and cfg.agent_lease_minutes == 5
+    assert not _labelling({}).agent_labellers
+
+
+def test_parallel_claims_never_share_an_item(agent_services: Services):
+    app.sample(agent_services, "figure_kind", 5)
+    first = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)
+    second = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)   # same name, in parallel
+    third = app.claim(agent_services, "figure_kind", 10, "other-agent", MODEL)
+    ids = [i.id for c in (first, second, third) for i in c.items]
+    assert len(ids) == 5 and len(set(ids)) == 5
+    empty = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)
+    assert empty.items == [] and empty.note and empty.lease_expires_at is None
+    # the guide travels with every claim: definitions of every label, the skip rule, Slovak
+    assert set(first.guide["labels"]) == set(app.task_or_404("figure_kind").labels)
+    assert "Obr. / Obrázok (cs Obrázek)" in first.guide["slovak_glossary"]
+    assert first.guide["question"] == "What is this image?"
+
+
+def test_the_unique_lease_is_the_lock(agent_services: Services, monkeypatch: pytest.MonkeyPatch):
+    """Two claims that read the same candidates at once: the second insert loses, not duplicates."""
+    app.sample(agent_services, "figure_kind", 3)
+    won = app.claim(agent_services, "figure_kind", 1, "a1", MODEL)
+    monkeypatch.setattr(app, "_leased", lambda *a, **k: set())   # b1 did not see a1's lease yet
+    lost = app.claim(agent_services, "figure_kind", 1, "b1", MODEL)
+    assert lost.items and lost.items[0].id != won.items[0].id
+
+
+def test_an_expired_lease_is_offered_again(agent_services: Services):
+    from evilflowers_books_digitalizer.studio.application.uow import LabelLease, select
+
+    app.sample(agent_services, "figure_kind", 2)
+    held = app.claim(agent_services, "figure_kind", 5, "a1", MODEL)
+    assert len(held.items) == 2 and not app.claim(agent_services, "figure_kind", 5, "b1", MODEL).items
+    with agent_services.uow() as uow:
+        for lease in uow.session.scalars(select(LabelLease)):
+            lease.expires_at = datetime(2000, 1, 1)
+    assert len(app.claim(agent_services, "figure_kind", 5, "b1", MODEL).items) == 2
+
+
+def test_claimed_items_never_carry_the_models_answer(agent_services: Services):
+    for t in ("figure_kind", "is_data_table", "section_relation", "subject"):
+        app.sample(agent_services, t, 10)
+        claim = app.claim(agent_services, t, 10, "claude", MODEL).model_dump()
+        leaked = _walk_keys(claim["items"]) & set(ANCHORS)
+        assert claim["items"] and not leaked, f"{t} claim leaks {leaked}"
+        for word in ("review", "prerequisite", "model-written", "strands"):
+            assert word not in json.dumps(claim["items"], ensure_ascii=False)
+
+
+def test_agent_answers_carry_provenance_and_release_the_lease(agent_services: Services):
+    from evilflowers_books_digitalizer.studio.application.uow import LabelLease, select
+
+    app.sample(agent_services, "figure_kind", 3)
+    claim = app.claim(agent_services, "figure_kind", 3, "claude", MODEL)
+    a, b, c = (i.id for i in claim.items)
+    out = app.submit_agent(agent_services, "claude", MODEL, [
+        app.AgentLabelIn(item_id=a, task="figure_kind", value="chart"),
+        app.AgentLabelIn(item_id=b, task="figure_kind", value="cat"),          # not a label
+        app.AgentLabelIn(item_id=c, task="figure_kind", value="skip")])
+    assert [r["item_id"] for r in out.recorded] == [a, c]
+    assert out.rejected[0]["item_id"] == b and "not a figure_kind label" in out.rejected[0]["error"]
+    with agent_services.uow() as uow:
+        assert {x.item_pk for x in uow.session.scalars(select(LabelLease))} == {b}   # b stays held
+    line = next(iter(app.export_lines(agent_services, "figure_kind")))
+    assert (line["label"], line["labeller_kind"], line["model"], line["via"]) == ("chart", "agent", MODEL, "mcp")
+    # another agent cannot answer an item b is leased to claude for
+    other = app.submit_agent(agent_services, "gpt", "x-1", [app.AgentLabelIn(item_id=b, task="figure_kind",
+                                                                             value="map")])
+    assert other.rejected and "leased to 'claude'" in other.rejected[0]["error"]
+
+
+def test_a_person_and_an_agent_cannot_share_a_name(agent_services: Services, lab_client: TestClient):
+    app.sample(agent_services, "figure_kind", 1)
+    item = lab_client.get("/api/v1/labelling/tasks/figure_kind/next").json()       # as jana
+    lab_client.post(f"/api/v1/labelling/items/{item['id']}/labels",
+                    json={"labels": [{"task": "figure_kind", "value": "map"}]})
+    out = app.submit_agent(agent_services, "jana", MODEL, [app.AgentLabelIn(item_id=item["id"],
+                                                                           task="figure_kind", value="chart")])
+    assert out.rejected and "as a human labeller" in out.rejected[0]["error"]
+
+
+def test_people_spot_check_agent_labels_and_the_summary_splits_kappa(agent_services: Services,
+                                                                    lab_client: TestClient):
+    app.sample(agent_services, "figure_kind", 5)
+    claim = app.claim(agent_services, "figure_kind", 4, "claude", MODEL)
+    answers = ["chart", "photo", "map", "stamp"]
+    app.submit_agent(agent_services, "claude", MODEL, [
+        app.AgentLabelIn(item_id=i.id, task="figure_kind", value=v) for i, v in zip(claim.items, answers)])
+    agent_ids = {i.id for i in claim.items}
+    # ceil(10 % of 4) = 1: the first item a person gets is an agent-labelled one
+    spot = lab_client.get("/api/v1/labelling/tasks/figure_kind/next").json()
+    assert spot["id"] in agent_ids and spot["mine"] == {}            # the agent's answer is not shown
+    agent_value = answers[[i.id for i in claim.items].index(spot["id"])]
+    lab_client.post(f"/api/v1/labelling/items/{spot['id']}/labels",
+                    json={"labels": [{"task": "figure_kind", "value": agent_value}]})
+    fresh = lab_client.get("/api/v1/labelling/tasks/figure_kind/next").json()
+    assert fresh["id"] not in agent_ids                                # quota met: the unlabelled one
+
+    s = app.summary(agent_services, "figure_kind")
+    assert s.by_labeller_kind == {"agent": 4, "human": 1} and s.by_model == {MODEL: 4}
+    assert (s.agent_items, s.spot_checked, s.spot_check_target) == (4, 1, 1)
+    assert s.agent_human.pairs == 1 and s.agent_human.agreement == 1.0
+    assert s.agent_human.confusion == {agent_value: {agent_value: 1}}
+    assert set(s.agent_human.by_language) <= {"sk", "en"}
+    assert s.human_human.pairs == 0 and s.double == 0                  # an agent is not a second person
+    assert s.agent_trusted is None                                    # one pair: no kappa yet
+
+    kinds = {json.loads(x)["labeller_kind"] for x in lab_client.get(
+        "/api/v1/labelling/tasks/figure_kind/export", params={"labeller_kind": "agent"}).text.splitlines()}
+    assert kinds == {"agent"}
+    humans = lab_client.get("/api/v1/labelling/tasks/figure_kind/export", params={"labeller_kind": "human"})
+    assert len(humans.text.splitlines()) == 1
+    assert lab_client.get("/api/v1/labelling/tasks/figure_kind/export",
+                          params={"labeller_kind": "robot"}).status_code == 400
+
+
+def test_a_person_is_not_offered_an_item_an_agent_holds(agent_services: Services, lab_client: TestClient):
+    app.sample(agent_services, "figure_kind", 2)
+    app.claim(agent_services, "figure_kind", 2, "claude", MODEL)
+    assert lab_client.get("/api/v1/labelling/tasks/figure_kind/next").json() is None
+
+
+def test_table_claims_take_both_answers_and_subject_options_come_once(agent_services: Services):
+    from evilflowers_books_digitalizer.studio.application.errors import BadRequest
+
+    app.sample(agent_services, "is_data_table", 5)
+    with pytest.raises(BadRequest, match="together with is_data_table"):
+        app.claim(agent_services, "table_quality", 5, "claude", MODEL)
+    claim = app.claim(agent_services, "is_data_table", 5, "claude", MODEL)
+    assert claim.guide["companion_guide"]["task"] == "table_quality"
+    item = claim.items[0]
+    assert item.payload["markdown"].startswith("| a |")
+    out = app.submit_agent(agent_services, "claude", MODEL, [
+        app.AgentLabelIn(item_id=item.id, task="is_data_table", value="yes"),
+        app.AgentLabelIn(item_id=item.id, task="table_quality", value="correct")])
+    assert len(out.recorded) == 2 and out.released == 1
+
+    app.sample(agent_services, "subject", 5)
+    subj = app.claim(agent_services, "subject", 5, "claude", MODEL)
+    assert len(subj.items) == 2 and all("options" not in i.payload for i in subj.items)
+    assert [o["term"] for o in subj.options_by_catalog[CAT]] == ["004.8", "51"]
+    assert {i.payload["options_catalog"] for i in subj.items} == {CAT}
+    with pytest.raises(BadRequest, match="model"):
+        app.claim(agent_services, "subject", 5, "claude", "")
+
+
+def test_mcp_agent_flow(agent_services: Services):
+    import anyio
+    from mcp.types import ImageContent, TextContent
+
+    from evilflowers_books_digitalizer.studio.api.mcp import AGENT_INSTRUCTIONS, build_mcp
+
+    mcp = build_mcp(agent_services)
+    assert mcp.instructions == AGENT_INSTRUCTIONS
+    app.sample(agent_services, "figure_kind", 3)
+
+    async def flow() -> None:
+        names = {t.name for t in await mcp.list_tools()}
+        assert {"claim_label_items", "submit_labels", "release_label_items", "next_label_item"} <= names
+        content = await mcp.call_tool("claim_label_items", {"task": "figure_kind", "labeller": "claude",
+                                                            "model": MODEL, "n": 3})
+        texts = [c.text for c in content if isinstance(c, TextContent)]
+        head = json.loads(texts[0])
+        assert len(head["items"]) == 3 and head["guide"]["labels"]["chart"]
+        assert sum(isinstance(c, ImageContent) for c in content) == 3
+        assert texts[1] == f"Item {head['items'][0]}:"                    # label, image, then JSON
+        assert isinstance(content[2], ImageContent)
+        item = json.loads(texts[2])
+        assert item["id"] == head["items"][0] and item["image"]["media_type"] == "image/webp"
+        assert not (_walk_keys(item) & set(ANCHORS))
+        _, out = await mcp.call_tool("submit_labels", {"labeller": "claude", "model": MODEL, "labels": [
+            {"item_id": i, "task": "figure_kind", "value": "diagram"} for i in head["items"][:2]]})
+        assert len(out["recorded"]) == 2 and out["released"] == 2
+        _, rel = await mcp.call_tool("release_label_items", {"labeller": "claude",
+                                                              "item_ids": head["items"][2:]})
+        assert rel["released"] == 1
+        content, _ = await mcp.call_tool("export_labels", {"task": "figure_kind", "labeller_kind": "agent"})
+        lines = [json.loads(x) for x in content[0].text.splitlines()]   # type: ignore[union-attr]
+        assert {(x["labeller_kind"], x["model"]) for x in lines} == {("agent", MODEL)}
+
+    anyio.run(flow)
+
+
+def _webp(w: int, h: int) -> bytes:
+    import io as _io
+
+    from PIL import Image as PILImage
+
+    buf = _io.BytesIO()
+    PILImage.new("RGB", (w, h), "white").save(buf, "WEBP")
+    return buf.getvalue()
+
+
+def test_claim_sends_sized_crops_and_cuts_to_the_budget(agent_services: Services,
+                                                       monkeypatch: pytest.MonkeyPatch):
+    from evilflowers_books_digitalizer.studio.application.uow import LabelLease, select
+
+    monkeypatch.setitem(globals(), "WEBP", _webp(3000, 2000))     # the fake catalog's crop
+    app.sample(agent_services, "is_data_table", 5)
+    app.sample(agent_services, "figure_kind", 5)
+    claim, images = app.claim_with_images(agent_services, "is_data_table", 5, "claude", MODEL)
+    info = claim.items[0].image
+    assert info is not None and (info["width"], info["height"]) == (1568, 1045)   # tables: 1568
+    assert info["original_width"] == 3000 and images[claim.items[0].id].media_type == "image/png"
+    fig, _ = app.claim_with_images(agent_services, "figure_kind", 1, "claude", MODEL)
+    assert fig.items[0].image and fig.items[0].image["width"] == 1024             # figures: 1024
+
+    # a budget for about one crop: the first item is kept, the rest released at once
+    cfg = dataclasses.replace(agent_services.config.labelling, agent_claim_token_budget=3000)
+    tight = dataclasses.replace(agent_services, config=dataclasses.replace(agent_services.config,
+                                                                           labelling=cfg))
+    cut, _ = app.claim_with_images(tight, "figure_kind", 10, "other", MODEL)
+    assert len(cut.items) == 1 and cut.note and "released" in cut.note
+    with agent_services.uow() as uow:
+        held = [x.item_pk for x in uow.session.scalars(select(LabelLease).where(
+            LabelLease.labeller == "other"))]
+    assert held == [cut.items[0].id]
+
+
+def test_release_drops_only_the_named_items(agent_services: Services):
+    app.sample(agent_services, "figure_kind", 4)
+    mine = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)
+    sibling = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)     # same name
+    assert app.release(agent_services, "claude", item_ids=[mine.items[0].id]) == 1
+    again = app.claim(agent_services, "figure_kind", 5, "claude-2", MODEL)
+    assert [i.id for i in again.items] == [mine.items[0].id]                   # sibling's still held
+    assert sibling.items[0].id not in {i.id for i in again.items}
+
+
+def test_agent_trust_waits_for_the_whole_spot_check(agent_services: Services, lab_client: TestClient):
+    app.sample(agent_services, "figure_kind", 5)
+    for _ in range(3):   # claim 5 in batches, answer all chart
+        c = app.claim(agent_services, "figure_kind", 2, "claude", MODEL)
+        app.submit_agent(agent_services, "claude", MODEL,
+                         [app.AgentLabelIn(item_id=i.id, task="figure_kind", value="chart") for i in c.items])
+    assert app.summary(agent_services, "figure_kind").spot_check_target == 1
+    spot = lab_client.get("/api/v1/labelling/tasks/figure_kind/next").json()
+    lab_client.post(f"/api/v1/labelling/items/{spot['id']}/labels",
+                    json={"labels": [{"task": "figure_kind", "value": "map"}]})
+    s = app.summary(agent_services, "figure_kind")
+    assert s.spot_checked == 1 and s.agent_human.kappa is None and s.agent_trusted is None
+
+
+def test_fit_image_shrinks_a_large_crop():
+    import io as _io
+
+    from PIL import Image as PILImage
+
+    from evilflowers_books_digitalizer.studio.adapters.imaging.crops import fit_image
+
+    buf = _io.BytesIO()
+    PILImage.new("RGB", (3000, 1500), "white").save(buf, "WEBP")
+    data, media, size, original = fit_image(buf.getvalue(), 1024)
+    assert media == "image/png" and size == (1024, 512) and original == (3000, 1500)
+    small = _io.BytesIO()
+    PILImage.new("RGB", (300, 200), "white").save(small, "WEBP")
+    assert fit_image(small.getvalue(), 1024)[1:] == ("image/webp", (300, 200), (300, 200))

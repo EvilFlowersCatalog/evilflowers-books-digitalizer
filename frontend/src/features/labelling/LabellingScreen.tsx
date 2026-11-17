@@ -260,6 +260,12 @@ export function LabellingScreen() {
                   {summary.data.agreement !== null ? `${Math.round(summary.data.agreement * 100)} %` : "—"}
                 </small>
               )}
+              {summary.data && summary.data.agent_items > 0 && (
+                <small className="muted">
+                  agent↔human κ {summary.data.agent_human.kappa?.toFixed(2) ?? "—"} on {summary.data.spot_checked}/
+                  {summary.data.spot_check_target} spot checks of {summary.data.agent_items} agent labels
+                </small>
+              )}
             </div>
           )}
         </Panel>

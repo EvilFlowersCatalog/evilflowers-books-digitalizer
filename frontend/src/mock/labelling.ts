@@ -37,6 +37,8 @@ const TASKS: Omit<LabelTaskOut, "items" | "labelled" | "skipped" | "double" | "m
 /** Tasks collected outside this screen (title_page): `next` and `samples` answer 400. */
 export const FORM_TASKS: ReadonlySet<LabelTaskName> = new Set(["title_page"]);
 
+const NO_PAIRS = { pairs: 0, agreement: null, kappa: null, by_language: {}, confusion: {} };
+
 const OPTIONS = [
   { id: "cat-004", term: "004.8", label: "Umelá inteligencia" },
   { id: "cat-004-1", term: "004.4", label: "Softvér" },
@@ -127,7 +129,10 @@ export class MockLabelling {
     return { task, target: t.target, labels: answered.length, skipped: rows.length - answered.length,
              done: answered.length >= t.target, by_label: count((l) => l.value),
              by_language: count((l) => ITEMS.find((i) => i.id === l.item)?.language ?? "??"),
-             labellers: count((l) => l.labeller), by_via: count(() => "spa"), double: 0, agreement: null, kappa: null, sampling: "mock data" };
+             labellers: count((l) => l.labeller), by_via: count(() => "spa"), by_labeller_kind: count(() => "human"),
+             by_model: {}, double: 0, agreement: null, kappa: null, human_human: NO_PAIRS, agent_human: NO_PAIRS,
+             agent_items: 0, spot_checked: 0, spot_check_target: 0, agent_kappa_min: 0.7, agent_trusted: null,
+             sampling: "mock data" };
   }
 
   private out(item: LabelItemOut, op: string): LabelItemOut {

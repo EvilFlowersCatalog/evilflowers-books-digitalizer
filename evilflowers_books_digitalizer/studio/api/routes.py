@@ -217,10 +217,11 @@ def labelling_summary(svc: Svc, task: str) -> labelling.SummaryOut:
 
 
 @router.get("/labelling/tasks/{task}/export")
-def labelling_export(svc: Svc, task: str) -> Response:
-    """JSONL, one line per non-skip label (the calibration input of knowledge#65)."""
+def labelling_export(svc: Svc, task: str, labeller_kind: str | None = None) -> Response:
+    """JSONL, one line per non-skip label (the calibration input of knowledge#65);
+    ``?labeller_kind=human|agent`` keeps only people's or only agents' labels (#16)."""
     body = "".join(json.dumps(line, ensure_ascii=False) + "\n"
-                   for line in labelling.export_lines(svc, task))
+                   for line in labelling.export_lines(svc, task, labeller_kind))
     return Response(body, media_type="application/x-ndjson",
                     headers={"Content-Disposition": f'attachment; filename="labels-{task}.jsonl"'})
 

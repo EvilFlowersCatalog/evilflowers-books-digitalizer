@@ -14,6 +14,12 @@ Rules (studio.labelling holds the task registry):
   necessarily the edge sweep's ``a_key``; ``pre`` and ``example`` are read in the item's
   orientation, which the export carries as ``section_a`` / ``section_b``.
 * One answer per (item, task, labeller): answering again replaces the previous answer.
+* **Provenance** (#16). Every label records ``labeller_kind`` (``human`` or ``agent``) and, for
+  an agent, its ``model``. Agents label only through :func:`claim` and :func:`submit_agent`.
+  A claim leases items, so parallel agents never get the same item. People keep
+  :func:`next_item`. Until :data:`AGENT_SPOT_CHECK_SHARE` of agent-labelled items also have a
+  human answer, ``next`` offers a person an item an agent answered (the spot check). The
+  summary reports agent<->human and human<->human agreement separately.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ import math
 import random
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,22 +39,32 @@ from evilflowers_books_digitalizer.studio.application.errors import BadRequest, 
 from evilflowers_books_digitalizer.studio.application.services import Services
 from evilflowers_books_digitalizer.studio.application.uow import (
     Book,
+    IntegrityError,
     Label,
     LabelItem,
+    LabelLease,
     MarkGroup,
     Session,
+    delete,
     func,
     select,
     utcnow,
 )
 from evilflowers_books_digitalizer.studio.labelling import (
+    AGENT,
+    AGENT_KAPPA_MIN,
+    AGENT_SPOT_CHECK_SHARE,
+    HUMAN,
     LABEL_HINTS,
+    LABELLER_KINDS,
     SECOND_LABELLER_SHARE,
     SKIP,
+    SLOVAK_GLOSSARY,
     STUDIO_KINDS,
     TASKS,
     ItemKind,
     LabelTask,
+    agent_guide,
     cohens_kappa,
     confidence_bucket,
     stratified,
@@ -135,6 +151,21 @@ class SampleOut(BaseModel):
     strata: dict[str, int]
 
 
+class AgreementOut(BaseModel):
+    """Agreement of two raters on the items both answered (non-skip)."""
+
+    pairs: int = 0
+    agreement: float | None = None
+    kappa: float | None = None
+
+
+class PairStatsOut(AgreementOut):
+    #: the same per item language (Slovak reported on its own, #16)
+    by_language: dict[str, AgreementOut] = Field(default_factory=dict)
+    #: first rater's answer -> second rater's answer -> count (agent_human: human -> agent)
+    confusion: dict[str, dict[str, int]] = Field(default_factory=dict)
+
+
 class SummaryOut(BaseModel):
     task: str
     target: int
@@ -145,10 +176,64 @@ class SummaryOut(BaseModel):
     by_language: dict[str, int]
     labellers: dict[str, int]
     by_via: dict[str, int]
+    #: non-skip labels per labeller kind (human, agent) and per agent model (#16)
+    by_labeller_kind: dict[str, int] = Field(default_factory=dict)
+    by_model: dict[str, int] = Field(default_factory=dict)
+    #: human<->human (the first two people of an item); kept for the screen and older readers
     double: int
     agreement: float | None
     kappa: float | None
+    human_human: PairStatsOut = Field(default_factory=PairStatsOut)
+    #: the spot check: an item's first human answer against its first agent answer
+    agent_human: PairStatsOut = Field(default_factory=PairStatsOut)
+    agent_items: int = 0                  # items with a non-skip agent label
+    spot_checked: int = 0                 # ... of which a person also answered
+    spot_check_target: int = 0            # ceil(AGENT_SPOT_CHECK_SHARE * agent_items)
+    agent_kappa_min: float = AGENT_KAPPA_MIN
+    #: agent_human.kappa >= agent_kappa_min (None: no kappa yet); knowledge#65 decides
+    agent_trusted: bool | None = None
     sampling: str
+
+
+class AgentLabelIn(BaseModel):
+    """One answer of an agent: ``value`` is a label key of ``task`` or ``skip``."""
+
+    model_config = ConfigDict(extra="forbid")
+    item_id: int
+    task: str
+    value: str = Field(min_length=1, max_length=64)
+
+
+class AgentItemOut(BaseModel):
+    """What an agent labels from: the payload only, never the model's answer or other labels."""
+
+    id: int
+    kind: str
+    language: str | None
+    payload: dict[str, Any]
+    #: the crop sent with the item: {"width", "height", "original_width", "original_height",
+    #: "media_type"}; None for text items (or when the crop could not be fetched: see error)
+    image: dict[str, Any] | None = None
+    image_error: str | None = None
+
+
+class ClaimOut(BaseModel):
+    task: str
+    labeller: str
+    model: str
+    lease_expires_at: str | None
+    guide: dict[str, Any]
+    items: list[AgentItemOut]
+    #: subject: the options once per catalog (an item's payload.options_catalog names its list)
+    options_by_catalog: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    left: int                             # unanswered items not leased to anyone after this claim
+    note: str | None = None
+
+
+class AgentSubmitOut(BaseModel):
+    recorded: list[dict[str, Any]]        # {item_id, task, value}
+    rejected: list[dict[str, Any]]        # {item_id, task, value, error}
+    released: int                         # leases released
 
 
 # ---------------------------------------------------------------- sampling
@@ -327,26 +412,44 @@ def next_item(svc: Services, task_name: str, labeller: str | None) -> LabelItemO
 
 
 def _pick(session: Session, t: LabelTask, who: str) -> LabelItem | None:
-    rows = session.execute(select(Label.item_pk, Label.value, Label.labeller)
+    """A person's next item: a spot check of an agent label, else a second-labeller item,
+    else a fresh one that nobody (person or agent) answered or holds a lease on."""
+    rows = session.execute(select(Label.item_pk, Label.value, Label.labeller, Label.labeller_kind)
                            .where(Label.task == t.name)).all()
-    answered_by: dict[int, set[str]] = defaultdict(set)   # non-skip answers
+    humans: dict[int, set[str]] = defaultdict(set)        # non-skip answers of people
+    agents: dict[int, set[str]] = defaultdict(set)        # non-skip answers of agents
     mine: set[int] = set()                                # this labeller's answers and skips
     for r in rows:
         if r.labeller == who:
             mine.add(r.item_pk)
         if r.value != SKIP:
-            answered_by[r.item_pk].add(r.labeller)
-    labelled = len(answered_by)
-    double = sum(1 for s in answered_by.values() if len(s) >= 2)
-    others_only = sorted(i for i, s in answered_by.items() if i not in mine and len(s) == 1)
-    if others_only and double < math.ceil(SECOND_LABELLER_SHARE * labelled):
+            (agents if r.labeller_kind == AGENT else humans)[r.item_pk].add(r.labeller)
+    # 1. the spot check: an agent answered it, no person yet (Slovak and the rest kept even)
+    checked = [i for i in agents if humans.get(i)]
+    spot = [i for i, s in agents.items() if len(s) == 1 and not humans.get(i) and i not in mine]
+    if spot and len(checked) < math.ceil(AGENT_SPOT_CHECK_SHARE * len(agents)):
+        langs = dict(session.execute(select(LabelItem.id, LabelItem.language)
+                                     .where(LabelItem.id.in_([*spot, *checked]))).tuples().all())
+        done_per_lang = Counter(langs.get(i) for i in checked)
+        return session.get(LabelItem, min(spot, key=lambda i: (done_per_lang[langs.get(i)], i)))
+    # 2. a second person on an item one person answered (human<->human kappa)
+    double = sum(1 for s in humans.values() if len(s) >= 2)
+    others_only = sorted(i for i, s in humans.items() if i not in mine and len(s) == 1)
+    if others_only and double < math.ceil(SECOND_LABELLER_SHARE * len(humans)):
         return session.get(LabelItem, others_only[0])
-    # fresh: nobody answered it yet (someone else's skip does not count: they were unsure)
-    taken = set(answered_by) | mine
+    # 3. fresh: nobody answered it yet (someone else's skip does not count: they were unsure),
+    #    and no agent holds it right now
+    taken = set(humans) | set(agents) | mine | _leased(session, t.name)
     q = select(LabelItem).where(LabelItem.kind == t.item_kind)
     if taken:
         q = q.where(LabelItem.id.not_in(taken))
     return session.scalars(q.order_by(LabelItem.id).limit(1)).first()
+
+
+def _leased(session: Session, task_name: str, *, now: datetime | None = None) -> set[int]:
+    """Items an agent holds a live lease on for ``task_name``."""
+    return set(session.scalars(select(LabelLease.item_pk).where(
+        LabelLease.task == task_name, LabelLease.expires_at > (now or utcnow()))))
 
 
 def get_item(svc: Services, item_id: int, labeller: str | None) -> LabelItemOut:
@@ -360,28 +463,262 @@ VIAS = ("spa", "cli", "mcp")
 
 def submit(svc: Services, item_id: int, cmd: LabelsIn, labeller: str | None, *,
            via: str = "spa") -> LabelItemOut:
-    """Record (or replace) this labeller's answers on one item."""
+    """Record (or replace) a PERSON's answers on one item (agents use :func:`submit_agent`)."""
     who = _require(labeller)
     if via not in VIAS:
         raise BadRequest(f"via must be one of {', '.join(VIAS)}")
     with svc.uow() as uow:
         item = _get(uow.session, item_id)
-        options = [str(o.get("id")) for o in item.payload.get("options", []) if isinstance(o, dict)]
-        for lab in cmd.labels:
-            t = _task(lab.task)
-            if t.item_kind != item.kind:
-                raise BadRequest(f"task {t.name} labels {t.item_kind} items, item {item.id} is {item.kind}")
-            if not t.accepts(lab.value, options):
-                allowed = ", ".join((*(t.labels or ("<a category id of the item>",)), SKIP))
-                raise BadRequest(f"{lab.value!r} is not a {t.name} label (allowed: {allowed})")
-            row = uow.session.scalars(select(Label).where(
-                Label.item_pk == item.id, Label.task == t.name, Label.labeller == who)).first()
-            if row is None:
-                uow.session.add(Label(item=item, task=t.name, value=lab.value, labeller=who, via=via))
-            else:
-                row.value, row.via, row.labelled_at = lab.value, via, utcnow()
+        _record(uow.session, item, cmd.labels, who, via=via, kind=HUMAN, model=None)
         uow.session.flush()
         return _item_out(item, who)
+
+
+def _record(session: Session, item: LabelItem, answers: Sequence[LabelIn | AgentLabelIn], who: str,
+            *, via: str, kind: str, model: str | None) -> None:
+    """Validate and store answers on one item: one row per (item, task, labeller), replaced on
+    a new answer. A labeller name keeps its kind: a person's row is never overwritten as an
+    agent's, or the reverse."""
+    if kind not in LABELLER_KINDS:
+        raise BadRequest(f"labeller_kind must be one of {', '.join(LABELLER_KINDS)}")
+    options = [str(o.get("id")) for o in item.payload.get("options", []) if isinstance(o, dict)]
+    for lab in answers:
+        t = _task(lab.task)
+        if t.item_kind != item.kind:
+            raise BadRequest(f"task {t.name} labels {t.item_kind} items, item {item.id} is {item.kind}")
+        if not t.accepts(lab.value, options):
+            allowed = ", ".join((*(t.labels or ("<a category id of the item>",)), SKIP))
+            raise BadRequest(f"{lab.value!r} is not a {t.name} label (allowed: {allowed})")
+        row = session.scalars(select(Label).where(
+            Label.item_pk == item.id, Label.task == t.name, Label.labeller == who)).first()
+        if row is None:
+            session.add(Label(item=item, task=t.name, value=lab.value, labeller=who, via=via,
+                              labeller_kind=kind, model=model))
+        elif row.labeller_kind != kind:
+            raise BadRequest(f"{who!r} already answered item {item.id} as a {row.labeller_kind} "
+                             f"labeller; use another labeller name")
+        else:
+            row.value, row.via, row.model, row.labelled_at = lab.value, via, model, utcnow()
+
+
+# ---------------------------------------------------------------- agent labellers (#16)
+#: items one claim returns at most, per item kind (MCP output budget: a crop costs ~1k tokens
+#: at 1024 px, a section pair ~1k, a subject entry ~0.5k plus its catalog's options once)
+CLAIM_MAX: dict[str, int] = {ItemKind.FIGURE: 10, ItemKind.TABLE: 8, ItemKind.MARK_GROUP: 10,
+                             ItemKind.SECTION_PAIR: 12, ItemKind.ENTRY: 15}
+#: answers one submit_agent call takes at most
+SUBMIT_MAX = 100
+
+
+def claim(svc: Services, task_name: str, n: int, labeller: str | None, model: str | None
+          ) -> ClaimOut:
+    """Lease up to ``n`` items of ``task_name`` that nobody answered (non-skip), this labeller
+    did not answer or skip, and nobody holds, to one agent labeller for
+    ``[labelling] agent_lease_minutes``. Each lease is an insert under a unique (item, task):
+    two agents that claim at the same moment cannot both win an item."""
+    t = _task(task_name)
+    if not t.by_hand:
+        raise BadRequest(f"{t.name} is labelled by confirming a book's metadata form, not here")
+    if t.companion_of:
+        raise BadRequest(f"{t.name} is answered together with {t.companion_of}: claim "
+                         f"{t.companion_of} items and submit both answers")
+    who, mdl = _require(labeller), _require_model(model)
+    cap = CLAIM_MAX.get(t.item_kind, 10)
+    if n < 1:
+        raise BadRequest("n must be at least 1")
+    n = min(n, cap)
+    now = utcnow()
+    expires = now + timedelta(minutes=svc.config.labelling.agent_lease_minutes)
+    got: list[int] = []
+    with svc.uow() as uow:
+        s = uow.session
+        s.execute(delete(LabelLease).where(LabelLease.expires_at <= now))
+        rows = s.execute(select(Label.item_pk, Label.value, Label.labeller)
+                         .where(Label.task == t.name)).all()
+        taken = {r.item_pk for r in rows if r.value != SKIP or r.labeller == who}
+        taken |= _leased(s, t.name, now=now)
+        q = select(LabelItem.id).where(LabelItem.kind == t.item_kind)
+        if taken:
+            q = q.where(LabelItem.id.not_in(taken))
+        candidates = list(s.scalars(q.order_by(LabelItem.id)))   # sample order: strata interleaved
+        for item_id in candidates:
+            try:
+                with s.begin_nested():
+                    s.add(LabelLease(item_pk=item_id, task=t.name, labeller=who, model=mdl,
+                                     leased_at=now, expires_at=expires))
+            except IntegrityError:   # a parallel claim took it first
+                continue
+            got.append(item_id)
+            if len(got) >= n:
+                break
+        items = [s.get(LabelItem, i) for i in got]
+        snapshot = [(i.id, i.kind, i.language, dict(i.payload), dict(i.ref)) for i in items if i]
+    left = max(0, len(candidates) - len(got))
+    out_items, options = _agent_items(snapshot)
+    note = None if got else (
+        "Nothing to claim: every item is answered, skipped by you or leased to another agent. "
+        "Sample more with sample_label_items, or wait for leases to expire.")
+    return ClaimOut(task=t.name, labeller=who, model=mdl,
+                    lease_expires_at=_iso(expires) if got else None,
+                    guide=_guide_for_agents(t), items=out_items, options_by_catalog=options,
+                    left=left, note=note)
+
+
+def _guide_for_agents(t: LabelTask) -> dict[str, Any]:
+    guide = agent_guide(t.name)
+    companion = guide.get("companion")
+    if isinstance(companion, str):
+        guide["companion_guide"] = agent_guide(companion)
+    if t.item_kind in (ItemKind.FIGURE, ItemKind.TABLE, ItemKind.SECTION_PAIR, ItemKind.ENTRY,
+                       ItemKind.MARK_GROUP):
+        guide["slovak_glossary"] = SLOVAK_GLOSSARY
+    return guide
+
+
+def _agent_items(snapshot: list[tuple[int, str, str | None, dict[str, Any], dict[str, Any]]]
+                 ) -> tuple[list[AgentItemOut], dict[str, list[dict[str, Any]]]]:
+    """Payloads for agents; a subject item's options move to one list per catalog."""
+    out: list[AgentItemOut] = []
+    options: dict[str, list[dict[str, Any]]] = {}
+    for item_id, kind, language, payload, ref in snapshot:
+        if "options" in payload:
+            catalog = str(ref.get("catalog_id") or "default")
+            options.setdefault(catalog, payload.pop("options") or [])
+            payload["options_catalog"] = catalog
+        out.append(AgentItemOut(id=item_id, kind=kind, language=language, payload=payload))
+    return out, options
+
+
+def agent_image(svc: Services, item_id: int, kind: str) -> tuple[ImageBytes, dict[str, Any]]:
+    """The item's crop for a vision model: at most ``agent_image_max_side`` px on the long edge
+    (``agent_table_image_max_side`` for tables, read cell by cell). The vision docs: images
+    are downscaled anyway, and under ~200 px a model misreads more, so the sizes travel with
+    the item."""
+    from evilflowers_books_digitalizer.studio.adapters.imaging.crops import fit_image
+
+    cfg = svc.config.labelling
+    side = cfg.agent_table_image_max_side if kind == ItemKind.TABLE else cfg.agent_image_max_side
+    img = item_image(svc, item_id)
+    try:
+        content, media, (w, h), (ow, oh) = fit_image(img.content, side)
+    except (OSError, ValueError):   # not decodable here: send it as the catalog served it
+        return img, {"media_type": img.media_type}
+    return ImageBytes(content, media), {"width": w, "height": h, "original_width": ow,
+                                        "original_height": oh, "media_type": media}
+
+
+#: estimated tokens of an image whose size is unknown (a 1092 x 1092 crop, the vision docs)
+_UNKNOWN_IMAGE_TOKENS = 1600
+#: image bytes one claim result may carry: Claude Code fails an HTTP MCP response over
+#: 16 MiB, and base64 grows the bytes by a third
+_CLAIM_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _image_tokens(info: dict[str, Any]) -> int:
+    """Claude's visual tokens: one per 28 x 28 patch (platform docs, vision)."""
+    w, h = info.get("width"), info.get("height")
+    if isinstance(w, int) and isinstance(h, int):
+        return math.ceil(w / 28) * math.ceil(h / 28)
+    return _UNKNOWN_IMAGE_TOKENS
+
+
+def _text_tokens(text: str) -> int:
+    return math.ceil(len(text) / 3)   # conservative for Slovak and JSON
+
+
+def claim_with_images(svc: Services, task_name: str, n: int, labeller: str | None,
+                      model: str | None) -> tuple[ClaimOut, dict[int, ImageBytes]]:
+    """:func:`claim` plus the crops, cut to ``[labelling] agent_claim_token_budget``: a result
+    over the client's MCP output limit is dropped by the client, so items that do not fit are
+    released at once instead of sitting leased (the first item is always kept)."""
+    import json
+
+    out = claim(svc, task_name, n, labeller, model)
+    budget = svc.config.labelling.agent_claim_token_budget
+    used = _text_tokens(json.dumps(out.model_dump(exclude={"items"}), ensure_ascii=False))
+    images: dict[int, ImageBytes] = {}
+    kept: list[AgentItemOut] = []
+    image_bytes = 0
+    for item in out.items:
+        cost, size = 0, 0
+        if item.kind in IMAGE_KINDS:
+            try:
+                img, info = agent_image(svc, item.id, item.kind)
+            except (NotFound, Unavailable) as exc:
+                item.image_error = f"{exc}: answer skip unless the text settles it"
+            else:
+                item.image, images[item.id] = info, img
+                cost, size = _image_tokens(info), len(img.content)
+        cost += _text_tokens(item.model_dump_json())
+        if kept and (used + cost > budget or image_bytes + size > _CLAIM_IMAGE_BYTES):
+            break
+        kept.append(item)
+        used, image_bytes = used + cost, image_bytes + size
+    cut = [i.id for i in out.items[len(kept):]]
+    if cut:
+        release(svc, out.labeller, out.task, item_ids=cut)
+        for i in cut:
+            images.pop(i, None)
+        out.left += len(cut)
+        out.note = (f"{len(cut)} more item(s) did not fit this result's size budget and were "
+                    "released: claim again for them.")
+    out.items = kept
+    return out, images
+
+
+def submit_agent(svc: Services, labeller: str | None, model: str | None,
+                 answers: Sequence[AgentLabelIn]) -> AgentSubmitOut:
+    """Record an agent's answers (``labeller_kind=agent``, ``model``) and release its leases.
+    Each item is its own transaction: one bad answer rejects that item, not the batch. An item
+    another labeller holds a live lease on is refused."""
+    who, mdl = _require(labeller), _require_model(model)
+    if not answers:
+        raise BadRequest("no labels")
+    if len(answers) > SUBMIT_MAX:
+        raise BadRequest(f"at most {SUBMIT_MAX} labels per call")
+    by_item: dict[int, list[AgentLabelIn]] = defaultdict(list)
+    for a in answers:
+        by_item[a.item_id].append(a)
+    recorded: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    released = 0
+    for item_id, group in by_item.items():
+        try:
+            with svc.uow() as uow:
+                s = uow.session
+                item = _get(s, item_id)
+                tasks = {a.task for a in group}
+                holders = s.execute(select(LabelLease.labeller, LabelLease.expires_at).where(
+                    LabelLease.item_pk == item_id, LabelLease.task.in_(tasks),
+                    LabelLease.expires_at > utcnow())).all()
+                other = next((h for h in holders if h.labeller != who), None)
+                if other is not None:
+                    raise BadRequest(f"item {item_id} is leased to {other.labeller!r} until "
+                                     f"{_iso(other.expires_at)}")
+                _record(s, item, group, who, via="mcp", kind=AGENT, model=mdl)
+                gone = s.execute(delete(LabelLease).where(LabelLease.item_pk == item_id,
+                                                          LabelLease.labeller == who))
+                released += int(getattr(gone, "rowcount", 0) or 0)
+        except (BadRequest, NotFound) as exc:
+            rejected += [{**a.model_dump(), "error": str(exc)} for a in group]
+            continue
+        recorded += [a.model_dump() for a in group]
+    return AgentSubmitOut(recorded=recorded, rejected=rejected, released=released)
+
+
+def release(svc: Services, labeller: str | None, task_name: str | None = None, *,
+            item_ids: Sequence[int] | None = None) -> int:
+    """Drop this labeller's leases on ``item_ids`` (or, without them, all of its leases, or one
+    task's): items it will not answer go back. Parallel agents sharing one name should pass
+    ``item_ids``, or they release each other's items."""
+    who = _require(labeller)
+    with svc.uow() as uow:
+        q = delete(LabelLease).where(LabelLease.labeller == who)
+        if task_name:
+            q = q.where(LabelLease.task == _task(task_name).name)
+        if item_ids is not None:
+            q = q.where(LabelLease.item_pk.in_(list(item_ids)))
+        return int(getattr(uow.session.execute(q), "rowcount", 0) or 0)
 
 
 def item_image(svc: Services, item_id: int) -> ImageBytes:
@@ -428,21 +765,32 @@ def _form_lines(svc: Services) -> list[dict[str, Any]]:
                     "suggested": row.get("suggested"), "line": row.get("line"),
                     "p": row.get("p"), "value": row.get("final"),
                     "decider_model": row.get("decider_model"),
-                    "labeller": row.get("labeller"), "labelled_at": row.get("at"), "via": "spa"})
+                    "labeller": row.get("labeller"), "labelled_at": row.get("at"), "via": "spa",
+                    "labeller_kind": HUMAN, "model": None})
     return lines
 
 
-def export_lines(svc: Services, task_name: str) -> Iterator[dict[str, Any]]:
-    """One dict per non-skip label (the JSONL line of #7), oldest first."""
+def labeller_kind_or_400(kind: str | None) -> str | None:
+    if kind and kind not in LABELLER_KINDS:
+        raise BadRequest(f"labeller_kind must be one of {', '.join(LABELLER_KINDS)}")
+    return kind or None
+
+
+def export_lines(svc: Services, task_name: str, labeller_kind: str | None = None
+                 ) -> Iterator[dict[str, Any]]:
+    """One dict per non-skip label (the JSONL line of #7), oldest first; ``labeller_kind``
+    keeps only people's or only agents' labels (#16)."""
     t = _task(task_name)
+    kind = labeller_kind_or_400(labeller_kind)
     if not t.by_hand:
-        yield from _form_lines(svc)
+        yield from (ln for ln in _form_lines(svc) if kind in (None, HUMAN))
         return
     with svc.uow() as uow:
-        rows = uow.session.execute(
-            select(Label, LabelItem).join(LabelItem, Label.item_pk == LabelItem.id)
-            .where(Label.task == t.name, Label.value != SKIP)
-            .order_by(Label.labelled_at, Label.id)).all()
+        q = (select(Label, LabelItem).join(LabelItem, Label.item_pk == LabelItem.id)
+             .where(Label.task == t.name, Label.value != SKIP))
+        if kind:
+            q = q.where(Label.labeller_kind == kind)
+        rows = uow.session.execute(q.order_by(Label.labelled_at, Label.id)).all()
         lines = [_line(t, label, item) for label, item in rows]
     yield from lines
 
@@ -450,7 +798,8 @@ def export_lines(svc: Services, task_name: str) -> Iterator[dict[str, Any]]:
 def _line(t: LabelTask, label: Label, item: LabelItem) -> dict[str, Any]:
     line: dict[str, Any] = {"task": t.name, "item": dict(item.ref), "language": item.language,
                             "label": label.value, "labeller": label.labeller,
-                            "labelled_at": _iso(label.labelled_at), "via": label.via}
+                            "labelled_at": _iso(label.labelled_at), "via": label.via,
+                            "labeller_kind": label.labeller_kind, "model": label.model}
     if t.name == "subject":   # the label is a category id; its UDC term travels with it
         term = next((o.get("term") for o in item.payload.get("options", [])
                      if isinstance(o, dict) and str(o.get("id")) == label.value), None)
@@ -469,21 +818,26 @@ def summary(svc: Services, task_name: str) -> SummaryOut:
                           .most_common()),
             by_language=dict(Counter(ln["language"] or "??" for ln in lines).most_common()),
             labellers=dict(Counter(ln["labeller"] or "?" for ln in lines).most_common()),
-            by_via={"spa": len(lines)} if lines else {}, double=0, agreement=None, kappa=None,
-            sampling=SAMPLING_NOTES[t.item_kind])
+            by_via={"spa": len(lines)} if lines else {},
+            by_labeller_kind={HUMAN: len(lines)} if lines else {},
+            double=0, agreement=None, kappa=None, sampling=SAMPLING_NOTES[t.item_kind])
     with svc.uow() as uow:
         rows = uow.session.execute(
             select(Label.item_pk, Label.value, Label.labeller, Label.via, Label.labelled_at,
-                   LabelItem.language)
+                   Label.labeller_kind, Label.model, LabelItem.language)
             .join(LabelItem, Label.item_pk == LabelItem.id).where(Label.task == t.name)
             .order_by(Label.labelled_at, Label.id)).all()
     answered = [r for r in rows if r.value != SKIP]
-    per_item: dict[int, list[str]] = defaultdict(list)
-    for r in answered:   # the first two labellers of an item, in answer order
-        if len(per_item[r.item_pk]) < 2:
-            per_item[r.item_pk].append(r.value)
-    pairs: Sequence[tuple[str, str]] = [(v[0], v[1]) for v in per_item.values() if len(v) == 2]
-    kappa = cohens_kappa(pairs)
+    human: dict[int, list[str]] = defaultdict(list)       # people's answers per item, in order
+    agent: dict[int, list[str]] = defaultdict(list)
+    language: dict[int, str] = {}
+    for r in answered:
+        (agent if r.labeller_kind == AGENT else human)[r.item_pk].append(r.value)
+        language[r.item_pk] = r.language or "??"
+    hh = [(i, v[0], v[1]) for i, v in human.items() if len(v) >= 2]       # the first two people
+    ah = [(i, human[i][0], v[0]) for i, v in agent.items() if human.get(i)]   # human -> agent
+    human_human, agent_human = _pair_stats(hh, language), _pair_stats(ah, language)
+    spot_target = math.ceil(AGENT_SPOT_CHECK_SHARE * len(agent))
     return SummaryOut(
         task=t.name, target=t.target, labels=len(answered), skipped=len(rows) - len(answered),
         done=len(answered) >= t.target,
@@ -491,10 +845,36 @@ def summary(svc: Services, task_name: str) -> SummaryOut:
         by_language=dict(Counter(r.language or "??" for r in answered).most_common()),
         labellers=dict(Counter(r.labeller for r in answered).most_common()),
         by_via=dict(Counter(r.via for r in answered).most_common()),
-        double=len(pairs),
-        agreement=(sum(a == b for a, b in pairs) / len(pairs)) if pairs else None,
-        kappa=round(kappa, 4) if kappa is not None else None,
+        by_labeller_kind=dict(Counter(r.labeller_kind for r in answered).most_common()),
+        by_model=dict(Counter(r.model for r in answered if r.model).most_common()),
+        double=human_human.pairs, agreement=human_human.agreement, kappa=human_human.kappa,
+        human_human=human_human, agent_human=agent_human,
+        agent_items=len(agent), spot_checked=agent_human.pairs, spot_check_target=spot_target,
+        # judged only once the spot check is complete: kappa on a handful of pairs swings
+        agent_trusted=(agent_human.kappa >= AGENT_KAPPA_MIN
+                       if agent_human.kappa is not None and spot_target
+                       and agent_human.pairs >= spot_target else None),
         sampling=SAMPLING_NOTES[t.item_kind])
+
+
+def _agreement(pairs: Sequence[tuple[str, str]]) -> AgreementOut:
+    kappa = cohens_kappa(pairs)
+    return AgreementOut(pairs=len(pairs),
+                        agreement=round(sum(a == b for a, b in pairs) / len(pairs), 4) if pairs else None,
+                        kappa=round(kappa, 4) if kappa is not None else None)
+
+
+def _pair_stats(triples: Sequence[tuple[int, str, str]], language: dict[int, str]) -> PairStatsOut:
+    """Agreement over (item, first, second) answers, overall and per item language."""
+    pairs = [(a, b) for _, a, b in triples]
+    per_lang: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    confusion: dict[str, Counter[str]] = defaultdict(Counter)
+    for item_pk, a, b in triples:
+        per_lang[language.get(item_pk, "??")].append((a, b))
+        confusion[a][b] += 1
+    return PairStatsOut(**_agreement(pairs).model_dump(),
+                        by_language={k: _agreement(v) for k, v in sorted(per_lang.items())},
+                        confusion={a: dict(c.most_common()) for a, c in sorted(confusion.items())})
 
 
 # ---------------------------------------------------------------- helpers
@@ -509,6 +889,15 @@ def _require(labeller: str | None) -> str:
     if not labeller:
         raise BadRequest("labelling needs the labeller's name (X-Operator header / --operator)")
     return labeller
+
+
+def _require_model(model: str | None) -> str:
+    model = (model or "").strip()
+    if not model:
+        raise BadRequest("an agent label needs the model that answered (e.g. claude-opus-5-5)")
+    if len(model) > 128:
+        raise BadRequest("model: at most 128 characters")
+    return model
 
 
 def _get(session: Session, item_id: int) -> LabelItem:

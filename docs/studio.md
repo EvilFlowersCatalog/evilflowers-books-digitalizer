@@ -237,7 +237,7 @@ cases, and every label records which one it came through (`via`).
 | step | SPA (**Labelling** in the menu) | CLI (`evilflowers-digitalizer studio …`) | MCP (`/mcp` on the portal, or `studio mcp` over stdio) |
 |---|---|---|---|
 | sample | **Sample 100 more** (runs in the background) | `sample-labels --task <t> --n 300` | `sample_label_items` |
-| label | digits pick, `s` skips, Enter saves a table | `label --task <t> --operator <name>` (interactive; `--open` shows crops), or `label --task <t> --item <id> --value <key>` | `next_label_item` → `submit_label` |
+| label | digits pick, `s` skips, Enter saves a table | `label --task <t> --operator <name>` (interactive; `--open` shows crops), or `label --task <t> --item <id> --value <key>` | `next_label_item` → `submit_label`; an agent: `claim_label_items` → `submit_labels` (#16) |
 | progress | the task list | `labelling-status` | `list_label_tasks`, `label_summary` |
 | export | **Export** link | `export-labels --task <t> --out <file>` | `export_labels` |
 
@@ -250,17 +250,62 @@ cases, and every label records which one it came through (`via`).
    - **CLI:** pass `--operator`, or set `$STUDIO_OPERATOR`.
    - **MCP:** the client passes `labeller`.
 
-   **The labels must be human.** An MCP client relays the person's answer and must not answer
-   for them. The server's instructions and tool descriptions say so, and every label records
-   `via` (spa, cli or mcp), so knowledge#65 can filter on it. To use the portal's MCP endpoint
-   from Claude Code, run:
+   **People's labels stay human.** `next_label_item` / `submit_label` relay a person's answer, and the
+   MCP client must not answer for them. Every label records `via` (spa, cli or mcp) and
+   `labeller_kind` (`human` or `agent`, see below), so knowledge#65 can filter on both. To use the
+   portal's MCP endpoint from Claude Code, run:
    `claude mcp add --transport http evilflowers-studio http://<portal>/mcp`.
+
+   **Agent labellers (#16).** A stronger model can produce the ~200 labels per task from Claude
+   Code, while people spot-check them. This is off by default:
+
+   ```toml
+   [labelling]
+   agent_labellers = true      # adds claim_label_items, submit_labels, release_label_items
+   agent_lease_minutes = 30    # how long a claim holds its items
+   agent_image_max_side = 1024        # figure / scan-mark crops: long edge sent to the model
+   agent_table_image_max_side = 1568  # table crops (read cell by cell)
+   agent_claim_token_budget = 15000   # one claim result; Claude Code's MCP limit is 25k tokens
+   ```
+
+   - The server's instructions switch to a two-flow text: people still use `next_label_item`,
+     and the model uses the agent tools.
+   - `claim_label_items(task, labeller, model, n)` leases up to `n` unanswered items. The lease
+     is a row in `label_leases` with a unique (item, task), so parallel agents, even under one
+     name, never get the same item. An expired lease is offered again.
+   - A claim returns the task's **guide** first: every label's definition, the rules for close
+     calls, when to skip, and a Slovak glossary (`LABEL_GUIDES` in `studio/labelling.py`). Then,
+     per item, it returns `Item <id>`, the crop (figures, tables, scan marks) and the payload.
+     The payload is the same one a person sees: page, printed caption and page text for
+     figures; the markdown for tables; both section texts; title, summary, ToC and one UDC
+     option list per catalog for subjects. The model's answer and other labels are never
+     included.
+   - `submit_labels(labeller, model, labels=[{item_id, task, value}, …])` records
+     `labeller_kind=agent` and the `model`, releases the leases, and returns rejected entries
+     with the reason. A labeller name cannot be both human and agent.
+   - A claim result stays inside Claude Code's MCP output limit, which counts images against
+     `MAX_MCP_OUTPUT_TOKENS` (25k by default). Each image is estimated at one token per
+     28×28 patch, and items beyond `agent_claim_token_budget` (or 8 MiB of images) are
+     released at once, not left leased. The `note` says so. The hard caps per call are
+     10 figures, 8 tables, 10 scan marks, 12 section pairs and 15 subjects, and the
+     default `n` is 5. `release_label_items(labeller, item_ids)` releases only the named
+     items, so agents that share a name keep theirs.
+   - **Spot check.** Until a person has answered 10 % of the agent-labelled items, `next`
+     (SPA, CLI or MCP) offers a person an item with exactly one agent label first, spreading
+     the checks over languages. The agent's answer is not shown. A person is never offered
+     an item an agent currently holds.
+   - A prompt for Claude Code: *"Use the evilflowers-studio MCP. Label figure_kind with
+     claim_label_items / submit_labels as labeller `claude-agent`, model `<your model id>`,
+     in parallel batches, until nothing is left."* The tool descriptions carry the rest.
 4. **Export:** `evilflowers-digitalizer studio export-labels --task figure_kind --out labels/figure_kind.jsonl`,
    or the **Export** link, or `GET /api/v1/labelling/tasks/{task}/export`. One line per label:
 
    ```json
-   {"task": "figure_kind", "item": {"entry_id": "…", "run_id": "…", "region": "p012-fig01", "region_id": "…"}, "language": "sk", "label": "stamp", "labeller": "…", "labelled_at": "…", "via": "spa"}
+   {"task": "figure_kind", "item": {"entry_id": "…", "run_id": "…", "region": "p012-fig01", "region_id": "…"}, "language": "sk", "label": "stamp", "labeller": "…", "labelled_at": "…", "via": "spa", "labeller_kind": "human", "model": null}
    ```
+
+   `?labeller_kind=human|agent` (API), `--labeller-kind` (CLI) or `export_labels(task,
+   labeller_kind)` (MCP) keeps only people's or only agents' labels.
 
    A `title_page` line comes from a confirmed form, one per suggested field:
 
@@ -268,8 +313,14 @@ cases, and every label records which one it came through (`via`).
    {"task": "title_page", "item": {"book_id": 12, "item_id": "stu-fei-…", "field": "year", "leaf": 3}, "language": "slo", "label": "changed", "suggested": "1998", "line": "…", "p": 0.81, "value": "2007", "decider_model": "…", "labeller": "…", "labelled_at": "…", "via": "spa"}
    ```
 
-   `labels/figure_kind.jsonl.summary.json` holds counts per label, language, labeller and `via`,
-   raw agreement and Cohen's κ on the doubly labelled items, and the sampling note.
+   `labels/figure_kind.jsonl.summary.json` holds:
+   - counts per label, language, labeller, `via`, `labeller_kind` and model;
+   - `human_human` agreement (also in `double` / `agreement` / `kappa`) and `agent_human`
+     agreement. Each gives pairs, raw agreement and Cohen's κ, per language too, plus a
+     confusion table (human answer → agent answer);
+   - spot-check progress (`agent_items`, `spot_checked`, `spot_check_target`);
+   - `agent_trusted`, which is κ ≥ 0.7, the proposed gate for knowledge#65;
+   - the sampling note.
 
 Known limits: the catalog has no route for section text yet (the studio matches paragraphs to
 the heading), `sections/{key}/related` drops pairs the catalog hid and is cross-book only, and

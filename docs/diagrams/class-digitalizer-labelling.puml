@@ -6,12 +6,13 @@
 '       kind. labels hold one answer per (item, task, labeller): a second
 '       labeller adds a row, a re-click replaces the old one. A skip is a
 '       label with value "skip"; the export drops it.
-' Kind: UML class diagram (persistence model, migration 0005), proposed.
+'       #16 adds provenance (labeller_kind, model) and label_leases (0008).
+' Kind: UML class diagram (persistence model, migrations 0005 and 0008).
 ' Source: evilflowers-books-digitalizer#7 (task and label sets, export line,
-'         2026-11-16); this repo db/models.py (naming, JSON columns, utcnow).
+'         2026-11-16), #16 (2026-11-17); this repo db/models.py.
 ' =============================================================================
 
-title Labelling for decider calibration: tables (proposed, 2026-11-16)
+title Labelling for decider calibration: tables (#7, #16 agent labellers, 2026-11-17)
 
 class "LabelItem (label_items)" as item <<proposed>> <<focus>> {
   id : int {PK}
@@ -30,11 +31,25 @@ class "Label (labels)" as label <<proposed>> {
   item_pk : int {FK}
   task : str
   value : str = a key of the task, or skip
-  labeller : str = the person's name
+  labeller : str = the person's or the agent's name
   via : str = spa | cli | mcp
+  labeller_kind : str = human | agent (0008, #16)
+  model : str = e.g. claude-opus-5-5, agents only (0008)
   labelled_at : datetime
   --
   unique (item_pk, task, labeller)
+}
+
+class "LabelLease (label_leases)" as lease <<focus>> {
+  id : int {PK}
+  item_pk : int {FK}
+  task : str
+  labeller : str = the agent's name
+  model : str
+  leased_at : datetime
+  expires_at : datetime = + agent_lease_minutes
+  --
+  unique (item_pk, task): the lock between parallel agents
 }
 
 class "LabelTask (code)" as task <<proposed>> {
@@ -45,6 +60,7 @@ class "LabelTask (code)" as task <<proposed>> {
 }
 
 item "1" *-- "0..*" label : answers
+item "1" *-- "0..1" lease : held by one agent per task
 task "1" ..> "0..*" label : value in labels or skip
 task "0..*" ..> "1" item : shows one kind
 

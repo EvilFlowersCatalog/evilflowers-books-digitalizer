@@ -26,14 +26,14 @@ scans_root = "{{storage_root}}/raw-scans"
 def test_db_upgrade_and_current(tmp_path, capsys):
     config = str(_config(tmp_path))
     assert cli.main(["db", "upgrade", "--config", config]) == 0
-    assert "at revision 0007" in capsys.readouterr().out
+    assert "at revision 0008" in capsys.readouterr().out
     assert cli.main(["db", "current", "--config", config]) == 0
-    assert "revision 0007" in capsys.readouterr().out
+    assert "revision 0008" in capsys.readouterr().out
 
 
 def test_studio_db_upgrade_prints_json(tmp_path, capsys):
     assert cli.main(["studio", "db-upgrade", "--config", str(_config(tmp_path))]) == 0
-    assert '"revision": "0007"' in capsys.readouterr().out
+    assert '"revision": "0008"' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("cmd", [

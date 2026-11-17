@@ -23,3 +23,19 @@ def crop_png(image: Path, bbox: tuple[int, int, int, int], max_side: int = 448) 
     out = io.BytesIO()
     region.save(out, "PNG")
     return out.getvalue()
+
+
+def fit_image(content: bytes, max_side: int) -> tuple[bytes, str, tuple[int, int], tuple[int, int]]:
+    """An image for a vision model (#16): unchanged when its long edge fits ``max_side``, else
+    scaled down and re-encoded as PNG. Returns (bytes, media type, size sent, original size).
+    Raises ``OSError`` / ``ValueError`` on bytes PIL cannot read."""
+    with Image.open(io.BytesIO(content)) as im:
+        original = im.size
+        fmt = (im.format or "PNG").upper()
+        if max(original) <= max_side and fmt in ("PNG", "JPEG", "WEBP", "GIF"):
+            return content, f"image/{fmt.lower()}", original, original
+        small = im.convert("RGB") if im.mode not in ("RGB", "L") else im.copy()
+    small.thumbnail((max_side, max_side))
+    out = io.BytesIO()
+    small.save(out, "PNG")
+    return out.getvalue(), "image/png", small.size, original

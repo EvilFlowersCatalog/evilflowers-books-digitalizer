@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from types import TracebackType
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import UnaryExpression
 
@@ -23,6 +24,7 @@ from evilflowers_books_digitalizer.db.models import (
     Book,
     Label,
     LabelItem,
+    LabelLease,
     MarkGroup,
     Note,
     Page,
@@ -36,9 +38,9 @@ from evilflowers_books_digitalizer.studio.events import Event
 from evilflowers_books_digitalizer.studio.ports import EventBus
 
 #: the query vocabulary use cases may use (re-exported so SQLAlchemy enters only here)
-__all__ = ["Book", "ColumnElement", "Label", "LabelItem", "MarkGroup", "Note", "Page",
-           "Publication", "Region", "Review", "Run", "Session", "SessionFactory",
-           "UnaryExpression", "UnitOfWork", "func", "or_", "select", "utcnow"]
+__all__ = ["Book", "ColumnElement", "Label", "LabelItem", "LabelLease", "MarkGroup", "Note", "Page",
+           "IntegrityError", "Publication", "Region", "Review", "Run", "Session", "SessionFactory",
+           "UnaryExpression", "UnitOfWork", "delete", "func", "or_", "select", "utcnow"]
 
 type SessionFactory = Callable[[], Session]
 

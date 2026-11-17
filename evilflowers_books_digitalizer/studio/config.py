@@ -82,6 +82,8 @@ name so new ones need configuration, not code (open/closed principle)::
     api_key_env = "EVILFLOWERS_LABELLING_API_KEY"                 # needs manage rights on the entries
     catalog_ids = []                            # empty = every catalog the key sees
     max_entries = 200                           # entries scanned per sample
+    agent_labellers = false                     # MCP tools for a model labelling (#16)
+    agent_lease_minutes = 30                    # an agent's hold on claimed items
 
 Paths: ``{storage_root}`` expands to the storage root, then relative paths resolve
 against the config file's directory. Environment variables ``STUDIO_DATABASE_URL`` /
@@ -321,6 +323,18 @@ class LabellingConfig:
     max_entries: int = 200
     timeout: float = 30.0
     seed: int = 7                               # shuffle within strata: reproducible samples
+    #: the agent tool set on the MCP server (#16): a model labels, people spot-check
+    agent_labellers: bool = False
+    #: how long claim_label_items holds an item for one agent before another may take it
+    agent_lease_minutes: int = 30
+    #: long edge (px) a figure / scan-mark crop is shrunk to before it goes to an agent
+    agent_image_max_side: int = 1024
+    #: the same for table crops: table_quality is read cell by cell (Claude's standard
+    #: vision tier downscales anything above 1568 px anyway)
+    agent_table_image_max_side: int = 1568
+    #: estimated tokens one claim_label_items result may hold (Claude Code's MCP output limit
+    #: defaults to 25k tokens); items beyond it are not leased
+    agent_claim_token_budget: int = 15000
 
     @property
     def enabled(self) -> bool:
@@ -549,7 +563,14 @@ def _labelling(raw: dict[str, Any]) -> LabellingConfig:
         catalog_ids=tuple(str(c) for c in raw.get("catalog_ids", ())),
         max_entries=int(raw.get("max_entries", d.max_entries)),
         timeout=float(raw.get("timeout", d.timeout)),
-        seed=int(raw.get("seed", d.seed)))
+        seed=int(raw.get("seed", d.seed)),
+        agent_labellers=bool(raw.get("agent_labellers", d.agent_labellers)),
+        agent_lease_minutes=int(raw.get("agent_lease_minutes", d.agent_lease_minutes)),
+        agent_image_max_side=int(raw.get("agent_image_max_side", d.agent_image_max_side)),
+        agent_table_image_max_side=int(raw.get("agent_table_image_max_side",
+                                               d.agent_table_image_max_side)),
+        agent_claim_token_budget=int(raw.get("agent_claim_token_budget",
+                                             d.agent_claim_token_budget)))
 
 
 def _table[T](name: str, cls: type[T], raw: dict[str, Any]) -> T:

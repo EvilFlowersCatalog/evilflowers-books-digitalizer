@@ -191,7 +191,8 @@ def cmd_studio_export_labels(args: argparse.Namespace) -> Any:
     from evilflowers_books_digitalizer.studio.application.labelling import export_lines, summary
 
     svc = _studio_services(args)
-    lines = [json.dumps(line, ensure_ascii=False) + "\n" for line in export_lines(svc, args.task)]
+    lines = [json.dumps(line, ensure_ascii=False) + "\n"
+             for line in export_lines(svc, args.task, args.labeller_kind)]
     info = summary(svc, args.task).model_dump(mode="json")
     if args.out and args.out != "-":
         out = Path(args.out)
@@ -276,6 +277,8 @@ def _add_studio_parser(sub: Any) -> None:
             cmd_studio_export_labels)
     q.add_argument("--task", required=True, choices=sorted(TASKS))
     q.add_argument("--out", help="JSONL file (default: stdout); the summary goes next to it")
+    q.add_argument("--labeller-kind", choices=("human", "agent"),
+                   help="only people's or only agents' labels (default: both)")
     q = add("label", "label items in the terminal (or record one answer with --item/--value)",
             cmd_studio_label)
     q.add_argument("--task", required=True, choices=sorted(SAMPLED_TASKS))

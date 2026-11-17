@@ -1,0 +1,49 @@
+@startuml sequence-digitalizer-agent-labelling
+!include elvira.iuml
+' =============================================================================
+' What: a stronger model (Claude, run from Claude Code) labels through the
+'       studio MCP; parallel agents never get the same item because a claim
+'       is a lease insert under a unique (item, task). People then spot-check
+'       about 10 % of the agent-labelled items, and the summary reports
+'       agent<->human kappa next to human<->human kappa.
+' Kind: UML sequence diagram, three scenarios (evilflowers-books-digitalizer#16).
+' Source: evilflowers-books-digitalizer#16 (2026-11-17); this repo
+'         studio/api/mcp.py, studio/application/labelling.py (claim,
+'         submit_agent, _pick, summary).
+' =============================================================================
+
+title Agent labellers over MCP: claim, submit, spot-check (#16, 2026-11-17)
+
+participant "Claude Code\nagent 1" as a1
+participant "Claude Code\nagent 2" as a2
+participant "studio MCP\n/mcp" as mcp <<focus>>
+database "studio DB" as pg
+participant "Catalog dev\n/api/v1" as cat
+actor "Operator" as op
+
+== claim (parallel; [labelling] agent_labellers = true) ==
+a1 -> mcp : claim_label_items(figure_kind, n=5, labeller, model)
+mcp -> pg : delete expired leases;\nitems nobody answered, not skipped by me, not leased
+mcp -> pg : INSERT label_leases (item, task) per item\n(savepoint; unique violation = taken, next item)
+a2 -> mcp : claim_label_items(figure_kind, n=5, labeller, model)
+mcp -> pg : the same query: a1's leases are excluded
+mcp -> cat : GET regions/{id}/image (Bearer)
+mcp -> pg : items over the result budget (15k tokens, 8 MiB images):\ndelete their leases at once
+mcp --> a1 : guide (definitions, rules, skip cases, glossary),\nthen per item: "Item <id>", crop (figures 1024 px, tables 1568 px), payload JSON;\nnever band, p, decision or other labels
+
+== submit ==
+a1 -> mcp : submit_labels(labeller, model, [{item_id, task, value}, ...])
+mcp -> pg : per item: refuse if another labeller holds a live lease;\nupsert label (labeller_kind=agent, model, via=mcp); delete my lease
+mcp --> a1 : recorded, rejected (with the reason), released
+
+== spot-check and agreement ==
+op -> mcp : next (SPA, CLI or next_label_item)
+mcp -> pg : while human answers on agent items < ceil(10 % of agent items):\nan item with one agent label and no person, fewest-checked language first
+mcp --> op : the item, without the agent's answer
+op -> mcp : label (labeller_kind=human)
+op -> mcp : label_summary / export ?labeller_kind=agent|human
+mcp --> op : agent_human: pairs, agreement, kappa, per language, confusion;\nhuman_human; agent_trusted = kappa >= 0.7 once the spot check is complete
+
+caption knowledge#65 fits thresholds on agent labels only when agent<->human kappa is high enough (proposal: >= 0.7 per task, Slovak reported separately).
+footer ELVIRA · FIIT STU · evilflowers-books-digitalizer · docs/diagrams/sequence-digitalizer-agent-labelling.puml
+@enduml

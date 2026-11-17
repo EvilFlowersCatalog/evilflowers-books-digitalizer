@@ -103,8 +103,32 @@ export interface LabelSummaryOut {
   labellers: Record<string, number>;
   /** interface the labels came through: spa | cli | mcp */
   by_via: Record<string, number>;
+  /** who produced the labels (#16): human | agent, and the agents' models */
+  by_labeller_kind: Record<string, number>;
+  by_model: Record<string, number>;
+  /** human↔human: the first two people of an item (same as `human_human`) */
   double: number;
   agreement: number | null;
   kappa: number | null;
+  human_human: PairStats;
+  /** the spot check: an item's first human answer against its first agent answer */
+  agent_human: PairStats;
+  agent_items: number;
+  spot_checked: number;
+  spot_check_target: number;
+  agent_kappa_min: number;
+  agent_trusted: boolean | null;
   sampling: string;
+}
+
+export interface Agreement {
+  pairs: number;
+  agreement: number | null;
+  kappa: number | null;
+}
+
+export interface PairStats extends Agreement {
+  by_language: Record<string, Agreement>;
+  /** first rater's answer → second rater's answer → count */
+  confusion: Record<string, Record<string, number>>;
 }

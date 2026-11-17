@@ -9,7 +9,8 @@
 '       studio database. The export writes JSONL for knowledge#65.
 ' Kind: UML component diagram, specification level, proposed
 '       (evilflowers-books-digitalizer#7).
-' Source: evilflowers-books-digitalizer#7 (2026-11-16); EvilFlowersCatalog
+' Source: evilflowers-books-digitalizer#7 (2026-11-16), #16 agent labellers
+'         (2026-11-17); EvilFlowersCatalog
 '         develop 709b712 apps/api/urls.py, extraction/admin_views.py,
 '         graph/views.py (read 2026-11-16); this repo studio/api/routes.py,
 '         studio/application/*, studio/adapters/catalog/*.
@@ -20,13 +21,14 @@ title Labelling mode for decider calibration: components (proposed, 2026-11-16)
 actor "Operator" as op
 component "SPA\nLabelling screen" as spa <<proposed>>
 component "MCP client\n(relays the person's answer)" as client
+component "Claude Code agent\n(labels on its own, #16;\n[labelling] agent_labellers)" as agent
 component "studio API\n/api/v1/labelling/*" as api <<proposed>>
 component "studio MCP\n/mcp · studio mcp (stdio)" as mcp <<proposed>>
 component "CLI\nstudio label · sample-labels\nexport-labels · labelling-status" as cli <<proposed>>
 component "application.labelling\nsample · next · label · export · κ" as app <<proposed>> <<focus>>
 interface "LabelSource" as port
 component "adapters.catalog.labelling\nCatalogLabelSource (GET only)" as adapter <<proposed>>
-database "postgresql18\ndb digitalizer\nlabel_items · labels" as pg
+database "postgresql18\ndb digitalizer\nlabel_items · labels · label_leases" as pg
 component "EvilFlowers Catalog (dev)\n/api/v1 (develop)" as catalog
 
 op --> spa : browser (VPN)
@@ -34,6 +36,7 @@ op --> cli : shell
 op --> client : chat
 spa --> api : HTTP JSON, X-Operator\n(+ crop proxy items/{id}/image)
 client --> mcp : MCP streamable HTTP /mcp\nor stdio
+agent --> mcp : claim_label_items · submit_labels\n(labeller_kind=agent, model)
 cli --> app : Python call, via=cli
 api --> app : Python call, via=spa
 mcp --> app : Python call, via=mcp

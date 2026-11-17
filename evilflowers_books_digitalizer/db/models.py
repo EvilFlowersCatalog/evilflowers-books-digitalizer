@@ -360,6 +360,29 @@ class Label(Base):
     labeller: Mapped[str] = mapped_column(String(100))
     #: the interface the answer came through: spa | cli | mcp (an MCP client relays a person's answer)
     via: Mapped[str] = mapped_column(String(8), default="spa")
+    #: who produced the answer (#16): a person (``human``) or a model labelling on its own (``agent``)
+    labeller_kind: Mapped[str] = mapped_column(String(8), default="human", server_default="human")
+    #: the model that answered (``claude-opus-5-5``) when ``labeller_kind`` is ``agent``
+    model: Mapped[str | None] = mapped_column(String(128))
     labelled_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     item: Mapped[LabelItem] = relationship(back_populates="labels")
+
+
+class LabelLease(Base):
+    """An agent labeller's claim on one (item, task) until ``expires_at`` (#16).
+
+    The unique (item, task) is the lock: parallel agents that claim at once cannot both insert
+    it, so they never get the same item. A submit releases it; an expired one is taken over.
+    """
+
+    __tablename__ = "label_leases"
+    __table_args__ = (UniqueConstraint("item_pk", "task", name="uq_label_leases_item_task"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_pk: Mapped[int] = mapped_column(ForeignKey("label_items.id", ondelete="CASCADE"))
+    task: Mapped[str] = mapped_column(String(32), index=True)
+    labeller: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str | None] = mapped_column(String(128))
+    leased_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
