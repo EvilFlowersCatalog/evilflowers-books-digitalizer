@@ -1,0 +1,4 @@
+# actionlint: the self-hosted ARC scale set inside k3s (knowledge Cookbooks/CI-Runner)
+self-hosted-runner:
+  labels:
+    - elvira-k3s

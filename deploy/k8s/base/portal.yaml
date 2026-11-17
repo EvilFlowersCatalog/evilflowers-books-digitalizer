@@ -12,6 +12,7 @@ metadata:
   labels:
     app.kubernetes.io/name: digitalizer-portal
     app.kubernetes.io/component: api
+    elvira.stuba.sk/image: evilflowers-books-digitalizer   # CI restarts by this (docker.yml deploy)
 spec:
   replicas: 1
   strategy: { type: Recreate }
@@ -22,6 +23,7 @@ spec:
       labels:
         app.kubernetes.io/name: digitalizer-portal
         app.kubernetes.io/component: api
+        elvira.stuba.sk/image: evilflowers-books-digitalizer
     spec:
       terminationGracePeriodSeconds: 15
       containers:

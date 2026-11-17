@@ -78,7 +78,10 @@ RUN chmod -R a+rX /opt/venv /app \
  && useradd --uid 10001 --gid 0 --groups digitalizer --home-dir /tmp --no-create-home \
       --shell /usr/sbin/nologin digitalizer
 
-ENV STUDIO_STATIC_DIR=/app/frontend/dist \
+# <ref>@<sha> from CI (docker.yml): service.version on every span; the pod's env may override it
+ARG IMAGE_TAG=unknown
+ENV IMAGE_TAG=${IMAGE_TAG} \
+    STUDIO_STATIC_DIR=/app/frontend/dist \
     HOME=/tmp \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

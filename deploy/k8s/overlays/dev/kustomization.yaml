@@ -18,9 +18,11 @@ labels:
     includeSelectors: false
 
 images:
-  # Pin a build with: newTag: sha-<short>
+  # development runs :develop: every push to develop rolls it out (.github/workflows/docker.yml,
+  # job deploy). Pin a build with: newTag: sha-<short> (CI's restart then pulls nothing new and
+  # its digest check fails, which is the point of a pin).
   - name: ghcr.io/evilflowerscatalog/evilflowers-books-digitalizer
-    newTag: master
+    newTag: develop
 
 components:
   - ../../components/storage-root      # mounts follow STUDIO_STORAGE_ROOT below
@@ -32,4 +34,4 @@ configMapGenerator:
       - STUDIO_STORAGE_ROOT=/data         # where the pods mount the shared storage
       - DEPLOYMENT_ENVIRONMENT=development
       - EVILFLOWERS_LOG_LEVEL=DEBUG
-      - IMAGE_TAG=master
+      # no IMAGE_TAG: the image bakes <ref>@<sha> (Dockerfile ARG), the span's service.version

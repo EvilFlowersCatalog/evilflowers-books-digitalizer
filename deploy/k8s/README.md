@@ -82,6 +82,30 @@ the answer), each step stops asking after its first failure, and both fall back 
 Service `portal` (ClusterIP :80) is VPN-only: no HTTPRoute.
 URL: `http://portal.digitalizer.stu.k8s.internal`.
 
+## Autodeploy (GitHub Actions)
+
+`.github/workflows/docker.yml`, following knowledge Cookbooks/Deploy-a-Service §4:
+
+| Push | Result |
+|---|---|
+| `develop` | tests (`tests.yml`, called) → image `:develop` + `:sha-<short>` → job `deploy` on `elvira-k3s`: `rollout restart` of every Deployment labelled `elvira.stuba.sk/image=evilflowers-books-digitalizer` in `digitalizer`, `rollout status`, then a check that every running pod (containers and the `migrate` init container) uses the pushed digest |
+| `master` / `main` | image only (production is not on k3s yet) |
+| PR | build only |
+
+The dev overlay pins `:develop` with `imagePullPolicy: Always`, so a restart is a redeploy.
+A push never changes manifests or env: those go through the Ansible role. A failed deploy
+is re-run from Actions → *Docker* → Run workflow on `develop`.
+
+Prerequisites, all outside this repository (knowledge#66):
+1. the overlay is applied (namespace `digitalizer`, both Deployments carry the label);
+2. `digitalizer` is in `github_runner_deploy_namespaces` (`roles/github_runner`), then
+   `ansible-playbook playbooks/github-runner.yml`;
+3. this repository is in the `elvira-k3s` runner group's selected repositories (org owner,
+   Cookbooks/CI-Runner §1).
+
+Until then the `deploy` job fails with an error naming the missing prerequisite; the image is
+pushed regardless.
+
 ## Render (never apply by hand)
 
 ```bash

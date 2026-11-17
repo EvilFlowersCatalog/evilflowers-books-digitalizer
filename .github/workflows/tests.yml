@@ -5,9 +5,13 @@ on:
     branches: [master, main, develop]
   pull_request:
   workflow_dispatch:
+  # docker.yml calls it before a deploy: a red suite never reaches dev k3s
+  workflow_call:
 
 concurrency:
-  group: tests-${{ github.ref }}
+  # github.workflow is the CALLER's name when called, so this run and docker.yml's call of it
+  # never cancel each other
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

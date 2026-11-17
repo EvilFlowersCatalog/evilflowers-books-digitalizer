@@ -21,6 +21,7 @@ metadata:
   labels:
     app.kubernetes.io/name: digitalizer-orchestrator
     app.kubernetes.io/component: orchestrator
+    elvira.stuba.sk/image: evilflowers-books-digitalizer   # CI restarts by this (docker.yml deploy)
 spec:
   # beat runs embedded (-B): exactly one replica, Recreate, or the pump and reconcile
   # would be scheduled twice (both are safe to overlap, but twice is waste)
@@ -33,6 +34,7 @@ spec:
       labels:
         app.kubernetes.io/name: digitalizer-orchestrator
         app.kubernetes.io/component: orchestrator
+        elvira.stuba.sk/image: evilflowers-books-digitalizer
       annotations:
         # Deploy-a-Service §3: the ledger gauges (studio/ledger_metrics.py), served here
         # because the orchestrator owns the ledger and outlives a portal outage (#13)
